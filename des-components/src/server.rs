@@ -1,12 +1,11 @@
-//! Unified server component with queue and simulated threadpool
+//! Server component with queue and simulated threadpool
 //!
-//! This module provides a unified Server component that combines the best features
-//! of both the complex server and simple server implementations. It uses the new
-//! Component trait API and includes integrated queue support with simulated thread
+//! This module provides a Server component that 
+//! includes integrated queue support with simulated thread
 //! capacity management.
 
 use crate::queue::{Queue, QueueItem};
-use crate::request::{RequestAttempt, RequestAttemptId, RequestId};
+use crate::request::{RequestAttempt, RequestAttemptId, RequestId, Response};
 use des_core::{Component, Key, Scheduler, SimTime, SimulationMetrics};
 use std::time::Duration;
 use uuid::Uuid;
@@ -14,14 +13,15 @@ use uuid::Uuid;
 /// Events that the unified server can handle
 #[derive(Debug, Clone)]
 pub enum ServerEvent {
-    /// Request received from client
+    /// Request attempt received from client
     ProcessRequest { 
-        request_id: u64, 
+        attempt: RequestAttempt, 
         client_id: Key<ClientEvent> 
     },
     /// Request processing completed
     RequestCompleted { 
-        request_id: u64, 
+        attempt_id: RequestAttemptId,
+        request_id: RequestId,
         client_id: Key<ClientEvent> 
     },
     /// Check for queued requests to process
@@ -119,34 +119,27 @@ impl Server {
         &self.metrics
     }
 
-    /// Process a request if capacity allows, otherwise queue or reject
+    /// Process a request attempt if capacity allows, otherwise queue or reject
     fn handle_request(
         &mut self, 
-        request_id: u64, 
+        attempt: RequestAttempt, 
         client_id: Key<ClientEvent>, 
         self_id: Key<ServerEvent>, 
         scheduler: &mut Scheduler
     ) {
         if self.has_capacity() {
             // Process immediately
-            self.start_processing_request(request_id, client_id, self_id, scheduler);
+            self.start_processing_request(attempt, client_id, self_id, scheduler);
         } else if let Some(ref mut queue) = self.queue {
-            // Try to queue the request
-            let attempt = RequestAttempt::new(
-                RequestAttemptId(request_id),
-                RequestId(request_id),
-                1, // attempt number
-                scheduler.time(),
-                vec![], // empty payload
-            );
-            let queue_item = QueueItem::with_client_id(attempt, scheduler.time(), client_id.id());
+            // Try to queue the request attempt
+            let queue_item = QueueItem::with_client_id(attempt.clone(), scheduler.time(), client_id.id());
             
             match queue.enqueue(queue_item) {
                 Ok(_) => {
                     self.requests_queued += 1;
                     println!(
-                        "[{}] Queued request #{} at {:?} (queue depth: {})",
-                        self.name, request_id, scheduler.time(), queue.len()
+                        "[{}] Queued request attempt {} at {:?} (queue depth: {})",
+                        self.name, attempt.id, scheduler.time(), queue.len()
                     );
                     
                     // Record metrics
@@ -155,27 +148,28 @@ impl Server {
                 }
                 Err(_) => {
                     // Queue is full - reject
-                    self.reject_request(request_id, client_id, scheduler);
+                    self.reject_request(attempt, client_id, scheduler);
                 }
             }
         } else {
             // No capacity and no queue - reject
-            self.reject_request(request_id, client_id, scheduler);
+            self.reject_request(attempt, client_id, scheduler);
         }
     }
 
-    /// Start processing a request (allocate a simulated thread)
+    /// Start processing a request attempt (allocate a simulated thread)
     fn start_processing_request(
         &mut self,
-        request_id: u64,
+        attempt: RequestAttempt,
         client_id: Key<ClientEvent>,
         self_id: Key<ServerEvent>,
         scheduler: &mut Scheduler,
     ) {
         println!(
-            "[{}] Processing request #{} at {:?} (threads: {}/{})",
+            "[{}] Processing request attempt {} (request {}) at {:?} (threads: {}/{})",
             self.name,
-            request_id,
+            attempt.id,
+            attempt.request_id,
             scheduler.time(),
             self.active_threads + 1,
             self.thread_capacity
@@ -193,21 +187,26 @@ impl Server {
         scheduler.schedule(
             SimTime::from_duration(self.service_time),
             self_id,
-            ServerEvent::RequestCompleted { request_id, client_id },
+            ServerEvent::RequestCompleted { 
+                attempt_id: attempt.id,
+                request_id: attempt.request_id,
+                client_id 
+            },
         );
     }
 
     /// Complete request processing (free a simulated thread)
     fn complete_request(
         &mut self,
-        request_id: u64,
+        attempt_id: RequestAttemptId,
+        request_id: RequestId,
         client_id: Key<ClientEvent>,
         self_id: Key<ServerEvent>,
         scheduler: &mut Scheduler,
     ) {
         println!(
-            "[{}] Completed request #{} at {:?}",
-            self.name, request_id, scheduler.time()
+            "[{}] Completed request attempt {} (request {}) at {:?}",
+            self.name, attempt_id, request_id, scheduler.time()
         );
 
         // Free the simulated thread
@@ -221,11 +220,18 @@ impl Server {
         self.metrics.record_gauge("utilization", &self.name, self.utilization() * 100.0, scheduler.time());
         self.metrics.record_duration("service_time", &self.name, self.service_time, scheduler.time());
 
-        // Send success response to client
+        // Create and send success response to client
+        let response = Response::success(
+            attempt_id,
+            request_id,
+            scheduler.time(),
+            vec![], // Empty response payload for now
+        );
+
         scheduler.schedule(
             SimTime::from_duration(Duration::from_millis(1)),
             client_id,
-            ClientEvent::ResponseReceived { success: true },
+            ClientEvent::ResponseReceived { response },
         );
 
         // Check if we can process queued requests
@@ -238,17 +244,18 @@ impl Server {
         }
     }
 
-    /// Reject a request (send failure response)
+    /// Reject a request attempt (send failure response)
     fn reject_request(
         &mut self,
-        request_id: u64,
+        attempt: RequestAttempt,
         client_id: Key<ClientEvent>,
         scheduler: &mut Scheduler,
     ) {
         println!(
-            "[{}] Rejecting request #{} - server overloaded (threads: {}/{}, queue: {})",
+            "[{}] Rejecting request attempt {} (request {}) - server overloaded (threads: {}/{}, queue: {})",
             self.name,
-            request_id,
+            attempt.id,
+            attempt.request_id,
             self.active_threads,
             self.thread_capacity,
             self.queue_depth()
@@ -259,11 +266,19 @@ impl Server {
         // Record metrics
         self.metrics.increment_counter("requests_rejected", &self.name, scheduler.time());
 
-        // Send failure response
+        // Create and send error response
+        let response = Response::error(
+            attempt.id,
+            attempt.request_id,
+            scheduler.time(),
+            503, // Service Unavailable
+            "Server overloaded".to_string(),
+        );
+
         scheduler.schedule(
             SimTime::from_duration(Duration::from_millis(1)),
             client_id,
-            ClientEvent::ResponseReceived { success: false },
+            ClientEvent::ResponseReceived { response },
         );
     }
 
@@ -278,33 +293,36 @@ impl Server {
             };
 
             if let Some(queued_item) = queued_item {
-                let request_id = queued_item.attempt.id.0;
+                let attempt = queued_item.attempt.clone();
+                let queue_time = queued_item.queue_time(scheduler.time());
                 
                 println!(
-                    "[{}] Processing queued request #{} at {:?} (was queued for {:?})",
+                    "[{}] Processing queued request attempt {} (request {}) at {:?} (was queued for {:?})",
                     self.name,
-                    request_id,
+                    attempt.id,
+                    attempt.request_id,
                     scheduler.time(),
-                    queued_item.queue_time(scheduler.time())
+                    queue_time
                 );
 
                 // Reconstruct the client_id from the stored UUID
                 if let Some(client_uuid) = queued_item.client_id {
                     let client_id = Key::<ClientEvent>::new_with_id(client_uuid);
-                    self.start_processing_request(request_id, client_id, self_id, scheduler);
+                    self.start_processing_request(attempt, client_id, self_id, scheduler);
                 } else {
                     // Fallback: complete the request without sending response
                     // This handles legacy queue items that don't have client_id stored
                     println!(
-                        "[{}] Warning: Processing queued request #{} without client_id",
-                        self.name, request_id
+                        "[{}] Warning: Processing queued request attempt {} without client_id",
+                        self.name, attempt.id
                     );
                     self.active_threads += 1;
                     scheduler.schedule(
                         SimTime::from_duration(self.service_time),
                         self_id,
                         ServerEvent::RequestCompleted { 
-                            request_id, 
+                            attempt_id: attempt.id,
+                            request_id: attempt.request_id,
                             client_id: Key::<ClientEvent>::new_with_id(Uuid::nil()) 
                         },
                     );
@@ -331,11 +349,11 @@ impl Component for Server {
         scheduler: &mut Scheduler,
     ) {
         match event {
-            ServerEvent::ProcessRequest { request_id, client_id } => {
-                self.handle_request(*request_id, *client_id, self_id, scheduler);
+            ServerEvent::ProcessRequest { attempt, client_id } => {
+                self.handle_request(attempt.clone(), *client_id, self_id, scheduler);
             }
-            ServerEvent::RequestCompleted { request_id, client_id } => {
-                self.complete_request(*request_id, *client_id, self_id, scheduler);
+            ServerEvent::RequestCompleted { attempt_id, request_id, client_id } => {
+                self.complete_request(*attempt_id, *request_id, *client_id, self_id, scheduler);
             }
             ServerEvent::ProcessQueuedRequests => {
                 self.process_queued_requests(self_id, scheduler);
@@ -377,16 +395,16 @@ mod tests {
             scheduler: &mut Scheduler,
         ) {
             match event {
-                ClientEvent::ResponseReceived { success } => {
+                ClientEvent::ResponseReceived { response } => {
                     self.responses_received += 1;
-                    if *success {
+                    if response.is_success() {
                         self.successful_responses += 1;
                     }
                     println!(
                         "[{}] Received response #{}: {} at {:?}",
                         self.name,
                         self.responses_received,
-                        if *success { "SUCCESS" } else { "FAILURE" },
+                        if response.is_success() { "SUCCESS" } else { "FAILURE" },
                         scheduler.time()
                     );
                 }
@@ -409,11 +427,19 @@ mod tests {
         let client = TestClient::new("test-client".to_string());
         let client_id = sim.add_component(client);
 
-        // Send a request
+        // Create and send a request attempt
+        let attempt = RequestAttempt::new(
+            RequestAttemptId(1),
+            RequestId(1),
+            1,
+            SimTime::from_duration(Duration::from_millis(10)),
+            vec![],
+        );
+
         sim.schedule(
             SimTime::from_duration(Duration::from_millis(10)),
             server_id,
-            ServerEvent::ProcessRequest { request_id: 1, client_id },
+            ServerEvent::ProcessRequest { attempt, client_id },
         );
 
         // Run simulation
@@ -441,16 +467,31 @@ mod tests {
         let client = TestClient::new("test-client".to_string());
         let client_id = sim.add_component(client);
 
-        // Send two requests simultaneously
+        // Create and send two request attempts simultaneously
+        let attempt1 = RequestAttempt::new(
+            RequestAttemptId(1),
+            RequestId(1),
+            1,
+            SimTime::from_duration(Duration::from_millis(10)),
+            vec![],
+        );
+        let attempt2 = RequestAttempt::new(
+            RequestAttemptId(2),
+            RequestId(2),
+            1,
+            SimTime::from_duration(Duration::from_millis(11)),
+            vec![],
+        );
+
         sim.schedule(
             SimTime::from_duration(Duration::from_millis(10)),
             server_id,
-            ServerEvent::ProcessRequest { request_id: 1, client_id },
+            ServerEvent::ProcessRequest { attempt: attempt1, client_id },
         );
         sim.schedule(
             SimTime::from_duration(Duration::from_millis(11)),
             server_id,
-            ServerEvent::ProcessRequest { request_id: 2, client_id },
+            ServerEvent::ProcessRequest { attempt: attempt2, client_id },
         );
 
         // Run simulation
@@ -479,12 +520,19 @@ mod tests {
         let client = TestClient::new("test-client".to_string());
         let client_id = sim.add_component(client);
 
-        // Send three requests
+        // Send three request attempts
         for i in 1..=3 {
+            let attempt = RequestAttempt::new(
+                RequestAttemptId(i),
+                RequestId(i),
+                1,
+                SimTime::from_duration(Duration::from_millis(10 + i)),
+                vec![],
+            );
             sim.schedule(
                 SimTime::from_duration(Duration::from_millis(10 + i)),
                 server_id,
-                ServerEvent::ProcessRequest { request_id: i, client_id },
+                ServerEvent::ProcessRequest { attempt, client_id },
             );
         }
 
@@ -510,12 +558,19 @@ mod tests {
         let client = TestClient::new("metrics-client".to_string());
         let client_id = sim.add_component(client);
 
-        // Send multiple requests with enough capacity
+        // Send multiple request attempts with enough capacity
         for i in 1..=4 {
+            let attempt = RequestAttempt::new(
+                RequestAttemptId(i),
+                RequestId(i),
+                1,
+                SimTime::from_duration(Duration::from_millis(10 * i)),
+                vec![],
+            );
             sim.schedule(
                 SimTime::from_duration(Duration::from_millis(10 * i)),
                 server_id,
-                ServerEvent::ProcessRequest { request_id: i, client_id },
+                ServerEvent::ProcessRequest { attempt, client_id },
             );
         }
 

@@ -250,7 +250,7 @@ fn test_generator_consumer_interleaved() {
 
     println!("\nEvent sequence:");
     for (time, event_type) in &all_events {
-        println!("  {:?}: {}", time, event_type);
+        println!("  {time:?}: {event_type}");
     }
 
     // Verify the expected interleaving pattern
@@ -272,13 +272,11 @@ fn test_generator_consumer_interleaved() {
         all_events.iter().zip(expected_pattern.iter()).enumerate() {
         assert_eq!(
             actual_time, expected_time,
-            "Event {} time mismatch: expected {:?}, got {:?}",
-            i, expected_time, actual_time
+            "Event {i} time mismatch: expected {expected_time:?}, got {actual_time:?}",
         );
         assert_eq!(
             actual_type, expected_type,
-            "Event {} type mismatch: expected {}, got {}",
-            i, expected_type, actual_type
+            "Event {i} type mismatch: expected {expected_type}, got {actual_type}",
         );
     }
 

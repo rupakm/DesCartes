@@ -181,7 +181,7 @@ mod test {
             }
         );
         // Bonus: satisfy codecov on derive
-        assert_eq!(&format!("{:?}", TestEvent), "TestEvent");
+        assert_eq!(&format!("{TestEvent:?}"), "TestEvent");
     }
 
     #[test]

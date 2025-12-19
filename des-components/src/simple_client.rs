@@ -3,6 +3,7 @@
 //! This is a minimal example showing how to create components that work
 //! with the new Component trait and event-driven simulation system.
 
+use crate::request::{RequestAttempt, RequestAttemptId, RequestId, Response};
 use des_core::{Component, Key, Scheduler, SimTime, SimulationMetrics};
 use std::time::Duration;
 
@@ -13,6 +14,10 @@ pub struct SimpleClient {
     pub requests_sent: u64,
     pub max_requests: Option<u64>,
     pub metrics: SimulationMetrics,
+    /// Counter for generating unique request IDs
+    pub next_request_id: u64,
+    /// Counter for generating unique attempt IDs
+    pub next_attempt_id: u64,
 }
 
 /// Events that the SimpleClient can handle
@@ -21,7 +26,7 @@ pub enum ClientEvent {
     /// Time to send the next request
     SendRequest,
     /// Response received from server
-    ResponseReceived { success: bool },
+    ResponseReceived { response: Response },
 }
 
 impl SimpleClient {
@@ -33,6 +38,8 @@ impl SimpleClient {
             requests_sent: 0,
             max_requests: None,
             metrics: SimulationMetrics::new(),
+            next_request_id: 1,
+            next_attempt_id: 1,
         }
     }
 
@@ -79,14 +86,29 @@ impl Component for SimpleClient {
     ) {
         match event {
             ClientEvent::SendRequest => {
+                let request_id = self.next_request_id;
+                let attempt_id = self.next_attempt_id;
+                
                 println!(
-                    "[{}] Sending request #{} at {:?}",
+                    "[{}] Sending request {} (attempt {}) at {:?}",
                     self.name,
-                    self.requests_sent + 1,
+                    request_id,
+                    attempt_id,
                     scheduler.time()
                 );
                 
+                // Create a RequestAttempt
+                let attempt = RequestAttempt::new(
+                    RequestAttemptId(attempt_id),
+                    RequestId(request_id),
+                    1, // First attempt
+                    scheduler.time(),
+                    vec![], // Empty payload for now
+                );
+                
                 self.requests_sent += 1;
+                self.next_request_id += 1;
+                self.next_attempt_id += 1;
                 
                 // Record metrics
                 self.metrics.increment_counter("requests_sent", &self.name, scheduler.time());
@@ -95,32 +117,41 @@ impl Component for SimpleClient {
                 // Schedule next request if we haven't reached the limit
                 self.schedule_next_request(self_id, scheduler);
                 
-                // In a real implementation, we would send the request to a server
-                // and schedule a response event. For now, we'll just simulate
-                // an immediate successful response.
+                // In a real implementation, we would send the attempt to a server
+                // For now, we'll simulate an immediate successful response
+                let response = Response::success(
+                    attempt.id,
+                    attempt.request_id,
+                    scheduler.time() + SimTime::from_duration(Duration::from_millis(10)),
+                    vec![], // Empty response payload
+                );
+                
                 scheduler.schedule(
                     SimTime::from_duration(Duration::from_millis(10)),
                     self_id,
-                    ClientEvent::ResponseReceived { success: true },
+                    ClientEvent::ResponseReceived { response },
                 );
             }
-            ClientEvent::ResponseReceived { success } => {
+            ClientEvent::ResponseReceived { response } => {
                 println!(
-                    "[{}] Received response for request #{}: {}",
+                    "[{}] Received response for attempt {} (request {}): {} at {:?}",
                     self.name,
-                    self.requests_sent,
-                    if *success { "SUCCESS" } else { "FAILURE" }
+                    response.attempt_id,
+                    response.request_id,
+                    if response.is_success() { "SUCCESS" } else { "FAILURE" },
+                    scheduler.time()
                 );
                 
                 // Record response metrics
-                if *success {
+                if response.is_success() {
                     self.metrics.increment_counter("responses_success", &self.name, scheduler.time());
                 } else {
                     self.metrics.increment_counter("responses_failure", &self.name, scheduler.time());
                 }
                 
-                // Record response time (simulated 10ms)
-                self.metrics.record_histogram("response_time_ms", &self.name, 10.0, scheduler.time());
+                // Calculate and record response time
+                let response_time = scheduler.time().duration_since(response.completed_at);
+                self.metrics.record_histogram("response_time_ms", &self.name, response_time.as_millis() as f64, scheduler.time());
             }
         }
     }

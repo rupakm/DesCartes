@@ -4,6 +4,7 @@
 //! by sending events between them.
 
 use des_components::{Server, ServerEvent, ClientEvent};
+use des_components::request::{RequestAttempt, RequestAttemptId, RequestId};
 use des_core::{Component, Execute, Executor, Key, Scheduler, Simulation, SimTime};
 use std::time::Duration;
 
@@ -16,6 +17,8 @@ pub struct CommunicatingClient {
     pub responses_received: u64,
     pub successful_responses: u64,
     pub max_requests: Option<u64>,
+    pub next_request_id: u64,
+    pub next_attempt_id: u64,
 }
 
 impl CommunicatingClient {
@@ -28,6 +31,8 @@ impl CommunicatingClient {
             responses_received: 0,
             successful_responses: 0,
             max_requests: None,
+            next_request_id: 1,
+            next_attempt_id: 1,
         }
     }
 
@@ -66,21 +71,36 @@ impl Component for CommunicatingClient {
     ) {
         match event {
             ClientEvent::SendRequest => {
+                let request_id = self.next_request_id;
+                let attempt_id = self.next_attempt_id;
+                
                 println!(
-                    "[{}] Sending request #{} to server at {:?}",
+                    "[{}] Sending request {} (attempt {}) to server at {:?}",
                     self.name,
-                    self.requests_sent + 1,
+                    request_id,
+                    attempt_id,
                     scheduler.time()
                 );
                 
-                self.requests_sent += 1;
+                // Create a RequestAttempt
+                let attempt = RequestAttempt::new(
+                    RequestAttemptId(attempt_id),
+                    RequestId(request_id),
+                    1, // First attempt
+                    scheduler.time(),
+                    vec![], // Empty payload
+                );
                 
-                // Send request to the server
+                self.requests_sent += 1;
+                self.next_request_id += 1;
+                self.next_attempt_id += 1;
+                
+                // Send request attempt to the server
                 scheduler.schedule(
                     SimTime::from_duration(Duration::from_millis(1)),
                     self.server_id,
                     ServerEvent::ProcessRequest { 
-                        request_id: self.requests_sent, 
+                        attempt,
                         client_id: self_id 
                     },
                 );
@@ -88,9 +108,9 @@ impl Component for CommunicatingClient {
                 // Schedule next request
                 self.schedule_next_request(self_id, scheduler);
             }
-            ClientEvent::ResponseReceived { success } => {
+            ClientEvent::ResponseReceived { response } => {
                 self.responses_received += 1;
-                if *success {
+                if response.is_success() {
                     self.successful_responses += 1;
                 }
                 
@@ -98,7 +118,7 @@ impl Component for CommunicatingClient {
                     "[{}] Received response #{}: {} at {:?}",
                     self.name,
                     self.responses_received,
-                    if *success { "SUCCESS" } else { "FAILURE" },
+                    if response.is_success() { "SUCCESS" } else { "FAILURE" },
                     scheduler.time()
                 );
             }

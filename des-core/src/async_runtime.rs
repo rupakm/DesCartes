@@ -793,14 +793,14 @@ mod tests {
                 };
                 
                 if let Some(req) = request {
-                    server_activity.borrow_mut().push(format!("Server: Processing request: {}", req));
+                    server_activity.borrow_mut().push(format!("Server: Processing request: {req}"));
                     
                     // Simulate processing time
                     sim_sleep(Duration::from_millis(30)).await;
                     
-                    let response = format!("Response to {}", req);
+                    let response = format!("Response to {req}");
                     server_responses.borrow_mut().push(response.clone());
-                    server_activity.borrow_mut().push(format!("Server: Sent response: {}", response));
+                    server_activity.borrow_mut().push(format!("Server: Sent response: {response}"));
                     
                     processed += 1;
                     if processed >= 3 {
@@ -820,9 +820,9 @@ mod tests {
             
             for i in 1..=3 {
                 // Send request
-                let request = format!("Request {}", i);
+                let request = format!("Request {i}");
                 client_requests.borrow_mut().push(request.clone());
-                client_activity.borrow_mut().push(format!("Client: Sent {}", request));
+                client_activity.borrow_mut().push(format!("Client: Sent {request}"));
                 
                 // Wait for response
                 loop {
@@ -830,7 +830,7 @@ mod tests {
                     let responses_len = client_responses.borrow().len();
                     if responses_len >= i {
                         let response = client_responses.borrow()[i-1].clone();
-                        client_activity.borrow_mut().push(format!("Client: Received response: {}", response));
+                        client_activity.borrow_mut().push(format!("Client: Received response: {response}"));
                         break;
                     }
                 }
