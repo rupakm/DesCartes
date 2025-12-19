@@ -19,14 +19,12 @@ pub use builder::{
     BuilderState, IntoOption, Set, Unset, Validate, ValidationError, ValidationResult,
     validate_non_empty, validate_non_negative, validate_positive, validate_range,
 };
-// pub use client::{Client, RequestGenerator, RetryPolicy, SimpleRequestGenerator};
 pub use error::{ComponentError, QueueError, ThrottleError, RequestError};
 
 pub mod queue;
 pub use queue::{FifoQueue, PriorityQueue, Queue, QueueItem};
 
 pub use request::{Request, RequestAttempt, RequestId, RequestAttemptId, RequestStatus, AttemptStatus, Response, ResponseStatus};
-// pub use server::Server;
 
 
 

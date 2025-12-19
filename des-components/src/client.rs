@@ -846,7 +846,7 @@ mod tests {
             match metric {
                 Metric::Gauge { timestamp: ts, .. } => assert_eq!(*ts, timestamp),
                 Metric::Counter { timestamp: ts, .. } => assert_eq!(*ts, timestamp),
-                _ => panic!("Unexpected metric type"),
+                _ => unreachable!("Test should only produce Gauge and Counter metrics"),
             }
         }
     }

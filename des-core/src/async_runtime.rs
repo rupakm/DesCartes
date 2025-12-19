@@ -340,6 +340,7 @@ impl Component for DesRuntime {
         event: &Self::Event,
         scheduler: &mut Scheduler,
     ) {
+        println!("DESRunTime: At time {:?}", scheduler.time());
         // Create async context for this polling cycle
         let mut context = AsyncContext::new(scheduler.time());
 
@@ -667,5 +668,223 @@ mod tests {
         Executor::timed(SimTime::from_millis(100)).execute(&mut sim);
 
         assert!(*woken.borrow());
+    }
+
+    #[test]
+    fn test_async_with_logging() {
+        let mut sim = Simulation::default();
+
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let events_clone = events.clone();
+
+        let mut runtime = DesRuntime::new();
+        
+        // Spawn multiple async tasks with different timing
+        runtime.spawn(async move {
+            events_clone.borrow_mut().push("Task1: Starting".to_string());
+            sim_sleep(Duration::from_millis(50)).await;
+            events_clone.borrow_mut().push("Task1: After 50ms sleep".to_string());
+            sim_sleep(Duration::from_millis(100)).await;
+            events_clone.borrow_mut().push("Task1: After 150ms total".to_string());
+        });
+
+        let events_clone2 = events.clone();
+        runtime.spawn(async move {
+            events_clone2.borrow_mut().push("Task2: Starting".to_string());
+            sim_sleep(Duration::from_millis(75)).await;
+            events_clone2.borrow_mut().push("Task2: After 75ms sleep".to_string());
+            sim_sleep(Duration::from_millis(50)).await;
+            events_clone2.borrow_mut().push("Task2: After 125ms total".to_string());
+        });
+
+        let events_clone3 = events.clone();
+        runtime.spawn(async move {
+            events_clone3.borrow_mut().push("Task3: Starting".to_string());
+            sim_sleep(Duration::from_millis(200)).await;
+            events_clone3.borrow_mut().push("Task3: After 200ms sleep".to_string());
+        });
+
+        let runtime_id = sim.add_component(runtime);
+
+        // Schedule initial poll
+        sim.schedule(SimTime::zero(), runtime_id, RuntimeEvent::Poll);
+
+        // Run simulation with side effects for logging
+        let step_count = Rc::new(RefCell::new(0));
+        let step_count_clone = step_count.clone();
+        let events_for_logging = events.clone();
+        
+        Executor::timed(SimTime::from_millis(250))
+            .side_effect(move |simulation| {
+                let mut count = step_count_clone.borrow_mut();
+                *count += 1;
+                println!("Step {}: Time = {:?}", *count, simulation.scheduler.time());
+                
+                // Print current events
+                let current_events = events_for_logging.borrow();
+                if !current_events.is_empty() {
+                    println!("  Events so far: {}", current_events.len());
+                    for (i, event) in current_events.iter().enumerate() {
+                        println!("    {}: {}", i + 1, event);
+                    }
+                }
+                
+                // Check runtime status
+                if let Some(_runtime) = simulation.components.components.get(&runtime_id.id) {
+                    // We can't easily access the runtime internals here due to type erasure
+                    // But we can see that events are being processed
+                    println!("  Runtime is active");
+                }
+                
+                println!();
+            })
+            .execute(&mut sim);
+
+        // Verify all tasks completed
+        let final_events = events.borrow();
+        println!("Final events ({} total):", final_events.len());
+        for (i, event) in final_events.iter().enumerate() {
+            println!("  {}: {}", i + 1, event);
+        }
+
+        // Check that all expected events occurred
+        assert!(final_events.iter().any(|e| e.contains("Task1: Starting")));
+        assert!(final_events.iter().any(|e| e.contains("Task1: After 50ms sleep")));
+        assert!(final_events.iter().any(|e| e.contains("Task1: After 150ms total")));
+        
+        assert!(final_events.iter().any(|e| e.contains("Task2: Starting")));
+        assert!(final_events.iter().any(|e| e.contains("Task2: After 75ms sleep")));
+        assert!(final_events.iter().any(|e| e.contains("Task2: After 125ms total")));
+        
+        assert!(final_events.iter().any(|e| e.contains("Task3: Starting")));
+        assert!(final_events.iter().any(|e| e.contains("Task3: After 200ms sleep")));
+
+        println!("Total simulation steps: {}", step_count.borrow());
+    }
+
+    #[test]
+    fn test_async_client_server_simulation() {
+        println!("\n=== Async Client-Server Simulation ===");
+        
+        let mut sim = Simulation::default();
+        let mut runtime = DesRuntime::new();
+
+        // Use separate RefCells to avoid borrow conflicts during side effects
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let responses = Rc::new(RefCell::new(Vec::new()));
+        let activity_log = Rc::new(RefCell::new(Vec::new()));
+
+        // Spawn server task
+        let server_requests = requests.clone();
+        let server_responses = responses.clone();
+        let server_activity = activity_log.clone();
+        runtime.spawn(async move {
+            server_activity.borrow_mut().push("Server: Starting up".to_string());
+            
+            let mut processed = 0;
+            loop {
+                // Check for new requests every 10ms
+                sim_sleep(Duration::from_millis(10)).await;
+                
+                // Try to get a request (avoid holding the borrow)
+                let request = {
+                    let mut reqs = server_requests.borrow_mut();
+                    reqs.pop()
+                };
+                
+                if let Some(req) = request {
+                    server_activity.borrow_mut().push(format!("Server: Processing request: {}", req));
+                    
+                    // Simulate processing time
+                    sim_sleep(Duration::from_millis(30)).await;
+                    
+                    let response = format!("Response to {}", req);
+                    server_responses.borrow_mut().push(response.clone());
+                    server_activity.borrow_mut().push(format!("Server: Sent response: {}", response));
+                    
+                    processed += 1;
+                    if processed >= 3 {
+                        server_activity.borrow_mut().push("Server: Shutting down".to_string());
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Spawn client task
+        let client_requests = requests.clone();
+        let client_responses = responses.clone();
+        let client_activity = activity_log.clone();
+        runtime.spawn(async move {
+            client_activity.borrow_mut().push("Client: Starting up".to_string());
+            
+            for i in 1..=3 {
+                // Send request
+                let request = format!("Request {}", i);
+                client_requests.borrow_mut().push(request.clone());
+                client_activity.borrow_mut().push(format!("Client: Sent {}", request));
+                
+                // Wait for response
+                loop {
+                    sim_sleep(Duration::from_millis(5)).await;
+                    let responses_len = client_responses.borrow().len();
+                    if responses_len >= i {
+                        let response = client_responses.borrow()[i-1].clone();
+                        client_activity.borrow_mut().push(format!("Client: Received response: {}", response));
+                        break;
+                    }
+                }
+                
+                // Wait before next request
+                sim_sleep(Duration::from_millis(40)).await;
+            }
+            
+            client_activity.borrow_mut().push("Client: All requests completed".to_string());
+        });
+
+        let runtime_id = sim.add_component(runtime);
+        sim.schedule(SimTime::zero(), runtime_id, RuntimeEvent::Poll);
+
+        // Run with detailed logging - use separate counters to avoid borrow conflicts
+        let step_count = Rc::new(RefCell::new(0));
+        let step_count_clone = step_count.clone();
+        
+        Executor::timed(SimTime::from_millis(300))
+            .side_effect(move |simulation| {
+                let mut count = step_count_clone.borrow_mut();
+                *count += 1;
+                
+                println!("--- Step {}: Time = {} ---", *count, simulation.scheduler.time());
+                
+                // Just print step info without accessing shared state during execution
+                // This avoids borrow conflicts with async tasks
+                println!("  Simulation step executing...");
+            })
+            .execute(&mut sim);
+
+        // Print all log entries after simulation completes
+        let final_log = activity_log.borrow();
+        println!("\n=== Full Activity Log ===");
+        for (i, entry) in final_log.iter().enumerate() {
+            println!("  {}: {}", i + 1, entry);
+        }
+
+        // Verify communication worked
+        let final_responses = responses.borrow();
+        assert_eq!(final_responses.len(), 3);
+        assert!(final_responses[0].contains("Response to Request 1"));
+        assert!(final_responses[1].contains("Response to Request 2"));
+        assert!(final_responses[2].contains("Response to Request 3"));
+        
+        // Verify all expected log entries exist
+        let log_entries = final_log.clone();
+        assert!(log_entries.iter().any(|e| e.contains("Server: Starting up")));
+        assert!(log_entries.iter().any(|e| e.contains("Client: Starting up")));
+        assert!(log_entries.iter().any(|e| e.contains("Server: Processing request: Request 1")));
+        assert!(log_entries.iter().any(|e| e.contains("Client: All requests completed")));
+        assert!(log_entries.iter().any(|e| e.contains("Server: Shutting down")));
+        
+        println!("Total simulation steps: {}", step_count.borrow());
+        println!("=== Simulation Complete ===\n");
     }
 }
