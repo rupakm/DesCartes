@@ -10,8 +10,10 @@ pub mod error;
 
 pub mod simple_client;
 pub mod server;
+pub mod tower;
 pub use simple_client::{SimpleClient, ClientEvent};
 pub use server::{Server, ServerEvent};
+pub use tower::{DesService, DesServiceBuilder, SchedulerHandle, ServiceError, SimBody, TowerClient};
 
 pub use builder::{
     BuilderState, IntoOption, Set, Unset, Validate, ValidationError, ValidationResult,

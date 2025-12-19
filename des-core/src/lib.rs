@@ -65,6 +65,7 @@ impl<T> Copy for Key<T> {}
 
 pub trait ProcessEventEntry: Any {
     fn process_event_entry(&mut self, entry: EventEntry, scheduler: &mut Scheduler);
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 pub trait Component: ProcessEventEntry {
@@ -90,6 +91,10 @@ where
             .downcast::<E>()
             .expect("Failed to downcast event entry.");
         self.process_event(typed_entry.component_key, typed_entry.event, scheduler);
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -125,12 +130,19 @@ impl Components {
     }
 
     pub fn remove<E: 'static, C: Component<Event=E> + 'static>(&mut self, key: Key<E>) -> Option<C> {
-        use std::any::Any;
-        
         self.components.remove(&key.id).and_then(|boxed_trait| {
             // Since ProcessEventEntry extends Any, we can cast the Box
-            let boxed_any: Box<dyn Any> = boxed_trait;
+            let boxed_any: Box<dyn std::any::Any> = boxed_trait;
             boxed_any.downcast::<C>().ok().map(|boxed_c| *boxed_c)
+        })
+    }
+
+    /// Get mutable access to a component
+    pub fn get_component_mut<E: 'static, C: Component<Event=E> + 'static>(&mut self, key: Key<E>) -> Option<&mut C> {
+        self.components.get_mut(&key.id).and_then(|boxed_trait| {
+            // Cast to Any first, then downcast to the concrete type
+            let any_ref = boxed_trait.as_any_mut();
+            any_ref.downcast_mut::<C>()
         })
     }
 }
@@ -183,6 +195,14 @@ impl Simulation {
         key: Key<E>,
     ) -> Option<C> {
         self.components.remove(key)
+    }
+
+    /// Get mutable access to a component
+    pub fn get_component_mut<E: std::fmt::Debug + 'static, C: Component<Event=E> + 'static>(
+        &mut self,
+        key: Key<E>,
+    ) -> Option<&mut C> {
+        self.components.get_component_mut(key)
     }
 
     /// Schedules a new event to be executed at time `time` in component `component`.
