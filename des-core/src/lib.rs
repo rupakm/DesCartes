@@ -41,12 +41,17 @@ pub struct Key<T> {
 }
 
 impl<T> Key<T> {
-    fn new_with_id(id: Uuid) -> Self {
+    pub fn new_with_id(id: Uuid) -> Self {
         Self {
             id,
             _marker: std::marker::PhantomData,
 
         }
+    }
+
+    /// Get the UUID of this key
+    pub fn id(&self) -> Uuid {
+        self.id
     }
 }
 

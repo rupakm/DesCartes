@@ -8,11 +8,12 @@ use crate::request::RequestAttempt;
 use des_core::SimTime;
 use serde::{Deserialize, Serialize};
 use std::collections::{BinaryHeap, VecDeque};
+use uuid::Uuid;
 
 /// Item stored in a queue
 ///
 /// QueueItem wraps a RequestAttempt along with metadata needed for queue management,
-/// such as enqueue time and priority.
+/// such as enqueue time, priority, and the original client that made the request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueueItem {
     /// The request attempt being queued
@@ -21,6 +22,8 @@ pub struct QueueItem {
     pub enqueued_at: SimTime,
     /// Priority for priority-based queues (lower values = higher priority)
     pub priority: u32,
+    /// Original client ID (stored as UUID for serialization)
+    pub client_id: Option<Uuid>,
 }
 
 impl QueueItem {
@@ -30,6 +33,7 @@ impl QueueItem {
             attempt,
             enqueued_at,
             priority: 0,
+            client_id: None,
         }
     }
 
@@ -39,6 +43,32 @@ impl QueueItem {
             attempt,
             enqueued_at,
             priority,
+            client_id: None,
+        }
+    }
+
+    /// Create a new queue item with client ID for proper response routing
+    pub fn with_client_id(attempt: RequestAttempt, enqueued_at: SimTime, client_id: Uuid) -> Self {
+        Self {
+            attempt,
+            enqueued_at,
+            priority: 0,
+            client_id: Some(client_id),
+        }
+    }
+
+    /// Create a new queue item with priority and client ID
+    pub fn with_priority_and_client_id(
+        attempt: RequestAttempt, 
+        enqueued_at: SimTime, 
+        priority: u32,
+        client_id: Uuid
+    ) -> Self {
+        Self {
+            attempt,
+            enqueued_at,
+            priority,
+            client_id: Some(client_id),
         }
     }
 

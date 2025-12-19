@@ -1,521 +1,346 @@
-//! Server component for request processing
+//! Unified server component with queue and simulated threadpool
 //!
-//! This module provides the Server component, which processes requests with
-//! configurable service time distributions and capacity limits.
+//! This module provides a unified Server component that combines the best features
+//! of both the complex server and simple server implementations. It uses the new
+//! Component trait API and includes integrated queue support with simulated thread
+//! capacity management.
 
-use crate::builder::{
-    validate_non_empty, validate_positive, Set, Unset, Validate, ValidationResult,
-};
-use crate::component::{Component, Metric};
-use crate::error::RequestError;
 use crate::queue::{Queue, QueueItem};
-use des_core::dists::ServiceTimeDistribution;
-use des_core::{Environment, RequestAttempt, Response, SimError, SimTime};
+use crate::request::{RequestAttempt, RequestAttemptId, RequestId};
+use des_core::{Component, Key, Scheduler, SimTime, SimulationMetrics};
 use std::time::Duration;
+use uuid::Uuid;
 
+/// Events that the unified server can handle
+#[derive(Debug, Clone)]
+pub enum ServerEvent {
+    /// Request received from client
+    ProcessRequest { 
+        request_id: u64, 
+        client_id: Key<ClientEvent> 
+    },
+    /// Request processing completed
+    RequestCompleted { 
+        request_id: u64, 
+        client_id: Key<ClientEvent> 
+    },
+    /// Check for queued requests to process
+    ProcessQueuedRequests,
+}
 
+// Re-export ClientEvent for compatibility
+pub use crate::simple_client::ClientEvent;
 
-/// Server component for processing requests
+/// Server component with queue and simulated threadpool
 ///
-/// A Server processes requests with configurable capacity and service time.
-/// When capacity is reached, requests are queued if a queue is configured,
-/// or rejected otherwise.
+/// This server combines:
+/// - Simulated thread capacity (no actual threads)
+/// - Integrated queue for request buffering
+/// - Configurable service time
+/// - Comprehensive metrics
+/// - Easy middleware wrapping support
 ///
-/// # Requirements
-///
-/// - 2.1: Provide Server component that processes requests with configurable service time distributions
-/// - 3.1: Define trait-based interfaces for all Model_Component types
-/// - 3.4: Allow Model_Component instances to emit metrics and traces during simulation
-///
-/// # Examples
-///
-/// ```ignore
-/// use des_components::server::{Server, ConstantServiceTime};
-/// use des_components::queue::FifoQueue;
-/// use std::time::Duration;
-///
-/// let server = Server::builder()
-///     .name("web-server")
-///     .capacity(10)
-///     .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(50))))
-///     .queue(Box::new(FifoQueue::bounded(100)))
-///     .build()
-///     .unwrap();
-/// ```
+/// The server processes requests up to its thread capacity. When at capacity,
+/// requests are queued if a queue is configured, or rejected otherwise.
+/// The "threadpool" is simulated - we track capacity but don't use real threads.
 pub struct Server {
-    /// Unique name for this server
-    name: String,
-    /// Maximum number of concurrent requests the server can handle
-    capacity: usize,
-    /// Distribution for sampling service times
-    service_time_dist: Box<dyn ServiceTimeDistribution>,
+    /// Server name for identification and metrics
+    pub name: String,
+    /// Simulated thread capacity (maximum concurrent requests)
+    pub thread_capacity: usize,
+    /// Current number of active "threads" (simulated)
+    pub active_threads: usize,
+    /// Service time per request
+    pub service_time: Duration,
     /// Optional queue for buffering requests when at capacity
-    queue: Option<Box<dyn Queue>>,
-    /// Number of requests currently being processed
-    active_requests: usize,
-    /// Total number of requests processed
-    total_processed: u64,
-    /// Total number of requests rejected
-    total_rejected: u64,
-    /// Total service time accumulated
-    total_service_time: Duration,
-    /// Completion times of currently active requests
-    active_request_completions: Vec<SimTime>,
+    pub queue: Option<Box<dyn Queue>>,
+    /// Total requests processed successfully
+    pub requests_processed: u64,
+    /// Total requests rejected (no capacity, no queue space)
+    pub requests_rejected: u64,
+    /// Total requests currently queued
+    pub requests_queued: u64,
+    /// Metrics collector
+    pub metrics: SimulationMetrics,
 }
 
 impl Server {
-    /// Create a new ServerBuilder
-    pub fn builder() -> ServerBuilder<Unset, Unset, Unset> {
-        ServerBuilder {
-            name: None,
-            capacity: None,
-            service_time_dist: None,
+    /// Create a new server
+    ///
+    /// # Arguments
+    /// * `name` - Server name for identification
+    /// * `thread_capacity` - Maximum number of simulated concurrent threads
+    /// * `service_time` - Time to process each request
+    pub fn new(name: String, thread_capacity: usize, service_time: Duration) -> Self {
+        Self {
+            name,
+            thread_capacity,
+            active_threads: 0,
+            service_time,
             queue: None,
-            _phantom_name: std::marker::PhantomData,
-            _phantom_capacity: std::marker::PhantomData,
-            _phantom_service_time: std::marker::PhantomData,
+            requests_processed: 0,
+            requests_rejected: 0,
+            requests_queued: 0,
+            metrics: SimulationMetrics::new(),
         }
     }
 
-    /// Get the current number of active requests
-    pub fn active_requests(&self) -> usize {
-        self.active_requests
+    /// Add a queue to the server for request buffering
+    ///
+    /// When the server is at capacity, requests will be queued instead of rejected.
+    pub fn with_queue(mut self, queue: Box<dyn Queue>) -> Self {
+        self.queue = Some(queue);
+        self
     }
 
-    /// Get the total number of requests processed
-    pub fn total_processed(&self) -> u64 {
-        self.total_processed
+    /// Get current thread utilization (0.0 to 1.0)
+    pub fn utilization(&self) -> f64 {
+        self.active_threads as f64 / self.thread_capacity as f64
     }
 
-    /// Get the total number of requests rejected
-    pub fn total_rejected(&self) -> u64 {
-        self.total_rejected
+    /// Check if server has available thread capacity
+    pub fn has_capacity(&self) -> bool {
+        self.active_threads < self.thread_capacity
     }
 
-    /// Get the current queue depth (0 if no queue)
+    /// Check if server can accept a request (has capacity or queue space)
+    pub fn can_accept_request(&self) -> bool {
+        self.has_capacity() || 
+        self.queue.as_ref().map(|q| !q.is_full()).unwrap_or(false)
+    }
+
+    /// Get current queue depth
     pub fn queue_depth(&self) -> usize {
         self.queue.as_ref().map(|q| q.len()).unwrap_or(0)
     }
 
-    /// Get the current utilization (active requests / capacity)
-    pub fn utilization(&self) -> f64 {
-        self.active_requests as f64 / self.capacity as f64
+    /// Get metrics for this server
+    pub fn get_metrics(&self) -> &SimulationMetrics {
+        &self.metrics
     }
 
-    /// Check if the server is at capacity
-    pub fn is_at_capacity(&self) -> bool {
-        self.active_requests >= self.capacity
-    }
-
-    /// Check if the server can accept a request (has capacity or queue space)
-    pub fn can_accept(&self) -> bool {
-        !self.is_at_capacity() || self.queue.as_ref().map(|q| !q.is_full()).unwrap_or(false)
-    }
-
-    /// Process a request attempt synchronously
-    ///
-    /// This method handles the complete lifecycle of processing a request:
-    /// 1. Check if server has capacity
-    /// 2. If at capacity, enqueue the request (if queue exists) or reject
-    /// 3. Sample service time from distribution
-    /// 4. Schedule completion event in the simulation
-    /// 5. Update metrics
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The simulation environment
-    /// * `attempt` - The request attempt to process
-    ///
-    /// # Returns
-    ///
-    /// A Response indicating success or failure, or None if the request was queued
-    ///
-    /// # Requirements
-    ///
-    /// - 2.1: Process requests with configurable service time distributions
-    /// - 3.4: Emit metrics for queue depth, utilization, and latency
-    /// - 7.1: Handle capacity limits and queuing
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// use des_components::server::Server;
-    /// use des_core::{Environment, RequestAttempt, RequestAttemptId, RequestId, SimTime};
-    ///
-    /// let mut env = Environment::new();
-    /// let mut server = Server::builder()
-    ///     .name("test-server")
-    ///     .capacity(10)
-    ///     .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(50))))
-    ///     .build()
-    ///     .unwrap();
-    ///
-    /// let attempt = RequestAttempt::new(
-    ///     RequestAttemptId(1),
-    ///     RequestId(1),
-    ///     1,
-    ///     SimTime::zero(),
-    ///     vec![],
-    /// );
-    ///
-    /// let response = server.process_request(&mut env, attempt);
-    /// ```
-    pub fn process_request(
-        &mut self,
-        env: &mut Environment,
-        attempt: RequestAttempt,
-    ) -> Result<Response, RequestError> {
-        let current_time = env.now();
-
-        // Update state based on current time (lazy completion)
-        self.update_state(current_time);
-
-        // Check if we have capacity
-        if self.is_at_capacity() {
-            // Try to enqueue if we have a queue
-            if let Some(ref mut queue) = self.queue {
-                let queue_item = QueueItem::new(attempt.clone(), current_time);
-
-                match queue.enqueue(queue_item) {
-                    Ok(_) => {
-                        // Successfully enqueued - return an error indicating queued status
-                        // In a real implementation, this would trigger a callback when capacity becomes available
-                        return Err(RequestError::Rejected(
-                            "Request queued - will be processed when capacity available"
-                                .to_string(),
-                        ));
-                    }
-                    Err(_) => {
-                        // Queue is full - reject the request
-                        self.total_rejected += 1;
-                        return Err(RequestError::Rejected(
-                            "Server at capacity and queue is full".to_string(),
-                        ));
-                    }
+    /// Process a request if capacity allows, otherwise queue or reject
+    fn handle_request(
+        &mut self, 
+        request_id: u64, 
+        client_id: Key<ClientEvent>, 
+        self_id: Key<ServerEvent>, 
+        scheduler: &mut Scheduler
+    ) {
+        if self.has_capacity() {
+            // Process immediately
+            self.start_processing_request(request_id, client_id, self_id, scheduler);
+        } else if let Some(ref mut queue) = self.queue {
+            // Try to queue the request
+            let attempt = RequestAttempt::new(
+                RequestAttemptId(request_id),
+                RequestId(request_id),
+                1, // attempt number
+                scheduler.time(),
+                vec![], // empty payload
+            );
+            let queue_item = QueueItem::with_client_id(attempt, scheduler.time(), client_id.id());
+            
+            match queue.enqueue(queue_item) {
+                Ok(_) => {
+                    self.requests_queued += 1;
+                    println!(
+                        "[{}] Queued request #{} at {:?} (queue depth: {})",
+                        self.name, request_id, scheduler.time(), queue.len()
+                    );
+                    
+                    // Record metrics
+                    self.metrics.increment_counter("requests_queued", &self.name, scheduler.time());
+                    self.metrics.record_gauge("queue_depth", &self.name, queue.len() as f64, scheduler.time());
                 }
-            } else {
-                // No queue and at capacity - reject
-                self.total_rejected += 1;
-                return Err(RequestError::Rejected("Server at capacity".to_string()));
+                Err(_) => {
+                    // Queue is full - reject
+                    self.reject_request(request_id, client_id, scheduler);
+                }
             }
-        }
-
-        // Process the request directly
-        self.process_request_internal(env, attempt)
-    }
-
-    /// Internal method to process a request (assumes capacity is available)
-    ///
-    /// This method starts processing a request and schedules its completion.
-    /// The active_requests counter is incremented immediately and should be
-    /// decremented when the request completes (after the service time).
-    fn process_request_internal(
-        &mut self,
-        env: &mut Environment,
-        attempt: RequestAttempt,
-    ) -> Result<Response, RequestError> {
-        let start_time = env.now();
-
-        // Increment active requests - this stays incremented until completion
-        self.active_requests += 1;
-
-        // Sample service time from distribution
-        let service_time = self.service_time_dist.sample();
-        self.total_service_time += service_time;
-
-        // Calculate completion time
-        let completion_time = start_time + service_time;
-
-        // Schedule a completion event in the simulation
-        // In a full implementation, this event would trigger a callback that:
-        // 1. Decrements active_requests
-        // 2. Increments total_processed
-        // 3. Processes queued requests if any
-        use des_core::event::EventPayload;
-        env.schedule(service_time, EventPayload::Generic);
-
-        // Track completion time for lazy updates
-        self.active_request_completions.push(completion_time);
-
-        // For testing purposes, we immediately mark as processed
-        // In production, this would happen when the completion event fires
-        // self.active_requests -= 1;
-        // self.total_processed += 1;
-
-        // Create a successful response
-        Ok(Response::success(
-            attempt.id,
-            attempt.request_id,
-            completion_time,
-            vec![], // Empty response payload
-        ))
-    }
-
-    /// Complete a request (called when service time has elapsed)
-    ///
-    /// This method should be called when a request's service time has completed.
-    /// It decrements the active request count and increments the processed count.
-    pub fn complete_request(&mut self) {
-        if self.active_requests > 0 {
-            self.active_requests -= 1;
-            self.total_processed += 1;
+        } else {
+            // No capacity and no queue - reject
+            self.reject_request(request_id, client_id, scheduler);
         }
     }
 
-    /// Try to process queued requests when capacity becomes available
-    ///
-    /// This method should be called when a request completes to check if there
-    /// are queued requests that can now be processed.
-    pub fn process_queued_requests(
+    /// Start processing a request (allocate a simulated thread)
+    fn start_processing_request(
         &mut self,
-        env: &mut Environment,
-    ) -> Vec<Result<Response, RequestError>> {
-        self.update_state(env.now());
-        let mut responses = Vec::new();
+        request_id: u64,
+        client_id: Key<ClientEvent>,
+        self_id: Key<ServerEvent>,
+        scheduler: &mut Scheduler,
+    ) {
+        println!(
+            "[{}] Processing request #{} at {:?} (threads: {}/{})",
+            self.name,
+            request_id,
+            scheduler.time(),
+            self.active_threads + 1,
+            self.thread_capacity
+        );
 
-        // Process as many queued requests as we have capacity for
-        while !self.is_at_capacity() {
-            if let Some(ref mut queue) = self.queue {
-                if let Some(queued_item) = queue.dequeue() {
-                    let result = self.process_request_internal(env, queued_item.attempt);
-                    responses.push(result);
-                } else {
-                    // Queue is empty
-                    break;
-                }
+        // Allocate a simulated thread
+        self.active_threads += 1;
+
+        // Record metrics
+        self.metrics.increment_counter("requests_accepted", &self.name, scheduler.time());
+        self.metrics.record_gauge("active_threads", &self.name, self.active_threads as f64, scheduler.time());
+        self.metrics.record_gauge("utilization", &self.name, self.utilization() * 100.0, scheduler.time());
+
+        // Schedule completion
+        scheduler.schedule(
+            SimTime::from_duration(self.service_time),
+            self_id,
+            ServerEvent::RequestCompleted { request_id, client_id },
+        );
+    }
+
+    /// Complete request processing (free a simulated thread)
+    fn complete_request(
+        &mut self,
+        request_id: u64,
+        client_id: Key<ClientEvent>,
+        self_id: Key<ServerEvent>,
+        scheduler: &mut Scheduler,
+    ) {
+        println!(
+            "[{}] Completed request #{} at {:?}",
+            self.name, request_id, scheduler.time()
+        );
+
+        // Free the simulated thread
+        self.active_threads = self.active_threads.saturating_sub(1);
+        self.requests_processed += 1;
+
+        // Record metrics
+        self.metrics.increment_counter("requests_completed", &self.name, scheduler.time());
+        self.metrics.record_gauge("total_processed", &self.name, self.requests_processed as f64, scheduler.time());
+        self.metrics.record_gauge("active_threads", &self.name, self.active_threads as f64, scheduler.time());
+        self.metrics.record_gauge("utilization", &self.name, self.utilization() * 100.0, scheduler.time());
+        self.metrics.record_duration("service_time", &self.name, self.service_time, scheduler.time());
+
+        // Send success response to client
+        scheduler.schedule(
+            SimTime::from_duration(Duration::from_millis(1)),
+            client_id,
+            ClientEvent::ResponseReceived { success: true },
+        );
+
+        // Check if we can process queued requests
+        if self.has_capacity() && self.queue_depth() > 0 {
+            scheduler.schedule(
+                SimTime::from_duration(Duration::from_millis(1)),
+                self_id,
+                ServerEvent::ProcessQueuedRequests,
+            );
+        }
+    }
+
+    /// Reject a request (send failure response)
+    fn reject_request(
+        &mut self,
+        request_id: u64,
+        client_id: Key<ClientEvent>,
+        scheduler: &mut Scheduler,
+    ) {
+        println!(
+            "[{}] Rejecting request #{} - server overloaded (threads: {}/{}, queue: {})",
+            self.name,
+            request_id,
+            self.active_threads,
+            self.thread_capacity,
+            self.queue_depth()
+        );
+
+        self.requests_rejected += 1;
+
+        // Record metrics
+        self.metrics.increment_counter("requests_rejected", &self.name, scheduler.time());
+
+        // Send failure response
+        scheduler.schedule(
+            SimTime::from_duration(Duration::from_millis(1)),
+            client_id,
+            ClientEvent::ResponseReceived { success: false },
+        );
+    }
+
+    /// Process queued requests when capacity becomes available
+    fn process_queued_requests(&mut self, self_id: Key<ServerEvent>, scheduler: &mut Scheduler) {
+        while self.has_capacity() {
+            // Extract the queued item first to avoid borrowing conflicts
+            let queued_item = if let Some(ref mut queue) = self.queue {
+                queue.dequeue()
             } else {
-                // No queue
+                None
+            };
+
+            if let Some(queued_item) = queued_item {
+                let request_id = queued_item.attempt.id.0;
+                
+                println!(
+                    "[{}] Processing queued request #{} at {:?} (was queued for {:?})",
+                    self.name,
+                    request_id,
+                    scheduler.time(),
+                    queued_item.queue_time(scheduler.time())
+                );
+
+                // Reconstruct the client_id from the stored UUID
+                if let Some(client_uuid) = queued_item.client_id {
+                    let client_id = Key::<ClientEvent>::new_with_id(client_uuid);
+                    self.start_processing_request(request_id, client_id, self_id, scheduler);
+                } else {
+                    // Fallback: complete the request without sending response
+                    // This handles legacy queue items that don't have client_id stored
+                    println!(
+                        "[{}] Warning: Processing queued request #{} without client_id",
+                        self.name, request_id
+                    );
+                    self.active_threads += 1;
+                    scheduler.schedule(
+                        SimTime::from_duration(self.service_time),
+                        self_id,
+                        ServerEvent::RequestCompleted { 
+                            request_id, 
+                            client_id: Key::<ClientEvent>::new_with_id(Uuid::nil()) 
+                        },
+                    );
+                }
+                
+                // Record queue metrics after processing
+                let queue_len = self.queue.as_ref().map(|q| q.len()).unwrap_or(0);
+                self.metrics.record_gauge("queue_depth", &self.name, queue_len as f64, scheduler.time());
+            } else {
+                // Queue is empty or no queue
                 break;
             }
-        }
-
-        responses
-    }
-
-    /// Emit metrics with a specific timestamp
-    ///
-    /// This is a helper method that allows specifying the timestamp for metrics.
-    /// Used internally and for testing.
-    pub fn emit_metrics_at(&self, timestamp: SimTime) -> Vec<Metric> {
-        vec![
-            Metric::Gauge {
-                name: format!("{}.active_requests", self.name),
-                value: self.active_requests as f64,
-                timestamp,
-            },
-            Metric::Gauge {
-                name: format!("{}.utilization", self.name),
-                value: self.utilization(),
-                timestamp,
-            },
-            Metric::Gauge {
-                name: format!("{}.queue_depth", self.name),
-                value: self.queue_depth() as f64,
-                timestamp,
-            },
-            Metric::Counter {
-                name: format!("{}.total_processed", self.name),
-                value: self.total_processed,
-                timestamp,
-            },
-            Metric::Counter {
-                name: format!("{}.total_rejected", self.name),
-                value: self.total_rejected,
-                timestamp,
-            },
-        ]
-    }
-
-    /// Get the average service time per request
-    pub fn average_service_time(&self) -> Option<Duration> {
-        if self.total_processed > 0 {
-            Some(self.total_service_time / self.total_processed as u32)
-        } else {
-            None
-        }
-    }
-
-    /// Update internal state based on current time
-    ///
-    /// Checks for completed requests and updates counters.
-    fn update_state(&mut self, current_time: SimTime) {
-        // Retain only requests that finish in the future
-        // Count how many we remove
-        let initial_count = self.active_request_completions.len();
-        self.active_request_completions
-            .retain(|&t| t > current_time);
-        let completed_count = initial_count - self.active_request_completions.len();
-
-        if completed_count > 0 {
-            self.active_requests -= completed_count;
-            self.total_processed += completed_count as u64;
         }
     }
 }
 
 impl Component for Server {
-    fn name(&self) -> &str {
-        &self.name
-    }
+    type Event = ServerEvent;
 
-    fn initialize(&mut self, _env: &mut Environment) -> Result<(), SimError> {
-        // Server initialization - reset metrics
-        self.active_requests = 0;
-        self.total_processed = 0;
-        self.total_rejected = 0;
-        self.total_service_time = Duration::ZERO;
-        self.active_request_completions.clear();
-        Ok(())
-    }
-
-    fn shutdown(&mut self, _env: &mut Environment) -> Result<(), SimError> {
-        // Server shutdown - ensure all active requests are completed
-        if self.active_requests > 0 {
-            eprintln!(
-                "Warning: Server '{}' shutting down with {} active requests",
-                self.name, self.active_requests
-            );
+    fn process_event(
+        &mut self,
+        self_id: Key<Self::Event>,
+        event: &Self::Event,
+        scheduler: &mut Scheduler,
+    ) {
+        match event {
+            ServerEvent::ProcessRequest { request_id, client_id } => {
+                self.handle_request(*request_id, *client_id, self_id, scheduler);
+            }
+            ServerEvent::RequestCompleted { request_id, client_id } => {
+                self.complete_request(*request_id, *client_id, self_id, scheduler);
+            }
+            ServerEvent::ProcessQueuedRequests => {
+                self.process_queued_requests(self_id, scheduler);
+            }
         }
-        Ok(())
-    }
-
-    fn emit_metrics(&self) -> Vec<Metric> {
-        // Use zero timestamp as default - in practice, the caller should use emit_metrics_at
-        // with the current simulation time
-        self.emit_metrics_at(SimTime::zero())
-    }
-}
-
-/// Builder for constructing Server instances with type-safe validation
-///
-/// The builder uses the type-state pattern to ensure all required fields
-/// are set at compile time.
-///
-/// # Type Parameters
-///
-/// - `NameState`: Tracks whether the name has been set
-/// - `CapacityState`: Tracks whether the capacity has been set
-/// - `ServiceTimeState`: Tracks whether the service time distribution has been set
-///
-/// # Requirements
-///
-/// - 6.2: Provide builder patterns for constructing complex Model_Component instances
-/// - 6.3: Produce compile-time errors with descriptive messages for invalid parameters
-pub struct ServerBuilder<NameState, CapacityState, ServiceTimeState> {
-    name: Option<String>,
-    capacity: Option<usize>,
-    service_time_dist: Option<Box<dyn ServiceTimeDistribution>>,
-    queue: Option<Box<dyn Queue>>,
-    _phantom_name: std::marker::PhantomData<NameState>,
-    _phantom_capacity: std::marker::PhantomData<CapacityState>,
-    _phantom_service_time: std::marker::PhantomData<ServiceTimeState>,
-}
-
-impl<NameState, CapacityState, ServiceTimeState>
-    ServerBuilder<NameState, CapacityState, ServiceTimeState>
-{
-    /// Set the optional queue for buffering requests
-    ///
-    /// If no queue is provided, requests will be rejected when the server is at capacity.
-    pub fn queue(mut self, queue: Box<dyn Queue>) -> Self {
-        self.queue = Some(queue);
-        self
-    }
-}
-
-impl<CapacityState, ServiceTimeState> ServerBuilder<Unset, CapacityState, ServiceTimeState> {
-    /// Set the server name (required)
-    pub fn name(
-        self,
-        name: impl Into<String>,
-    ) -> ServerBuilder<Set, CapacityState, ServiceTimeState> {
-        ServerBuilder {
-            name: Some(name.into()),
-            capacity: self.capacity,
-            service_time_dist: self.service_time_dist,
-            queue: self.queue,
-            _phantom_name: std::marker::PhantomData,
-            _phantom_capacity: std::marker::PhantomData,
-            _phantom_service_time: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<NameState, ServiceTimeState> ServerBuilder<NameState, Unset, ServiceTimeState> {
-    /// Set the server capacity (required)
-    ///
-    /// Capacity is the maximum number of concurrent requests the server can handle.
-    pub fn capacity(self, capacity: usize) -> ServerBuilder<NameState, Set, ServiceTimeState> {
-        ServerBuilder {
-            name: self.name,
-            capacity: Some(capacity),
-            service_time_dist: self.service_time_dist,
-            queue: self.queue,
-            _phantom_name: std::marker::PhantomData,
-            _phantom_capacity: std::marker::PhantomData,
-            _phantom_service_time: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<NameState, CapacityState> ServerBuilder<NameState, CapacityState, Unset> {
-    /// Set the service time distribution (required)
-    ///
-    /// The distribution is used to sample service times for each request.
-    pub fn service_time(
-        self,
-        dist: Box<dyn ServiceTimeDistribution>,
-    ) -> ServerBuilder<NameState, CapacityState, Set> {
-        ServerBuilder {
-            name: self.name,
-            capacity: self.capacity,
-            service_time_dist: Some(dist),
-            queue: self.queue,
-            _phantom_name: std::marker::PhantomData,
-            _phantom_capacity: std::marker::PhantomData,
-            _phantom_service_time: std::marker::PhantomData,
-        }
-    }
-}
-
-impl ServerBuilder<Set, Set, Set> {
-    /// Build the Server instance
-    ///
-    /// This method is only available when all required fields have been set.
-    ///
-    /// # Errors
-    ///
-    /// Returns a validation error if any field values are invalid.
-    pub fn build(self) -> ValidationResult<Server> {
-        self.validate()?;
-
-        Ok(Server {
-            name: self.name.unwrap(),
-            capacity: self.capacity.unwrap(),
-            service_time_dist: self.service_time_dist.unwrap(),
-            queue: self.queue,
-            active_requests: 0,
-            total_processed: 0,
-            total_rejected: 0,
-            total_service_time: Duration::ZERO,
-            active_request_completions: Vec::new(),
-        })
-    }
-}
-
-impl Validate for ServerBuilder<Set, Set, Set> {
-    fn validate(&self) -> ValidationResult<()> {
-        // Validate name is not empty
-        if let Some(ref name) = self.name {
-            validate_non_empty("name", name)?;
-        }
-
-        // Validate capacity is positive
-        if let Some(capacity) = self.capacity {
-            validate_positive("capacity", capacity)?;
-        }
-
-        Ok(())
     }
 }
 
@@ -523,504 +348,188 @@ impl Validate for ServerBuilder<Set, Set, Set> {
 mod tests {
     use super::*;
     use crate::queue::FifoQueue;
-    use crate::ConstantServiceTime;
+    use des_core::{Execute, Executor, Simulation};
 
-    #[test]
-    fn test_constant_service_time() {
-        let mut dist = ConstantServiceTime::new(Duration::from_millis(100));
-        assert_eq!(dist.sample(), Duration::from_millis(100));
-        assert_eq!(dist.sample(), Duration::from_millis(100));
+    /// Test client for server testing
+    pub struct TestClient {
+        pub name: String,
+        pub responses_received: u64,
+        pub successful_responses: u64,
     }
 
-
-
-    #[test]
-    fn test_server_builder_all_required_fields() {
-        let server = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
-
-        assert_eq!(server.name(), "test-server");
-        assert_eq!(server.capacity, 10);
-        assert_eq!(server.active_requests(), 0);
-        assert_eq!(server.total_processed(), 0);
-        assert_eq!(server.total_rejected(), 0);
-    }
-
-    #[test]
-    fn test_server_builder_with_queue() {
-        let server = Server::builder()
-            .name("test-server")
-            .capacity(5)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .queue(Box::new(FifoQueue::bounded(20)))
-            .build()
-            .unwrap();
-
-        assert_eq!(server.name(), "test-server");
-        assert!(server.queue.is_some());
-    }
-
-    #[test]
-    fn test_server_builder_validation_empty_name() {
-        let result = Server::builder()
-            .name("")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build();
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_server_builder_validation_zero_capacity() {
-        let result = Server::builder()
-            .name("test-server")
-            .capacity(0)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build();
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_server_utilization() {
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
-
-        assert_eq!(server.utilization(), 0.0);
-
-        server.active_requests = 5;
-        assert_eq!(server.utilization(), 0.5);
-
-        server.active_requests = 10;
-        assert_eq!(server.utilization(), 1.0);
-    }
-
-    #[test]
-    fn test_server_capacity_checks() {
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(2)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
-
-        assert!(!server.is_at_capacity());
-        assert!(server.can_accept());
-
-        server.active_requests = 2;
-        assert!(server.is_at_capacity());
-        assert!(!server.can_accept());
-    }
-
-    #[test]
-    fn test_server_capacity_with_queue() {
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(2)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .queue(Box::new(FifoQueue::bounded(5)))
-            .build()
-            .unwrap();
-
-        server.active_requests = 2;
-        assert!(server.is_at_capacity());
-        assert!(server.can_accept()); // Can still accept because queue has space
-    }
-
-    #[test]
-    fn test_server_emit_metrics() {
-        let server = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
-
-        let metrics = server.emit_metrics();
-        assert_eq!(metrics.len(), 5);
-
-        // Check that all expected metrics are present
-        let metric_names: Vec<String> = metrics
-            .iter()
-            .map(|m| match m {
-                Metric::Gauge { name, .. } => name.clone(),
-                Metric::Counter { name, .. } => name.clone(),
-                _ => String::new(),
-            })
-            .collect();
-
-        assert!(metric_names.contains(&"test-server.active_requests".to_string()));
-        assert!(metric_names.contains(&"test-server.utilization".to_string()));
-        assert!(metric_names.contains(&"test-server.queue_depth".to_string()));
-        assert!(metric_names.contains(&"test-server.total_processed".to_string()));
-        assert!(metric_names.contains(&"test-server.total_rejected".to_string()));
-    }
-
-    #[test]
-    fn test_server_queue_depth() {
-        let server = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
-
-        assert_eq!(server.queue_depth(), 0);
-
-        let server_with_queue = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .queue(Box::new(FifoQueue::bounded(5)))
-            .build()
-            .unwrap();
-
-        assert_eq!(server_with_queue.queue_depth(), 0);
-    }
-}
-
-#[cfg(test)]
-mod request_processing_tests {
-    use super::*;
-    use crate::ConstantServiceTime;
-    use crate::queue::FifoQueue;
-    use des_core::{Environment, RequestAttemptId, RequestId};
-
-    #[test]
-    fn test_process_request_with_capacity() {
-        let mut env = Environment::new();
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
-
-        let attempt = RequestAttempt::new(
-            RequestAttemptId(1),
-            RequestId(1),
-            1,
-            SimTime::zero(),
-            vec![1, 2, 3],
-        );
-
-        let result = server.process_request(&mut env, attempt);
-        assert!(result.is_ok());
-        server.complete_request();
-
-        let response = result.unwrap();
-        assert!(response.is_success());
-        assert_eq!(response.request_id, RequestId(1));
-        assert_eq!(response.attempt_id, RequestAttemptId(1));
-        assert_eq!(response.attempt_id, RequestAttemptId(1));
-
-        server.complete_request();
-        assert_eq!(server.total_processed(), 1);
-        assert_eq!(server.total_rejected(), 0);
-    }
-
-    #[test]
-    fn test_process_request_at_capacity_no_queue() {
-        let mut env = Environment::new();
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(1)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
-
-        // Fill capacity
-        server.active_requests = 1;
-
-        let attempt = RequestAttempt::new(
-            RequestAttemptId(2),
-            RequestId(2),
-            1,
-            SimTime::zero(),
-            vec![],
-        );
-
-        let result = server.process_request(&mut env, attempt);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RequestError::Rejected(_)));
-        assert_eq!(server.total_rejected(), 1);
-    }
-
-    #[test]
-    fn test_process_request_with_queue() {
-        let mut env = Environment::new();
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(1)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .queue(Box::new(FifoQueue::bounded(5)))
-            .build()
-            .unwrap();
-
-        // Fill capacity
-        server.active_requests = 1;
-
-        let attempt = RequestAttempt::new(
-            RequestAttemptId(2),
-            RequestId(2),
-            1,
-            SimTime::zero(),
-            vec![],
-        );
-
-        // Should be queued (returns error indicating queued status)
-        let result = server.process_request(&mut env, attempt);
-        assert!(result.is_err());
-        assert_eq!(server.queue_depth(), 1);
-        assert_eq!(server.total_rejected(), 0); // Not rejected, just queued
-    }
-
-    #[test]
-    fn test_process_request_queue_full() {
-        let mut env = Environment::new();
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(1)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .queue(Box::new(FifoQueue::bounded(1)))
-            .build()
-            .unwrap();
-
-        // Fill capacity
-        server.active_requests = 1;
-
-        // Fill the queue
-        let queue_item = QueueItem::new(
-            RequestAttempt::new(
-                RequestAttemptId(1),
-                RequestId(1),
-                1,
-                SimTime::zero(),
-                vec![],
-            ),
-            SimTime::zero(),
-        );
-        server.queue.as_mut().unwrap().enqueue(queue_item).unwrap();
-
-        // Now try to process another request - should be rejected
-        let attempt = RequestAttempt::new(
-            RequestAttemptId(2),
-            RequestId(2),
-            1,
-            SimTime::zero(),
-            vec![],
-        );
-
-        let result = server.process_request(&mut env, attempt);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RequestError::Rejected(_)));
-        assert_eq!(server.total_rejected(), 1);
-    }
-
-    #[test]
-    fn test_process_multiple_requests() {
-        let mut env = Environment::new();
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(5)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
-
-        // Process multiple requests
-        for i in 1..=3 {
-            let attempt = RequestAttempt::new(
-                RequestAttemptId(i),
-                RequestId(i),
-                1,
-                SimTime::zero(),
-                vec![],
-            );
-
-            let result = server.process_request(&mut env, attempt);
-            assert!(result.is_ok());
-            server.complete_request();
+    impl TestClient {
+        pub fn new(name: String) -> Self {
+            Self {
+                name,
+                responses_received: 0,
+                successful_responses: 0,
+            }
         }
-
-        assert_eq!(server.total_processed(), 3);
-        assert_eq!(server.total_rejected(), 0);
     }
 
-    #[test]
-    fn test_service_time_accumulation() {
-        let mut env = Environment::new();
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                100,
-            ))))
-            .build()
-            .unwrap();
+    impl Component for TestClient {
+        type Event = ClientEvent;
 
-        // Process 3 requests
-        for i in 1..=3 {
-            let attempt = RequestAttempt::new(
-                RequestAttemptId(i),
-                RequestId(i),
-                1,
-                SimTime::zero(),
-                vec![],
-            );
-
-            server.process_request(&mut env, attempt).unwrap();
-            server.complete_request();
-        }
-
-        // Total service time should be 300ms
-        assert_eq!(server.total_service_time, Duration::from_millis(300));
-        assert_eq!(
-            server.average_service_time(),
-            Some(Duration::from_millis(100))
-        );
-    }
-
-    #[test]
-    fn test_process_queued_requests() {
-        let mut env = Environment::new();
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(50))))
-            .queue(Box::new(FifoQueue::bounded(5)))
-            .build()
-            .unwrap();
-
-        // Test that the server can process requests and that queue functionality exists
-        let attempt = RequestAttempt::new(
-            RequestAttemptId(1),
-            RequestId(1),
-            1,
-            SimTime::zero(),
-            vec![],
-        );
-        
-        let result = server.process_request(&mut env, attempt);
-        assert!(result.is_ok());
-        
-        // Verify basic queue functionality
-        assert_eq!(server.queue_depth(), 0);
-        assert!(server.can_accept());
-        assert!(!server.is_at_capacity());
-    }
-
-    #[test]
-    fn test_emit_metrics_at() {
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
-
-        server.active_requests = 5;
-        server.total_processed = 100;
-        server.total_rejected = 10;
-
-        let timestamp = SimTime::from_millis(1000);
-        let metrics = server.emit_metrics_at(timestamp);
-
-        assert_eq!(metrics.len(), 5);
-
-        // Verify all metrics have the correct timestamp
-        for metric in &metrics {
-            match metric {
-                Metric::Gauge { timestamp: ts, .. } => assert_eq!(*ts, timestamp),
-                Metric::Counter { timestamp: ts, .. } => assert_eq!(*ts, timestamp),
-                _ => unreachable!("Test should only produce Gauge and Counter metrics"),
+        fn process_event(
+            &mut self,
+            _self_id: Key<Self::Event>,
+            event: &Self::Event,
+            scheduler: &mut Scheduler,
+        ) {
+            match event {
+                ClientEvent::ResponseReceived { success } => {
+                    self.responses_received += 1;
+                    if *success {
+                        self.successful_responses += 1;
+                    }
+                    println!(
+                        "[{}] Received response #{}: {} at {:?}",
+                        self.name,
+                        self.responses_received,
+                        if *success { "SUCCESS" } else { "FAILURE" },
+                        scheduler.time()
+                    );
+                }
+                ClientEvent::SendRequest => {
+                    // TestClient doesn't send requests, only receives responses
+                }
             }
         }
     }
 
     #[test]
-    fn test_initialize_resets_metrics() {
-        let mut env = Environment::new();
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
+    fn test_server_basic() {
+        let mut sim = Simulation::default();
 
-        // Set some state
-        server.active_requests = 5;
-        server.total_processed = 100;
-        server.total_rejected = 10;
-        server.total_service_time = Duration::from_secs(10);
+        // Create server with 2 thread capacity and 50ms service time
+        let server = Server::new("test-server".to_string(), 2, Duration::from_millis(50));
+        let server_id = sim.add_component(server);
 
-        // Initialize should reset
-        server.initialize(&mut env).unwrap();
+        // Create test client
+        let client = TestClient::new("test-client".to_string());
+        let client_id = sim.add_component(client);
 
-        assert_eq!(server.active_requests, 0);
-        assert_eq!(server.total_processed, 0);
-        assert_eq!(server.total_rejected, 0);
-        assert_eq!(server.total_service_time, Duration::ZERO);
+        // Send a request
+        sim.schedule(
+            SimTime::from_duration(Duration::from_millis(10)),
+            server_id,
+            ServerEvent::ProcessRequest { request_id: 1, client_id },
+        );
+
+        // Run simulation
+        Executor::timed(SimTime::from_duration(Duration::from_millis(200))).execute(&mut sim);
+
+        // Verify results
+        let server = sim.remove_component::<ServerEvent, Server>(server_id).unwrap();
+        let client = sim.remove_component::<ClientEvent, TestClient>(client_id).unwrap();
+
+        assert_eq!(server.requests_processed, 1);
+        assert_eq!(server.active_threads, 0);
+        assert_eq!(client.responses_received, 1);
+        assert_eq!(client.successful_responses, 1);
     }
 
     #[test]
-    fn test_shutdown_with_active_requests() {
-        let mut env = Environment::new();
-        let mut server = Server::builder()
-            .name("test-server")
-            .capacity(10)
-            .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
-                50,
-            ))))
-            .build()
-            .unwrap();
+    fn test_server_capacity_limit() {
+        let mut sim = Simulation::default();
 
-        server.active_requests = 3;
+        // Create server with 1 thread capacity and 100ms service time
+        let server = Server::new("test-server".to_string(), 1, Duration::from_millis(100));
+        let server_id = sim.add_component(server);
 
-        // Should succeed but print a warning
-        let result = server.shutdown(&mut env);
-        assert!(result.is_ok());
+        // Create test client
+        let client = TestClient::new("test-client".to_string());
+        let client_id = sim.add_component(client);
+
+        // Send two requests simultaneously
+        sim.schedule(
+            SimTime::from_duration(Duration::from_millis(10)),
+            server_id,
+            ServerEvent::ProcessRequest { request_id: 1, client_id },
+        );
+        sim.schedule(
+            SimTime::from_duration(Duration::from_millis(11)),
+            server_id,
+            ServerEvent::ProcessRequest { request_id: 2, client_id },
+        );
+
+        // Run simulation
+        Executor::timed(SimTime::from_duration(Duration::from_millis(200))).execute(&mut sim);
+
+        // Verify results
+        let server = sim.remove_component::<ServerEvent, Server>(server_id).unwrap();
+        let client = sim.remove_component::<ClientEvent, TestClient>(client_id).unwrap();
+
+        assert_eq!(server.requests_processed, 1);
+        assert_eq!(server.requests_rejected, 1);
+        assert_eq!(client.responses_received, 2);
+        assert_eq!(client.successful_responses, 1);
+    }
+
+    #[test]
+    fn test_server_with_queue() {
+        let mut sim = Simulation::default();
+
+        // Create server with queue
+        let server = Server::new("test-server".to_string(), 1, Duration::from_millis(50))
+            .with_queue(Box::new(FifoQueue::bounded(5)));
+        let server_id = sim.add_component(server);
+
+        // Create test client
+        let client = TestClient::new("test-client".to_string());
+        let client_id = sim.add_component(client);
+
+        // Send three requests
+        for i in 1..=3 {
+            sim.schedule(
+                SimTime::from_duration(Duration::from_millis(10 + i)),
+                server_id,
+                ServerEvent::ProcessRequest { request_id: i, client_id },
+            );
+        }
+
+        // Run simulation
+        Executor::timed(SimTime::from_duration(Duration::from_millis(300))).execute(&mut sim);
+
+        // Verify results
+        let server = sim.remove_component::<ServerEvent, Server>(server_id).unwrap();
+
+        // With queue, all requests should eventually be processed
+        assert_eq!(server.requests_processed, 3);
+        assert_eq!(server.requests_rejected, 0);
+        assert_eq!(server.active_threads, 0);
+    }
+
+    #[test]
+    fn test_server_metrics() {
+        let mut sim = Simulation::default();
+
+        let server = Server::new("metrics-server".to_string(), 4, Duration::from_millis(30));
+        let server_id = sim.add_component(server);
+
+        let client = TestClient::new("metrics-client".to_string());
+        let client_id = sim.add_component(client);
+
+        // Send multiple requests with enough capacity
+        for i in 1..=4 {
+            sim.schedule(
+                SimTime::from_duration(Duration::from_millis(10 * i)),
+                server_id,
+                ServerEvent::ProcessRequest { request_id: i, client_id },
+            );
+        }
+
+        // Run simulation
+        Executor::timed(SimTime::from_duration(Duration::from_millis(200))).execute(&mut sim);
+
+        // Check metrics
+        let server = sim.remove_component::<ServerEvent, Server>(server_id).unwrap();
+        let metrics = server.get_metrics();
+
+        assert_eq!(server.requests_processed, 4);
+        assert!(!metrics.get_metrics().is_empty());
+
+        let server_metrics = metrics.get_component_metrics("metrics-server");
+        assert!(!server_metrics.is_empty());
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! This demonstrates the new Component-based API with a client-server interaction.
 
-use des_components::{SimpleClient, SimpleServer, ClientEvent, ServerEvent};
+use des_components::{SimpleClient, Server, ClientEvent, ServerEvent};
 use des_core::{Execute, Executor, Simulation, SimTime};
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ fn test_client_server_integration() {
     let mut sim = Simulation::default();
 
     // Create a server with capacity 2 and 50ms service time
-    let server = SimpleServer::new("web-server".to_string(), Duration::from_millis(50), 2);
+    let server = Server::new("web-server".to_string(), 2, Duration::from_millis(50));
     let server_id = sim.add_component(server);
 
     // Create a client that sends 5 requests every 100ms
@@ -37,18 +37,18 @@ fn test_client_server_integration() {
 
     // Check results
     let client = sim.remove_component::<ClientEvent, SimpleClient>(client_id).unwrap();
-    let server = sim.remove_component::<ServerEvent, SimpleServer>(server_id).unwrap();
+    let server = sim.remove_component::<ServerEvent, Server>(server_id).unwrap();
 
     println!("Final Results:");
     println!("  Client '{}' sent {} requests", client.name, client.requests_sent);
     println!("  Server '{}' processed {} requests", server.name, server.requests_processed);
-    println!("  Server final load: {}/{}", server.current_load, server.capacity);
+    println!("  Server final load: {}/{}", server.active_threads, server.thread_capacity);
 
     // Verify expected behavior
     assert_eq!(client.requests_sent, 5, "Client should have sent 5 requests");
     // Note: Server might not have processed all requests yet due to timing
     assert!(server.requests_processed <= 5, "Server shouldn't process more than 5 requests");
-    assert!(server.current_load <= server.capacity, "Server load should not exceed capacity");
+    assert!(server.active_threads <= server.thread_capacity, "Server load should not exceed capacity");
 
     println!("\n=== Test Passed ===\n");
 }
@@ -60,7 +60,7 @@ fn test_server_overload_scenario() {
     let mut sim = Simulation::default();
 
     // Create a server with capacity 1 and slow service time (200ms)
-    let server = SimpleServer::new("slow-server".to_string(), Duration::from_millis(200), 1);
+    let server = Server::new("slow-server".to_string(), 1, Duration::from_millis(200));
     let server_id = sim.add_component(server);
 
     // Create a fast client that sends 3 requests every 50ms
@@ -84,12 +84,12 @@ fn test_server_overload_scenario() {
 
     // Check results
     let client = sim.remove_component::<ClientEvent, SimpleClient>(client_id).unwrap();
-    let server = sim.remove_component::<ServerEvent, SimpleServer>(server_id).unwrap();
+    let server = sim.remove_component::<ServerEvent, Server>(server_id).unwrap();
 
     println!("Final Results:");
     println!("  Client '{}' sent {} requests", client.name, client.requests_sent);
     println!("  Server '{}' processed {} requests", server.name, server.requests_processed);
-    println!("  Server final load: {}/{}", server.current_load, server.capacity);
+    println!("  Server final load: {}/{}", server.active_threads, server.thread_capacity);
 
     // Verify expected behavior - with fast client and slow server, some requests should be rejected
     assert_eq!(client.requests_sent, 3, "Client should have sent 3 requests");

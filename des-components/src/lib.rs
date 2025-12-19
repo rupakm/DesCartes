@@ -8,12 +8,10 @@ pub mod builder;
 pub mod request;
 pub mod error;
 
-
-// pub mod server;  // TODO: Update to use new Component API
 pub mod simple_client;
-pub mod simple_server;
+pub mod server;
 pub use simple_client::{SimpleClient, ClientEvent};
-pub use simple_server::{SimpleServer, ServerEvent};
+pub use server::{Server, ServerEvent};
 
 pub use builder::{
     BuilderState, IntoOption, Set, Unset, Validate, ValidationError, ValidationResult,
