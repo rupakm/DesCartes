@@ -1,0 +1,99 @@
+use des_components::queue::FifoQueue;
+use des_components::server::Server;
+use des_components::ConstantServiceTime;
+use des_core::{Environment, RequestAttempt, RequestAttemptId, RequestId, SimTime};
+use std::time::Duration;
+
+#[test]
+fn test_server_queue_integration() {
+    let mut env = Environment::new();
+
+    // Create a server with capacity 1 and queue capacity 2
+    // Service time is 100ms
+    let mut server = Server::builder()
+        .name("test-server")
+        .capacity(1)
+        .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
+            100,
+        ))))
+        .queue(Box::new(FifoQueue::bounded(2)))
+        .build()
+        .unwrap();
+
+    // Helper to create attempts
+    let create_attempt = |id: u64| {
+        RequestAttempt::new(
+            RequestAttemptId(id),
+            RequestId(id),
+            1,
+            SimTime::zero(),
+            vec![],
+        )
+    };
+
+    // 1. Send Request 1 - should be processed immediately
+    let result1 = server.process_request(&mut env, create_attempt(1));
+    assert!(result1.is_ok()); // Returns Ok(Response) immediately because we're not using async/await fully yet in this test setup
+                              // Note: In the current implementation of Server::process_request, it returns Ok(Response)
+                              // if processed immediately (synchronously in the model logic), or Err(Rejected) if queued/rejected.
+                              // The "synchronous" processing actually schedules a completion event.
+
+    assert_eq!(server.active_requests(), 1);
+    assert_eq!(server.queue_depth(), 0);
+
+    // 2. Send Request 2 - should be queued
+    let result2 = server.process_request(&mut env, create_attempt(2));
+    assert!(result2.is_err()); // Should be "Rejected" with "queued" message
+    assert_eq!(server.active_requests(), 1);
+    assert_eq!(server.queue_depth(), 1);
+
+    // 3. Send Request 3 - should be queued
+    let result3 = server.process_request(&mut env, create_attempt(3));
+    assert!(result3.is_err());
+    assert_eq!(server.active_requests(), 1);
+    assert_eq!(server.queue_depth(), 2);
+
+    // 4. Send Request 4 - should be rejected (queue full)
+    let result4 = server.process_request(&mut env, create_attempt(4));
+    assert!(result4.is_err());
+    // Check it's actually rejected, not queued
+    // In a real scenario we'd check the error message or type more specifically
+    assert_eq!(server.total_rejected(), 1);
+    assert_eq!(server.queue_depth(), 2);
+
+    // 5. Advance time to complete Request 1 (100ms)
+    // We need to run the environment.
+    // The server scheduled an event at 100ms.
+    env.run_until(SimTime::from_millis(100)).unwrap();
+
+    // Manually trigger completion on the server (since we don't have the full event loop wiring in this unit test style)
+    // In a full simulation, the event handler would call server.complete_request()
+    // server.complete_request();
+
+    assert_eq!(server.active_requests(), 0);
+    assert_eq!(server.total_processed(), 1);
+
+    // 6. Process queued requests
+    // The server should now be able to take from the queue
+    let responses = server.process_queued_requests(&mut env);
+    assert_eq!(responses.len(), 1); // Should pick up one request (capacity is 1)
+    assert!(responses[0].is_ok());
+
+    assert_eq!(server.active_requests(), 1); // Request 2 is now active
+    assert_eq!(server.queue_depth(), 1); // Request 3 is still queued
+
+    // 7. Advance time for Request 2 (another 100ms -> 200ms total)
+    env.run_until(SimTime::from_millis(200)).unwrap();
+    // server.complete_request();
+
+    assert_eq!(server.active_requests(), 0);
+    assert_eq!(server.total_processed(), 2);
+
+    // 8. Process next queued request
+    let responses = server.process_queued_requests(&mut env);
+    assert_eq!(responses.len(), 1);
+    assert!(responses[0].is_ok());
+
+    assert_eq!(server.active_requests(), 1); // Request 3 is now active
+    assert_eq!(server.queue_depth(), 0); // Queue empty
+}

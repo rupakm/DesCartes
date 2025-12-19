@@ -1,0 +1,74 @@
+use des_components::client::{Client, SimpleRequestGenerator};
+use des_components::server::Server;
+use des_components::{ConstantArrivalPattern, ConstantServiceTime};
+use des_core::Environment;
+use std::time::Duration;
+
+#[test]
+fn test_client_server_integration() {
+    let mut env = Environment::new();
+
+    // Server: Capacity 10, Service Time 50ms
+    let mut server = Server::builder()
+        .name("web-server")
+        .capacity(10)
+        .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
+            50,
+        ))))
+        .build()
+        .unwrap();
+
+    // Client: Arrival every 100ms
+    let mut client = Client::builder()
+        .name("web-client")
+        .arrival_pattern(Box::new(ConstantArrivalPattern::new(
+            Duration::from_millis(100),
+        )))
+        .request_generator(Box::new(SimpleRequestGenerator::new()))
+        .build()
+        .unwrap();
+
+    // Simulation loop for 5 requests
+    // In a real simulation, this would be driven by the event loop.
+    // Here we manually drive the client and server interaction to verify integration.
+
+    for _ in 0..5 {
+        // 1. Client generates request
+        // In a real sim, an event would trigger this.
+        let response = client.send_request(&mut env, &mut server);
+
+        assert!(response.is_ok());
+        let resp = response.unwrap();
+
+        // Since server has capacity and service time is 50ms,
+        // and we are calling send_request which calls server.process_request,
+        // the server processes it "immediately" in terms of logic (returns Ok),
+        // but schedules completion 50ms later.
+
+        // Verify response details
+        assert!(resp.is_success());
+
+        // Advance time by inter-arrival time (100ms)
+        // This allows the server to "finish" processing (since service time is 50ms)
+        let current_time = env.now();
+        env.run_until(current_time + Duration::from_millis(100))
+            .unwrap();
+    }
+
+    // Final update to process the last request completion
+    // In a real simulation, this would happen automatically when the next event is processed
+    // or when we query the server state
+    let current_time = env.now();
+    // Advance time a bit more to ensure the last request completes
+    env.run_until(current_time + Duration::from_millis(50)).unwrap();
+    
+    // Trigger a state update by calling process_queued_requests which calls update_state
+    let _ = server.process_queued_requests(&mut env);
+
+    assert_eq!(client.total_requests(), 5);
+    assert_eq!(client.total_successful(), 5);
+    assert_eq!(client.total_failed(), 0);
+
+    assert_eq!(server.total_processed(), 5);
+    assert_eq!(server.total_rejected(), 0);
+}

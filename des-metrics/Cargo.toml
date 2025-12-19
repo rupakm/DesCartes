@@ -1,0 +1,17 @@
+[package]
+name = "des-metrics"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+des-core = { path = "../des-core" }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

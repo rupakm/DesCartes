@@ -1,0 +1,18 @@
+[package]
+name = "des-components"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+des-core = { path = "../des-core" }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

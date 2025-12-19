@@ -1,0 +1,17 @@
+[package]
+name = "des-viz"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+des-core = { path = "../des-core" }
+des-metrics = { path = "../des-metrics" }
+thiserror = { workspace = true }
+plotters = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

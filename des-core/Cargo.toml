@@ -1,0 +1,31 @@
+[package]
+name = "des-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+metrics = "0.24"
+
+[dependencies.uuid]
+version = "1.19.0"
+# Lets you generate random UUIDs
+features = [
+    "v7",
+]
+
+[dev-dependencies]
+proptest = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
+
+[features]
+default = ["formal"]
+formal = []

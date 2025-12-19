@@ -1,0 +1,265 @@
+# Implementation Plan
+
+- [x] 1. Set up project structure and core types
+  - Create Cargo workspace with crates: des-core, des-components, des-formal, des-metrics, des-viz
+  - Define core type aliases and newtypes (SimTime, EventId, RequestId, etc.)
+  - Set up error types using thiserror for each module
+  - Configure dependencies (tokio, rand, thiserror, serde)
+  - _Requirements: 1.1, 6.1, 9.1_
+
+- [x] 2. Implement core simulation time and event system
+  - [x] 2.1 Implement SimTime with nanosecond precision
+    - Create SimTime newtype wrapping u64 nanoseconds
+    - Implement arithmetic operations and conversions to/from Duration
+    - Implement Ord, PartialOrd for time comparisons
+    - _Requirements: 1.4_
+  - [x] 2.2 Implement Event and EventScheduler
+    - Create Event struct with id, time, priority, and payload
+    - Implement EventScheduler using BinaryHeap for priority queue
+    - Ensure deterministic ordering for same-time events using sequence numbers
+    - Write schedule, peek_next, and pop_next methods
+    - _Requirements: 1.3, 1.5_
+
+
+- [x] 4. Implement Request/RequestAttempt data models
+  - [x] 4.1 Create Request and RequestAttempt structs
+    - Define Request with id, created_at, attempts, and status tracking
+    - Define RequestAttempt with id, request_id, attempt_number, and timing
+    - Implement AttemptStatus and RequestStatus enums
+    - Add helper methods for latency calculation
+    - _Requirements: 2.1, 2.2, 7.1, 7.4_
+  - [x] 4.2 Create Response types
+    - Define Response struct with attempt_id, request_id, and status
+    - Implement ResponseStatus enum with Ok and Error variants
+    - _Requirements: 2.1_
+
+- [x] 5. Implement Component trait and base abstractions
+  - [x] 5.1 Define Component trait
+    - Create Component trait with name(), initialize(), shutdown(), and emit_metrics()
+    - Make trait object-safe with Send bound
+    - _Requirements: 3.1, 3.4, 9.1_
+  - [x] 5.2 Create builder pattern infrastructure
+    - Implement builder pattern helpers for type-safe construction
+    - Add compile-time validation for required fields
+    - _Requirements: 6.2, 6.3_
+
+- [x] 6. Implement Queue components
+  - [x] 6.1 Define Queue trait
+    - Create Queue trait with enqueue, dequeue, len, capacity methods
+    - Define QueueItem and QueueError types
+    - _Requirements: 2.3, 3.1_
+  - [x] 6.2 Implement FifoQueue
+    - Use VecDeque for FIFO ordering
+    - Support optional capacity limits
+    - Track queue depth metrics
+    - _Requirements: 2.3_
+  - [x] 6.3 Implement PriorityQueue
+    - Use BinaryHeap for priority-based ordering
+    - Support optional capacity limits
+    - _Requirements: 2.3_
+
+- [x] 7. Implement Server component
+  - [x] 7.1 Create Server struct and builder
+    - Define Server with capacity, service_time distribution, and queue
+    - Implement ServerBuilder with type-safe configuration
+    - Add validation for capacity and service time parameters
+    - _Requirements: 2.1, 6.1, 6.2_
+  - [x] 7.2 Implement request processing logic
+    - Write process_request() async method
+    - Handle capacity limits and queuing
+    - Sample service times from distribution
+    - Emit metrics for queue depth, utilization, and latency
+    - _Requirements: 2.1, 3.4, 7.1_
+
+- [-] 8. Implement Client component with retry support
+  - [ ] 8.1 Create Client struct and builder
+    - Define Client with arrival_pattern, request_generator, retry_policy, and timeout
+    - Implement ClientBuilder for configuration
+    - Define ArrivalPattern and RequestGenerator traits
+    - _Requirements: 2.2, 6.1, 6.2_
+  - [ ] 8.2 Implement send_request with retry logic
+    - Write send_request() async method with retry loop
+    - Implement timeout handling using timeout_after helper
+    - Track Request and RequestAttempt separately
+    - Integrate with metrics for request/attempt tracking
+    - _Requirements: 2.2, 2.5, 7.1, 7.4_
+
+- [x] 9. Implement arrival patterns and distributions
+  - [x] 9.1 Implement common arrival patterns
+    - Create PoissonArrivals using exponential distribution
+    - Create ConstantArrivals with fixed inter-arrival time
+    - Create BurstyArrivals with periodic bursts
+    - _Requirements: 2.2_
+  - [x] 9.2 Implement service time distributions
+    - Create ExponentialDistribution wrapper
+    - Create ConstantDistribution wrapper
+    - Create UniformDistribution wrapper
+    - Use rand_distr crate for implementations
+    - _Requirements: 2.1_
+
+- [ ] 10. Implement Throttle components
+  - [ ] 10.1 Implement TokenBucketThrottle
+    - Create TokenBucketThrottle with capacity and refill_rate
+    - Write acquire() async method that waits for tokens
+    - Implement token refill logic based on simulation time
+    - _Requirements: 2.4_
+  - [ ] 10.2 Implement LeakyBucketThrottle
+    - Create LeakyBucketThrottle with capacity and leak_rate
+    - Write acquire() method with leak calculation
+    - _Requirements: 2.4_
+
+- [ ] 11. Implement RetryPolicy components
+  - [ ] 11.1 Create RetryPolicy trait
+    - Define RetryPolicy trait with should_retry() and next_delay()
+    - _Requirements: 2.5, 3.1_
+  - [ ] 11.2 Implement ExponentialBackoff
+    - Create ExponentialBackoff with base_delay, max_delay, multiplier
+    - Add optional jitter support
+    - Implement max_attempts limit
+    - _Requirements: 2.5_
+  - [ ] 11.3 Implement CircuitBreaker
+    - Create CircuitBreaker with failure_threshold and timeout
+    - Implement state machine (Closed, Open, HalfOpen)
+    - Track failure counts and state transitions
+    - _Requirements: 2.5_
+
+- [ ] 12. Implement metrics collection system
+  - [ ] 12.1 Create MetricsCollector and backend trait
+    - Define MetricsBackend trait with record() and flush()
+    - Implement MetricsCollector with pluggable backend
+    - Create Metric enum (Counter, Gauge, Histogram)
+    - Implement InMemoryBackend for testing
+    - _Requirements: 7.1, 7.2_
+  - [ ] 12.2 Implement RequestTracker
+    - Create RequestTracker to track active and completed requests/attempts
+    - Write start_request(), start_attempt(), complete_attempt(), complete_request()
+    - Implement latency calculation methods for requests and attempts
+    - Compute goodput, throughput, retry_rate, timeout_rate
+    - _Requirements: 7.1, 7.3, 7.4_
+  - [ ] 12.3 Implement MetricSeries and statistics
+    - Create MetricSeries to store time-series data
+    - Implement mean(), percentile(), variance() calculations
+    - Create LatencyStats struct with p50, p95, p99, p999
+    - _Requirements: 7.3_
+
+- [ ] 13. Implement structured logging
+  - [ ] 13.1 Create Logger and LogBackend
+    - Define LogBackend trait for pluggable logging
+    - Create Logger with level filtering
+    - Define LogEntry with time, level, component, message, context
+    - Implement InMemoryLogBackend and FileLogBackend
+    - _Requirements: 7.6_
+  - [ ] 13.2 Integrate logging into Environment
+    - Add logger field to Environment
+    - Log key simulation events (process spawn, event schedule, component lifecycle)
+    - _Requirements: 7.6_
+
+- [ ] 14. Implement Lyapunov function support
+  - [ ] 14.1 Create LyapunovFunction trait
+    - Define LyapunovFunction trait with evaluate() and drift_bound()
+    - Create SimulationState struct to capture system state
+    - _Requirements: 4.1, 9.1_
+  - [ ] 14.2 Implement LyapunovEvaluator
+    - Create LyapunovEvaluator to manage multiple functions
+    - Write evaluate_step() to check drift conditions after each step
+    - Track LyapunovSample history with time, value, drift
+    - Report violations with simulation state details
+    - _Requirements: 4.2, 4.3, 4.4, 4.5_
+
+- [ ] 15. Implement certificate verification
+  - [ ] 15.1 Create Certificate trait and verifier
+    - Define Certificate trait with name() and check()
+    - Create CertificateResult enum (Satisfied, Violated)
+    - Implement CertificateVerifier to manage certificates
+    - _Requirements: 5.1, 9.1_
+  - [ ] 15.2 Implement built-in certificate types
+    - Create LatencyBoundCertificate for latency constraints
+    - Create StabilityInvariant for queue bounds
+    - Create ThroughputCertificate for minimum throughput
+    - _Requirements: 5.1_
+  - [ ] 15.3 Integrate verification into simulation loop
+    - Check certificates after each simulation step
+    - Halt simulation on violation and capture counterexample
+    - Generate verification report at end of simulation
+    - _Requirements: 5.2, 5.3, 5.4_
+  - [ ] 15.4 Implement certificate composition
+    - Create AndCertificate and OrCertificate combinators
+    - Allow building complex certificates from simple ones
+    - _Requirements: 5.5_
+
+- [ ] 16. Implement visualization library
+  - [ ] 16.1 Create plotting abstractions
+    - Define PlotBackend trait with create_time_series(), create_histogram()
+    - Create Plot struct to represent chart configuration
+    - Define ExportFormat enum (Png, Svg, Html)
+    - _Requirements: 8.1, 8.4, 9.1_
+  - [ ] 16.2 Implement PlottersBackend
+    - Integrate plotters crate as default backend
+    - Implement time-series plots for metrics over time
+    - Implement histogram plots for latency distributions
+    - Add built-in chart types for queue depth, latency, throughput
+    - _Requirements: 8.1, 8.3, 8.4_
+  - [ ] 16.3 Implement export functionality
+    - Write export() method to render plots to PNG, SVG, HTML
+    - Support customization of styles and layouts
+    - _Requirements: 8.2, 8.5_
+
+- [ ] 17. Create high-level Simulation builder API
+  - [ ] 17.1 Implement Simulation struct
+    - Create Simulation wrapper around Environment
+    - Provide builder API for declarative simulation construction
+    - Support add_server(), add_client(), add_component() methods
+    - _Requirements: 3.2, 6.1, 6.2_
+  - [ ] 17.2 Implement convenience methods
+    - Write run_for() as wrapper around run_until()
+    - Create metrics() accessor for MetricsCollector
+    - Create visualize() to get Visualizer instance
+    - Add statistics() for quick metric summaries
+    - _Requirements: 7.3, 8.1_
+
+- [ ] 18. Implement component composition and pipelines
+  - [ ] 18.1 Create component chaining mechanism
+    - Define ComponentChain to connect components
+    - Implement type-safe interface validation at compile time
+    - Support pipeline construction with >> operator or builder
+    - _Requirements: 3.2, 3.3_
+  - [ ] 18.2 Add distributed tracing support
+    - Create TraceContext for request tracking across components
+    - Propagate trace context through component calls
+    - Emit trace spans to metrics collector
+    - _Requirements: 7.4_
+
+- [ ] 19. Create comprehensive examples
+  - [ ] 19.1 Write M/M/1 queue example
+    - Demonstrate basic server and client setup
+    - Show metrics collection and visualization
+    - _Requirements: 2.1, 2.2, 7.1, 8.1_
+  - [ ] 19.2 Write retry and timeout example
+    - Show client with retry policy and timeouts
+    - Demonstrate request vs attempt metrics
+    - _Requirements: 2.5, 7.1_
+  - [ ] 19.3 Write Lyapunov function example
+    - Create simple queue stability Lyapunov function
+    - Show drift tracking and violation detection
+    - _Requirements: 4.1, 4.2, 4.3_
+  - [ ] 19.4 Write certificate verification example
+    - Demonstrate latency bound and stability certificates
+    - Show counterexample generation on violation
+    - _Requirements: 5.1, 5.2, 5.3_
+
+- [ ] 20. Write documentation and API docs
+  - [ ] 20.1 Write rustdoc for all public APIs
+    - Document all public types, traits, and methods
+    - Include usage examples in doc comments
+    - Add module-level documentation
+    - _Requirements: 6.5_
+  - [ ] 20.2 Create user guide
+    - Write getting started guide
+    - Document common patterns and best practices
+    - Explain formal reasoning features
+    - _Requirements: 6.5_
+  - [ ] 20.3 Create architecture documentation
+    - Document extension points for custom components
+    - Explain trait implementations for extensibility
+    - Document unsafe escape hatches with safety requirements
+    - _Requirements: 9.1, 9.5_

@@ -1,0 +1,454 @@
+//! Event scheduling and management
+//!
+//! This module provides the core event system for discrete event simulation,
+//! including event definitions and a priority-based event scheduler.
+
+use crate::error::EventError;
+use crate::time::SimTime;
+use crate::types::EventId;
+use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+
+/// Event payload that can be attached to events
+///
+/// This is a flexible container for event-specific data. Users can extend
+/// this enum with their own event types.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EventPayload {
+    /// Generic event with no specific payload
+    Generic,
+    /// Custom event with arbitrary data
+    Custom(Vec<u8>),
+    /// Process wakeup event
+    ProcessWakeup { process_id: u64 },
+    /// Timeout event
+    Timeout { context: String },
+}
+
+/// An event in the simulation
+///
+/// Events are the fundamental unit of simulation activity. Each event has:
+/// - A unique ID for tracking
+/// - A scheduled time when it should occur
+/// - A sequence number for deterministic ordering of events at the same time
+/// - An optional payload with event-specific data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Event {
+    /// Unique identifier for this event
+    id: EventId,
+    /// Simulation time when this event should occur
+    time: SimTime,
+    /// Sequence number for deterministic ordering
+    sequence: u64,
+    /// Event-specific data
+    payload: EventPayload,
+}
+
+impl Event {
+    /// Create a new event
+    pub fn new(id: EventId, time: SimTime, sequence: u64) -> Self {
+        Self {
+            id,
+            time,
+            sequence,
+            payload: EventPayload::Generic,
+        }
+    }
+
+    /// Create a new event with a payload
+    pub fn with_payload(
+        id: EventId,
+        time: SimTime,
+        sequence: u64,
+        payload: EventPayload,
+    ) -> Self {
+        Self {
+            id,
+            time,
+            sequence,
+            payload,
+        }
+    }
+
+    /// Get the event ID
+    pub fn id(&self) -> EventId {
+        self.id
+    }
+
+    /// Get the scheduled time
+    pub fn time(&self) -> SimTime {
+        self.time
+    }
+
+
+
+    /// Get the sequence number
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    /// Get a reference to the payload
+    pub fn payload(&self) -> &EventPayload {
+        &self.payload
+    }
+
+    /// Get a mutable reference to the payload
+    pub fn payload_mut(&mut self) -> &mut EventPayload {
+        &mut self.payload
+    }
+
+    /// Consume the event and return the payload
+    pub fn into_payload(self) -> EventPayload {
+        self.payload
+    }
+}
+
+/// Wrapper for events in the scheduler's priority queue
+///
+/// This wrapper implements reverse ordering so that BinaryHeap (which is a max-heap)
+/// behaves as a min-heap for our purposes.
+#[derive(Debug, Clone)]
+struct ScheduledEvent(Event);
+
+impl PartialEq for ScheduledEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.time == other.0.time && self.0.sequence == other.0.sequence
+    }
+}
+
+impl Eq for ScheduledEvent {}
+
+impl PartialOrd for ScheduledEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ScheduledEvent {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reverse ordering for min-heap behavior
+        // First compare by time (earlier times have higher priority)
+        other
+            .0
+            .time
+            .cmp(&self.0.time)
+            // Then by sequence number for deterministic ordering
+            .then_with(|| other.0.sequence.cmp(&self.0.sequence))
+    }
+}
+
+/// Event scheduler using a priority queue
+///
+/// The EventScheduler maintains a priority queue of events ordered by:
+/// 1. Simulation time (earlier events first)
+/// 2. Sequence number (lower sequence numbers first, for determinism)
+///
+/// This ensures deterministic event ordering even when multiple events
+/// are scheduled for the same simulation time.
+pub struct EventScheduler {
+    /// Priority queue of scheduled events
+    queue: BinaryHeap<ScheduledEvent>,
+    /// Next event ID to assign
+    next_id: u64,
+    /// Next sequence number for deterministic ordering
+    next_sequence: u64,
+}
+
+impl EventScheduler {
+    /// Create a new empty event scheduler
+    pub fn new() -> Self {
+        Self {
+            queue: BinaryHeap::new(),
+            next_id: 0,
+            next_sequence: 0,
+        }
+    }
+
+    /// Schedule a new event
+    ///
+    /// Returns the ID of the scheduled event.
+    ///
+    /// # Arguments
+    /// * `time` - The simulation time when the event should occur
+    /// * `payload` - The event payload
+    ///
+    /// # Examples
+    /// ```
+    /// # use des_core::event::{EventScheduler, EventPayload};
+    /// # use des_core::SimTime;
+    /// let mut scheduler = EventScheduler::new();
+    /// let event_id = scheduler.schedule(
+    ///     SimTime::from_millis(100),
+    ///     EventPayload::Generic,
+    /// );
+    /// ```
+    pub fn schedule(&mut self, time: SimTime, payload: EventPayload) -> EventId {
+        let id = EventId(self.next_id);
+        self.next_id += 1;
+
+        let sequence = self.next_sequence;
+        self.next_sequence += 1;
+
+        let event = Event::with_payload(id, time, sequence, payload);
+        self.queue.push(ScheduledEvent(event));
+
+        id
+    }
+
+    /// Peek at the next event without removing it
+    ///
+    /// Returns `None` if the queue is empty.
+    pub fn peek_next(&self) -> Option<&Event> {
+        self.queue.peek().map(|scheduled| &scheduled.0)
+    }
+
+    /// Remove and return the next event
+    ///
+    /// Returns an error if the queue is empty.
+    pub fn pop_next(&mut self) -> Result<Event, EventError> {
+        self.queue
+            .pop()
+            .map(|scheduled| scheduled.0)
+            .ok_or(EventError::EmptyQueue)
+    }
+
+    /// Check if the scheduler has any pending events
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+
+    /// Get the number of pending events
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    /// Clear all pending events
+    pub fn clear(&mut self) {
+        self.queue.clear();
+    }
+}
+
+impl Default for EventScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_event_creation() {
+        let event = Event::new(
+            EventId(1),
+            SimTime::from_millis(100),
+            0,
+        );
+
+        assert_eq!(event.id(), EventId(1));
+        assert_eq!(event.time(), SimTime::from_millis(100));
+        assert_eq!(event.sequence(), 0);
+    }
+
+    #[test]
+    fn test_event_with_payload() {
+        let payload = EventPayload::Timeout {
+            context: "test".to_string(),
+        };
+        let event = Event::with_payload(
+            EventId(1),
+            SimTime::from_millis(100),
+            0,
+            payload,
+        );
+
+        match event.payload() {
+            EventPayload::Timeout { context } => assert_eq!(context, "test"),
+            _ => panic!("Wrong payload type"),
+        }
+    }
+
+    #[test]
+    fn test_scheduler_basic() {
+        let mut scheduler = EventScheduler::new();
+
+        assert!(scheduler.is_empty());
+        assert_eq!(scheduler.len(), 0);
+
+        let id = scheduler.schedule(
+            SimTime::from_millis(100),
+            EventPayload::Generic,
+        );
+
+        assert!(!scheduler.is_empty());
+        assert_eq!(scheduler.len(), 1);
+        assert_eq!(id, EventId(0));
+    }
+
+    #[test]
+    fn test_scheduler_ordering_by_time() {
+        let mut scheduler = EventScheduler::new();
+
+        // Schedule events in reverse time order
+        scheduler.schedule(
+            SimTime::from_millis(300),
+            EventPayload::Generic,
+        );
+        scheduler.schedule(
+            SimTime::from_millis(100),
+            EventPayload::Generic,
+        );
+        scheduler.schedule(
+            SimTime::from_millis(200),
+            EventPayload::Generic,
+        );
+
+        // Should come out in time order
+        let e1 = scheduler.pop_next().unwrap();
+        assert_eq!(e1.time(), SimTime::from_millis(100));
+
+        let e2 = scheduler.pop_next().unwrap();
+        assert_eq!(e2.time(), SimTime::from_millis(200));
+
+        let e3 = scheduler.pop_next().unwrap();
+        assert_eq!(e3.time(), SimTime::from_millis(300));
+    }
+
+    #[test]
+    fn test_scheduler_ordering_by_sequence() {
+        let mut scheduler = EventScheduler::new();
+
+        // Schedule events at same time - should come out in sequence order
+        let time = SimTime::from_millis(100);
+        let id1 = scheduler.schedule(time, EventPayload::Generic);
+        let id2 = scheduler.schedule(time, EventPayload::Generic);
+        let id3 = scheduler.schedule(time, EventPayload::Generic);
+
+        // Should come out in scheduling order (sequence order)
+        let e1 = scheduler.pop_next().unwrap();
+        assert_eq!(e1.id(), id1);
+
+        let e2 = scheduler.pop_next().unwrap();
+        assert_eq!(e2.id(), id2);
+
+        let e3 = scheduler.pop_next().unwrap();
+        assert_eq!(e3.id(), id3);
+    }
+
+    #[test]
+    fn test_scheduler_deterministic_ordering() {
+        let mut scheduler = EventScheduler::new();
+
+        // Schedule multiple events at same time
+        let time = SimTime::from_millis(100);
+
+        let id1 = scheduler.schedule(time, EventPayload::Generic);
+        let id2 = scheduler.schedule(time, EventPayload::Generic);
+        let id3 = scheduler.schedule(time, EventPayload::Generic);
+
+        // Should come out in scheduling order (deterministic via sequence numbers)
+        let e1 = scheduler.pop_next().unwrap();
+        assert_eq!(e1.id(), id1);
+
+        let e2 = scheduler.pop_next().unwrap();
+        assert_eq!(e2.id(), id2);
+
+        let e3 = scheduler.pop_next().unwrap();
+        assert_eq!(e3.id(), id3);
+    }
+
+    #[test]
+    fn test_scheduler_peek() {
+        let mut scheduler = EventScheduler::new();
+
+        scheduler.schedule(
+            SimTime::from_millis(100),
+            EventPayload::Generic,
+        );
+
+        // Peek should not remove the event
+        let peeked = scheduler.peek_next().unwrap();
+        assert_eq!(peeked.time(), SimTime::from_millis(100));
+        assert_eq!(scheduler.len(), 1);
+
+        // Pop should remove it
+        let popped = scheduler.pop_next().unwrap();
+        assert_eq!(popped.time(), SimTime::from_millis(100));
+        assert_eq!(scheduler.len(), 0);
+    }
+
+    #[test]
+    fn test_scheduler_empty_queue() {
+        let mut scheduler = EventScheduler::new();
+
+        assert!(scheduler.peek_next().is_none());
+        assert!(scheduler.pop_next().is_err());
+
+        match scheduler.pop_next() {
+            Err(EventError::EmptyQueue) => (),
+            _ => panic!("Expected EmptyQueue error"),
+        }
+    }
+
+    #[test]
+    fn test_scheduler_clear() {
+        let mut scheduler = EventScheduler::new();
+
+        scheduler.schedule(
+            SimTime::from_millis(100),
+            EventPayload::Generic,
+        );
+        scheduler.schedule(
+            SimTime::from_millis(200),
+            EventPayload::Generic,
+        );
+
+        assert_eq!(scheduler.len(), 2);
+
+        scheduler.clear();
+
+        assert_eq!(scheduler.len(), 0);
+        assert!(scheduler.is_empty());
+    }
+
+    #[test]
+    fn test_complex_ordering() {
+        let mut scheduler = EventScheduler::new();
+
+        // Mix of times and sequences
+        let id1 = scheduler.schedule(SimTime::from_millis(100), EventPayload::Generic);
+        let id2 = scheduler.schedule(SimTime::from_millis(100), EventPayload::Generic);
+        let id3 = scheduler.schedule(SimTime::from_millis(50), EventPayload::Generic);
+        let id4 = scheduler.schedule(SimTime::from_millis(100), EventPayload::Generic);
+        let id5 = scheduler.schedule(SimTime::from_millis(50), EventPayload::Generic);
+
+        // Expected order:
+        // 1. time=50, sequence=2 (earliest time, first scheduled at that time)
+        // 2. time=50, sequence=4 (earliest time, second scheduled at that time)
+        // 3. time=100, sequence=0 (later time, first scheduled at that time)
+        // 4. time=100, sequence=1 (later time, second scheduled at that time)
+        // 5. time=100, sequence=3 (later time, third scheduled at that time)
+
+        let e1 = scheduler.pop_next().unwrap();
+        assert_eq!(e1.time(), SimTime::from_millis(50));
+        assert_eq!(e1.id(), id3);
+
+        let e2 = scheduler.pop_next().unwrap();
+        assert_eq!(e2.time(), SimTime::from_millis(50));
+        assert_eq!(e2.id(), id5);
+
+        let e3 = scheduler.pop_next().unwrap();
+        assert_eq!(e3.time(), SimTime::from_millis(100));
+        assert_eq!(e3.id(), id1);
+
+        let e4 = scheduler.pop_next().unwrap();
+        assert_eq!(e4.time(), SimTime::from_millis(100));
+        assert_eq!(e4.id(), id2);
+
+        let e5 = scheduler.pop_next().unwrap();
+        assert_eq!(e5.time(), SimTime::from_millis(100));
+        assert_eq!(e5.id(), id4);
+    }
+}

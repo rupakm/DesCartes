@@ -1,0 +1,114 @@
+use des_components::client::{Client, RetryPolicy, SimpleRequestGenerator};
+use des_components::error::RequestError;
+use des_components::server::Server;
+use des_components::{ConstantArrivalPattern, ConstantServiceTime};
+use des_core::{Environment, SimTime};
+use std::time::Duration;
+
+// Simple retry policy for testing
+struct TestRetryPolicy {
+    max_retries: usize,
+    delay: Duration,
+}
+
+impl RetryPolicy for TestRetryPolicy {
+    fn should_retry(&mut self, attempt: usize, _error: &RequestError) -> bool {
+        attempt <= self.max_retries
+    }
+
+    fn next_delay(&mut self, _attempt: usize) -> Duration {
+        self.delay
+    }
+}
+
+#[test]
+fn test_client_retry_integration() {
+    let mut env = Environment::new();
+
+    // Server: Capacity 1, Service Time 100ms
+    let mut server = Server::builder()
+        .name("retry-server")
+        .capacity(1)
+        .service_time(Box::new(ConstantServiceTime::new(Duration::from_millis(
+            100,
+        ))))
+        .build()
+        .unwrap();
+
+    // Client: Retry up to 2 times with 50ms delay
+    let mut client = Client::builder()
+        .name("retry-client")
+        .arrival_pattern(Box::new(ConstantArrivalPattern::new(
+            Duration::from_millis(1000),
+        )))
+        .request_generator(Box::new(SimpleRequestGenerator::new()))
+        .retry_policy(Box::new(TestRetryPolicy {
+            max_retries: 2,
+            delay: Duration::from_millis(50),
+        }))
+        .build()
+        .unwrap();
+
+    // 1. Fill the server capacity manually
+    use des_core::{RequestAttempt, RequestAttemptId, RequestId};
+    let dummy_attempt = RequestAttempt::new(
+        RequestAttemptId(999),
+        RequestId(999),
+        1,
+        SimTime::zero(),
+        vec![],
+    );
+    server.process_request(&mut env, dummy_attempt).unwrap();
+    assert!(server.is_at_capacity());
+
+    // 2. Client sends a request
+    // This should fail initially (Server at capacity), then retry.
+    // T=0: Fail.
+    // T=50: Retry 1. Fail (Server busy until 100).
+    // T=100: Retry 2. Success (Server free).
+
+    let response = client.send_request(&mut env, &mut server);
+
+    assert!(response.is_ok());
+    let resp = response.unwrap();
+    assert!(resp.is_success());
+
+    // Verify timing
+    // The client loop advances time.
+    // T=0 -> T=50 -> T=100.
+    // At T=100, request is accepted. Service time is 100ms.
+    // So completion time should be 100 + 100 = 200ms.
+    // Note: `send_request` returns immediately after acceptance (and scheduling completion).
+    // It does NOT wait for the request to complete on the server side (unless timeout is used).
+    // Wait, `Client::send_request` calls `server.process_request`.
+    // `server.process_request` returns `Ok(Response)` with `completion_time`.
+
+    assert_eq!(env.now(), SimTime::from_millis(100));
+    // The response completion time should be 200ms
+    // (100ms start time + 100ms service time)
+    // Note: Response struct doesn't expose completion_time directly as public field in some implementations,
+    // but let's check `des-core/src/request.rs` or `server.rs`.
+    // In `server.rs`: `Ok(Response::success(..., completion_time, ...))`
+
+    // Verify metrics
+    assert_eq!(client.total_requests(), 1);
+    assert_eq!(client.total_attempts(), 3); // Initial + 2 retries
+    assert_eq!(client.total_successful(), 1);
+    assert_eq!(client.total_failed(), 0);
+
+    // Verify server metrics
+    // Server processed 2 requests (dummy + client)
+    // But `total_processed` is updated lazily or via `complete_request`.
+    // The dummy request finished at 100ms.
+    // The client request started at 100ms, finishes at 200ms.
+    // `active_requests` should be 1 (the client request).
+    // `total_processed` should be 1 (the dummy request).
+
+    // We need to trigger update_state to see the dummy request completion reflected in total_processed
+    // But `process_request` already called `update_state(100)`.
+    // At T=100, dummy request (finish=100) is > 100? No. 100 > 100 is False.
+    // So dummy request is removed. `total_processed` increments.
+
+    assert_eq!(server.total_processed(), 1);
+    assert_eq!(server.active_requests(), 1);
+}
