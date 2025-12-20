@@ -14,6 +14,7 @@ pub mod tower;
 pub use simple_client::{SimpleClient, ClientEvent};
 pub use server::{Server, ServerEvent};
 pub use tower::{DesService, DesServiceBuilder, SchedulerHandle, ServiceError, SimBody};
+pub use tower::{DesTimeout, DesLoadBalancer, DesCircuitBreaker, DesLoadBalanceStrategy, DesRateLimit, DesConcurrencyLimit, DesGlobalConcurrencyLimit, DesHedge};
 
 pub use builder::{
     BuilderState, IntoOption, Set, Unset, Validate, ValidationError, ValidationResult,

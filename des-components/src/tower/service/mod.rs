@@ -1,17 +1,10 @@
-//! Tower Service trait integration for DES components
-//!
-//! This module provides implementations of the Tower Service trait that allow
-//! Tower-based services and middleware to run within our discrete event simulation.
-//! This enables testing of real-world service architectures under simulated
-//! network conditions, failures, and performance characteristics.
+//! DES-backed Tower Service implementation
 
-use crate::request::{RequestAttempt, RequestAttemptId, RequestId, Response, ResponseStatus};
+use crate::request::{RequestAttempt, RequestAttemptId, RequestId, Response};
 use crate::server::{Server, ServerEvent, ClientEvent};
 use des_core::{Component, Key, Scheduler, SimTime, Simulation};
 
-use bytes::Bytes;
-use http::{Request, Response as HttpResponse, StatusCode};
-use http_body::Body as HttpBody;
+use http::Request;
 use pin_project::pin_project;
 use std::collections::HashMap;
 use std::future::Future;
@@ -20,66 +13,10 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
-use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::Service;
 
-/// Errors that can occur in the DES Tower integration
-#[derive(Debug, Error)]
-pub enum ServiceError {
-    #[error("Service is not ready to accept requests")]
-    NotReady,
-    #[error("Request was cancelled")]
-    Cancelled,
-    #[error("Service is overloaded")]
-    Overloaded,
-    #[error("Internal simulation error: {0}")]
-    Internal(String),
-    #[error("HTTP error: {0}")]
-    Http(#[from] http::Error),
-}
-
-/// A simple HTTP body type for our simulation
-#[derive(Debug, Clone)]
-pub struct SimBody {
-    data: Bytes,
-}
-
-impl SimBody {
-    pub fn new(data: impl Into<Bytes>) -> Self {
-        Self { data: data.into() }
-    }
-
-    pub fn empty() -> Self {
-        Self {
-            data: Bytes::new(),
-        }
-    }
-
-    pub fn from_static(data: &'static str) -> Self {
-        Self {
-            data: Bytes::from_static(data.as_bytes()),
-        }
-    }
-}
-
-impl HttpBody for SimBody {
-    type Data = Bytes;
-    type Error = std::convert::Infallible;
-
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-        let this = self.get_mut();
-        if this.data.is_empty() {
-            Poll::Ready(None)
-        } else {
-            let data = std::mem::take(&mut this.data);
-            Poll::Ready(Some(Ok(http_body::Frame::data(data))))
-        }
-    }
-}
+use super::{ServiceError, SimBody, response_to_http, serialize_http_request};
 
 /// Handle to interact with the DES scheduler from Tower services
 #[derive(Clone)]
@@ -97,7 +34,7 @@ pub struct SchedulerHandle {
     /// Current load tracking
     current_load: Arc<AtomicUsize>,
     /// Maximum capacity
-    capacity: usize,
+    pub capacity: usize,
     /// Wakers for pending poll_ready calls
     wakers: Arc<Mutex<Vec<Waker>>>,
 }
@@ -299,6 +236,7 @@ impl DesServiceBuilder {
 }
 
 /// Tower Service implementation backed by DES
+#[derive(Clone)]
 pub struct DesService {
     scheduler_handle: SchedulerHandle,
 }
@@ -318,7 +256,7 @@ pub struct DesServiceFuture {
 }
 
 impl Future for DesServiceFuture {
-    type Output = Result<HttpResponse<SimBody>, ServiceError>;
+    type Output = Result<http::Response<SimBody>, ServiceError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -334,7 +272,7 @@ impl Future for DesServiceFuture {
 }
 
 impl Service<Request<SimBody>> for DesService {
-    type Response = HttpResponse<SimBody>;
+    type Response = http::Response<SimBody>;
     type Error = ServiceError;
     type Future = DesServiceFuture;
 
@@ -387,193 +325,4 @@ fn http_to_request_attempt(
         SimTime::from_duration(Duration::ZERO), // Will be set by scheduler
         payload,
     )
-}
-
-/// Convert DES Response to HTTP response
-fn response_to_http(response: Response) -> Result<HttpResponse<SimBody>, ServiceError> {
-    match response.status {
-        ResponseStatus::Ok => {
-            let body = if response.payload.is_empty() {
-                SimBody::from_static("OK")
-            } else {
-                SimBody::new(response.payload)
-            };
-
-            HttpResponse::builder()
-                .status(StatusCode::OK)
-                .body(body)
-                .map_err(ServiceError::Http)
-        }
-        ResponseStatus::Error { code, message } => {
-            let status = StatusCode::from_u16(code as u16)
-                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-
-            HttpResponse::builder()
-                .status(status)
-                .body(SimBody::new(message))
-                .map_err(ServiceError::Http)
-        }
-    }
-}
-
-/// Serialize HTTP request to bytes (simplified)
-fn serialize_http_request(req: &Request<SimBody>) -> Vec<u8> {
-    // Simple serialization - in practice you might use a more sophisticated format
-    let method = req.method().as_str();
-    let uri = req.uri().to_string();
-    let headers = req
-        .headers()
-        .iter()
-        .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("")))
-        .collect::<Vec<_>>()
-        .join("\r\n");
-
-    format!("{method} {uri} HTTP/1.1\r\n{headers}\r\n\r\n").into_bytes()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use des_core::Simulation;
-    use http::Method;
-    use std::sync::Arc;
-    use tower::Service;
-
-    #[tokio::test]
-    async fn test_des_service_basic() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
-
-        // Build the service
-        let mut service = DesServiceBuilder::new("test-server".to_string())
-            .thread_capacity(2)
-            .service_time(Duration::from_millis(50))
-            .build(simulation.clone())
-            .unwrap();
-
-        // Create a test request
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("/test")
-            .body(SimBody::from_static("test body"))
-            .unwrap();
-
-        // Make the request and run simulation concurrently
-        let response_future = service.call(request);
-        
-        // Run a few simulation steps to process the request
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-            let mut sim = simulation.lock().unwrap();
-            for _ in 0..5 {
-                if !sim.step() {
-                    break;
-                }
-            }
-        }
-
-        // The response should be ready now
-        let response = tokio::time::timeout(Duration::from_millis(100), response_future)
-            .await
-            .expect("Response should be ready")
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_des_service_with_tower_middleware() {
-        use tower::timeout::Timeout;
-
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
-
-        // Build the service with Tower timeout middleware
-        let base_service = DesServiceBuilder::new("middleware-server".to_string())
-            .thread_capacity(1)
-            .service_time(Duration::from_millis(30))
-            .build(simulation.clone())
-            .unwrap();
-
-        let mut service = Timeout::new(base_service, Duration::from_millis(100));
-
-        // Create a test request
-        let request = Request::builder()
-            .method(Method::POST)
-            .uri("/api/test")
-            .body(SimBody::from_static("middleware test"))
-            .unwrap();
-
-        // Make the request and run simulation concurrently
-        let response_future = service.call(request);
-        
-        // Run simulation steps
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-            let mut sim = simulation.lock().unwrap();
-            for _ in 0..5 {
-                if !sim.step() {
-                    break;
-                }
-            }
-        }
-
-        // Make the request through middleware
-        let response = tokio::time::timeout(Duration::from_millis(100), response_future)
-            .await
-            .expect("Response should be ready")
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_des_service_capacity_limit() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
-
-        // Build service with capacity 1 and slow service time
-        let mut service = DesServiceBuilder::new("capacity-test".to_string())
-            .thread_capacity(1)
-            .service_time(Duration::from_millis(100))
-            .build(simulation.clone())
-            .unwrap();
-
-        // Send first request
-        let req1 = Request::builder()
-            .method(Method::GET)
-            .uri("/test1")
-            .body(SimBody::empty())
-            .unwrap();
-
-        let future1 = service.call(req1);
-
-        // Wait a bit then send second request
-        tokio::time::sleep(Duration::from_millis(20)).await;
-
-        let req2 = Request::builder()
-            .method(Method::GET)
-            .uri("/test2")
-            .body(SimBody::empty())
-            .unwrap();
-
-        let future2 = service.call(req2);
-
-        // Run simulation steps to process both requests
-        for _ in 0..20 {
-            tokio::task::yield_now().await;
-            let mut sim = simulation.lock().unwrap();
-            for _ in 0..10 {
-                if !sim.step() {
-                    break;
-                }
-            }
-        }
-
-        // Both should complete, but second should wait for first
-        let (resp1, resp2) = tokio::join!(
-            tokio::time::timeout(Duration::from_millis(200), future1),
-            tokio::time::timeout(Duration::from_millis(200), future2)
-        );
-
-        assert!(resp1.is_ok());
-        assert!(resp2.is_ok());
-    }
 }
