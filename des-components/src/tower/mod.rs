@@ -36,6 +36,8 @@ pub enum ServiceError {
     Cancelled,
     #[error("Service is overloaded")]
     Overloaded,
+    #[error("Request timeout after {duration:?}")]
+    Timeout { duration: std::time::Duration },
     #[error("Internal simulation error: {0}")]
     Internal(String),
     #[error("HTTP error: {0}")]
@@ -751,6 +753,292 @@ mod tests {
             Poll::Pending => {
                 panic!("Composed service still pending after simulation steps");
             }
+        }
+    }
+
+    #[test]
+    fn test_timeout_layer_success() {
+        let simulation = Arc::new(Mutex::new(Simulation::default()));
+
+        // Create base service with very fast service time (1ms)
+        let base_service = DesServiceBuilder::new("timeout-success-test".to_string())
+            .thread_capacity(5)
+            .service_time(Duration::from_millis(1))
+            .build(simulation.clone())
+            .unwrap();
+
+        // Wrap with timeout layer (very long timeout - 1000ms)
+        use tower::Layer;
+        let mut timeout_service = DesTimeoutLayer::new(
+            Duration::from_millis(1000),
+            Arc::downgrade(&simulation),
+        ).layer(base_service);
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // Service should be ready
+        assert!(matches!(timeout_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("/timeout-success")
+            .body(SimBody::empty())
+            .unwrap();
+        let mut future = timeout_service.call(req);
+
+        // Poll once to start the request and register waker
+        let result1 = Pin::new(&mut future).poll(&mut cx);
+        assert!(matches!(result1, Poll::Pending), "Request should be pending initially");
+
+        // Run simulation to complete the request
+        // The timeout is scheduled for 1000ms, request completes in ~2ms
+        let mut sim = simulation.lock().unwrap();
+        for _ in 0..50 {
+            if !sim.step() {
+                break;
+            }
+        }
+        drop(sim);
+
+        // Request should succeed (no timeout)
+        let result = Pin::new(&mut future).poll(&mut cx);
+        match result {
+            Poll::Ready(Ok(_)) => {
+                // Success - request completed before timeout
+            }
+            Poll::Ready(Err(ServiceError::Timeout { duration })) => {
+                panic!("Request should not have timed out (timeout was {:?}, service time was 1ms)", duration);
+            }
+            Poll::Ready(Err(e)) => {
+                panic!("Unexpected error: {:?}", e);
+            }
+            Poll::Pending => {
+                // Try polling again after more simulation steps
+                let mut sim = simulation.lock().unwrap();
+                for _ in 0..50 {
+                    if !sim.step() {
+                        break;
+                    }
+                }
+                drop(sim);
+                
+                let result2 = Pin::new(&mut future).poll(&mut cx);
+                match result2 {
+                    Poll::Ready(Ok(_)) => {
+                        // Success after more steps
+                    }
+                    Poll::Ready(Err(e)) => {
+                        panic!("Request failed after more simulation steps: {:?}", e);
+                    }
+                    Poll::Pending => {
+                        panic!("Request should have completed after sufficient simulation steps");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_timeout_layer_timeout() {
+        let simulation = Arc::new(Mutex::new(Simulation::default()));
+
+        // Create base service with long service time (200ms)
+        let base_service = DesServiceBuilder::new("timeout-test".to_string())
+            .thread_capacity(5)
+            .service_time(Duration::from_millis(200))
+            .build(simulation.clone())
+            .unwrap();
+
+        // Wrap with timeout layer (short timeout - 50ms)
+        use tower::Layer;
+        let mut timeout_service = DesTimeoutLayer::new(
+            Duration::from_millis(50),
+            Arc::downgrade(&simulation),
+        ).layer(base_service);
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // Service should be ready
+        assert!(matches!(timeout_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("/timeout-test")
+            .body(SimBody::empty())
+            .unwrap();
+        let mut future = timeout_service.call(req);
+
+        // Poll once to start the request and register waker
+        let result1 = Pin::new(&mut future).poll(&mut cx);
+        assert!(matches!(result1, Poll::Pending), "Request should be pending initially");
+
+        // Run simulation step by step, polling the future periodically
+        // This simulates how a real async runtime would work
+        let mut timeout_detected = false;
+        
+        for step in 0..300 {
+            // Run one simulation step
+            {
+                let mut sim = simulation.lock().unwrap();
+                if !sim.step() {
+                    break;
+                }
+            } // Release lock automatically
+            
+            // Poll the future every step to check for timeout
+            if step % 1 == 0 {  // Poll every step
+                let result = Pin::new(&mut future).poll(&mut cx);
+                match result {
+                    Poll::Ready(Err(ServiceError::Timeout { duration })) => {
+                        assert_eq!(duration, Duration::from_millis(50));
+                        timeout_detected = true;
+                        break;
+                    }
+                    Poll::Ready(Ok(_)) => {
+                        panic!("Request should have timed out, not succeeded");
+                    }
+                    Poll::Ready(Err(e)) => {
+                        panic!("Expected timeout error, got: {:?}", e);
+                    }
+                    Poll::Pending => {
+                        // Continue simulation
+                    }
+                }
+            }
+        }
+
+        if !timeout_detected {
+            // Final poll to check timeout
+            let result = Pin::new(&mut future).poll(&mut cx);
+            match result {
+                Poll::Ready(Err(ServiceError::Timeout { duration })) => {
+                    assert_eq!(duration, Duration::from_millis(50));
+                }
+                Poll::Ready(Ok(_)) => {
+                    panic!("Request should have timed out, not succeeded");
+                }
+                Poll::Ready(Err(e)) => {
+                    panic!("Expected timeout error, got: {:?}", e);
+                }
+                Poll::Pending => {
+                    panic!("Request should have timed out after sufficient simulation steps");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_timeout_layer_resource_cleanup() {
+        let simulation = Arc::new(Mutex::new(Simulation::default()));
+
+        // Create base service
+        let base_service = DesServiceBuilder::new("cleanup-test".to_string())
+            .thread_capacity(5)
+            .service_time(Duration::from_millis(50))
+            .build(simulation.clone())
+            .unwrap();
+
+        // Wrap with timeout layer
+        use tower::Layer;
+        let mut timeout_service = DesTimeoutLayer::new(
+            Duration::from_millis(100),
+            Arc::downgrade(&simulation),
+        ).layer(base_service);
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // Create and drop multiple futures to test cleanup
+        for _ in 0..5 {
+            assert!(matches!(timeout_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+            
+            let req = Request::builder()
+                .method(Method::GET)
+                .uri("/cleanup-test")
+                .body(SimBody::empty())
+                .unwrap();
+            let future = timeout_service.call(req);
+            
+            // Drop the future immediately to test PinnedDrop cleanup
+            drop(future);
+        }
+
+        // Run a few simulation steps to allow any cleanup to occur
+        let mut sim = simulation.lock().unwrap();
+        for _ in 0..10 {
+            if !sim.step() {
+                break;
+            }
+        }
+        drop(sim);
+
+        // Test passes if no panics or resource leaks occur
+        // The PinnedDrop implementation should clean up timeout components
+    }
+
+    #[test]
+    fn test_circuit_breaker_failure_threshold() {
+        let simulation = Arc::new(Mutex::new(Simulation::default()));
+
+        // Create a service that always fails
+        let failing_service = FailingService;
+
+        // Wrap with circuit breaker (failure threshold of 3, recovery timeout of 1 second)
+        let mut circuit_breaker_service = DesCircuitBreaker::new(
+            failing_service,
+            3, // failure threshold
+            Duration::from_secs(1),
+            Arc::downgrade(&simulation),
+        );
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // First 3 requests should be allowed and fail
+        for i in 0..3 {
+            assert!(matches!(circuit_breaker_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+            
+            let req = Request::builder()
+                .method(Method::GET)
+                .uri(format!("/fail/{}", i))
+                .body(SimBody::empty())
+                .unwrap();
+            let mut future = circuit_breaker_service.call(req);
+            
+            // Poll the future to completion
+            match Pin::new(&mut future).poll(&mut cx) {
+                Poll::Ready(Err(ServiceError::Internal(_))) => {
+                    // Expected failure from FailingService
+                }
+                other => panic!("Expected failure, got: {:?}", other),
+            }
+        }
+
+        // 4th request should be rejected due to circuit breaker being open
+        match circuit_breaker_service.poll_ready(&mut cx) {
+            Poll::Ready(Err(ServiceError::Overloaded)) => {
+                // Expected - circuit breaker is now open
+            }
+            other => panic!("Expected circuit breaker to be open, got: {:?}", other),
+        }
+    }
+
+    // Helper service that always fails for testing circuit breaker
+    struct FailingService;
+
+    impl Service<Request<SimBody>> for FailingService {
+        type Response = http::Response<SimBody>;
+        type Error = ServiceError;
+        type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: Request<SimBody>) -> Self::Future {
+            std::future::ready(Err(ServiceError::Internal("Always fails".to_string())))
         }
     }
 

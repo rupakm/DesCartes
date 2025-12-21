@@ -100,35 +100,6 @@ impl<S> DesCircuitBreaker<S> {
             }
         }
     }
-
-    #[allow(dead_code)]
-    fn record_failure(&self) {
-        let mut state = self.state.lock().unwrap();
-        match *state {
-            CircuitBreakerState::Closed { failure_count } => {
-                let new_count = failure_count + 1;
-                if new_count >= self.failure_threshold {
-                    if let Some(sim) = self.simulation.upgrade() {
-                        let simulation = sim.lock().unwrap();
-                        let current_time = simulation.scheduler.time();
-                        *state = CircuitBreakerState::Open { opened_at: current_time };
-                    }
-                } else {
-                    *state = CircuitBreakerState::Closed { failure_count: new_count };
-                }
-            }
-            CircuitBreakerState::HalfOpen => {
-                if let Some(sim) = self.simulation.upgrade() {
-                    let simulation = sim.lock().unwrap();
-                    let current_time = simulation.scheduler.time();
-                    *state = CircuitBreakerState::Open { opened_at: current_time };
-                }
-            }
-            CircuitBreakerState::Open { .. } => {
-                // Already open, no change needed
-            }
-        }
-    }
 }
 
 /// Future for circuit breaker operations
@@ -137,6 +108,9 @@ pub struct DesCircuitBreakerFuture<F> {
     #[pin]
     inner: Option<F>,
     state: Arc<Mutex<CircuitBreakerState>>,
+    failure_threshold: usize,
+    recovery_timeout: Duration,
+    simulation: Weak<Mutex<Simulation>>,
     immediate_error: Option<ServiceError>,
 }
 
@@ -161,6 +135,9 @@ where
             return DesCircuitBreakerFuture {
                 inner: None,
                 state: self.state.clone(),
+                failure_threshold: self.failure_threshold,
+                recovery_timeout: self.recovery_timeout,
+                simulation: self.simulation.clone(),
                 immediate_error: Some(ServiceError::Overloaded),
             };
         }
@@ -183,6 +160,9 @@ where
         DesCircuitBreakerFuture {
             inner: Some(inner_future),
             state: self.state.clone(),
+            failure_threshold: self.failure_threshold,
+            recovery_timeout: self.recovery_timeout,
+            simulation: self.simulation.clone(),
             immediate_error: None,
         }
     }
@@ -206,24 +186,48 @@ where
         if let Some(inner) = this.inner.as_mut().as_pin_mut() {
             match inner.poll(cx) {
                 Poll::Ready(Ok(response)) => {
-                    // Record success
+                    // Record success - reset failure count
                     let mut state = this.state.lock().unwrap();
                     *state = CircuitBreakerState::Closed { failure_count: 0 };
                     Poll::Ready(Ok(response))
                 }
                 Poll::Ready(Err(err)) => {
-                    // Record failure
+                    // Record failure - increment count and check threshold
                     let mut state = this.state.lock().unwrap();
                     match *state {
                         CircuitBreakerState::Closed { failure_count } => {
-                            *state = CircuitBreakerState::Closed { failure_count: failure_count + 1 };
+                            let new_count = failure_count + 1;
+                            if new_count >= *this.failure_threshold {
+                                // Transition to Open state
+                                if let Some(sim) = this.simulation.upgrade() {
+                                    let simulation = sim.lock().unwrap();
+                                    let current_time = simulation.scheduler.time();
+                                    *state = CircuitBreakerState::Open { opened_at: current_time };
+                                } else {
+                                    // Fallback if simulation is unavailable
+                                    *state = CircuitBreakerState::Open { 
+                                        opened_at: SimTime::from_duration(Duration::ZERO) 
+                                    };
+                                }
+                            } else {
+                                // Stay closed but increment failure count
+                                *state = CircuitBreakerState::Closed { failure_count: new_count };
+                            }
                         }
                         CircuitBreakerState::HalfOpen => {
-                            // Transition back to open on failure
-                            *state = CircuitBreakerState::Open { opened_at: SimTime::from_duration(Duration::ZERO) };
+                            // Transition back to open on failure in half-open state
+                            if let Some(sim) = this.simulation.upgrade() {
+                                let simulation = sim.lock().unwrap();
+                                let current_time = simulation.scheduler.time();
+                                *state = CircuitBreakerState::Open { opened_at: current_time };
+                            } else {
+                                *state = CircuitBreakerState::Open { 
+                                    opened_at: SimTime::from_duration(Duration::ZERO) 
+                                };
+                            }
                         }
                         CircuitBreakerState::Open { .. } => {
-                            // Already open
+                            // Already open, no state change needed
                         }
                     }
                     Poll::Ready(Err(err))

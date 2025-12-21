@@ -222,7 +222,7 @@ impl DesServiceBuilder {
         let server = Server::new(self.server_name.clone(), self.thread_capacity, self.service_time);
         let server_key = sim.add_component(server);
 
-        // Create scheduler handle - much simpler now!
+        // Create scheduler handle
         let handle = SchedulerHandle::new(
             Arc::downgrade(&simulation),
             server_key,

@@ -4,6 +4,7 @@
 //! including servers, clients, queues, throttles, and retry policies.
 
 pub mod builder;
+pub mod dists;
 // pub mod client;  // TODO: Update to use new Component API
 pub mod request;
 pub mod error;

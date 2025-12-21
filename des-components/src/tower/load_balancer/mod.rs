@@ -1,8 +1,10 @@
 //! DES-aware load balancer layer
 
 use http::Request;
-use rand::seq::SliceRandom;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
@@ -51,6 +53,8 @@ pub struct DesLoadBalancer<S> {
     services: Vec<S>,
     strategy: DesLoadBalanceStrategy,
     current_index: AtomicUsize,
+    /// Deterministic RNG for random load balancing
+    rng: Arc<Mutex<ChaCha8Rng>>,
 }
 
 impl<S: Clone> Clone for DesLoadBalancer<S> {
@@ -59,6 +63,10 @@ impl<S: Clone> Clone for DesLoadBalancer<S> {
             services: self.services.clone(),
             strategy: self.strategy.clone(),
             current_index: AtomicUsize::new(self.current_index.load(Ordering::Relaxed)),
+            // Clone the RNG state for deterministic behavior across clones
+            rng: Arc::new(Mutex::new(
+                self.rng.lock().unwrap().clone()
+            )),
         }
     }
 }
@@ -72,10 +80,16 @@ pub enum DesLoadBalanceStrategy {
 
 impl<S> DesLoadBalancer<S> {
     pub fn new(services: Vec<S>, strategy: DesLoadBalanceStrategy) -> Self {
+        Self::with_seed(services, strategy, 42) // Default deterministic seed
+    }
+
+    /// Create a new load balancer with a specific seed for deterministic random behavior
+    pub fn with_seed(services: Vec<S>, strategy: DesLoadBalanceStrategy, seed: u64) -> Self {
         Self {
             services,
             strategy,
             current_index: AtomicUsize::new(0),
+            rng: Arc::new(Mutex::new(ChaCha8Rng::seed_from_u64(seed))),
         }
     }
 
@@ -87,6 +101,11 @@ impl<S> DesLoadBalancer<S> {
         Self::new(services, DesLoadBalanceStrategy::Random)
     }
 
+    /// Create a random load balancer with a specific seed for deterministic behavior
+    pub fn random_with_seed(services: Vec<S>, seed: u64) -> Self {
+        Self::with_seed(services, DesLoadBalanceStrategy::Random, seed)
+    }
+
     fn select_service(&self) -> usize {
         match self.strategy {
             DesLoadBalanceStrategy::RoundRobin => {
@@ -94,8 +113,9 @@ impl<S> DesLoadBalancer<S> {
                 index % self.services.len()
             }
             DesLoadBalanceStrategy::Random => {
-                let mut rng = rand::thread_rng();
-                (0..self.services.len()).collect::<Vec<_>>().choose(&mut rng).copied().unwrap_or(0)
+                // Use deterministic seeded RNG instead of thread_rng
+                let mut rng = self.rng.lock().unwrap();
+                rng.gen_range(0..self.services.len())
             }
             DesLoadBalanceStrategy::LeastConnections => {
                 // For simplicity, use round robin for now

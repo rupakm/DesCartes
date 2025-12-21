@@ -147,8 +147,11 @@ impl GlobalConcurrencyLimitState {
         self.current_concurrency.fetch_sub(1, Ordering::Relaxed);
         
         // Wake up any waiting tasks
-        let mut waiters = self.waiters.lock().unwrap();
-        for waker in waiters.drain(..) {
+        let waiters = {
+            let mut waiters = self.waiters.lock().unwrap();
+            std::mem::take(&mut *waiters)
+        };
+        for waker in waiters {
             waker.wake();
         }
     }

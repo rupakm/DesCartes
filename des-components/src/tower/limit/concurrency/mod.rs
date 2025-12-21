@@ -171,8 +171,11 @@ where
                     this.concurrency_limiter.fetch_sub(1, Ordering::Relaxed);
                     
                     // Wake up any waiting tasks
-                    let mut waiters = this.waiters.lock().unwrap();
-                    for waker in waiters.drain(..) {
+                    let waiters = {
+                        let mut waiters = this.waiters.lock().unwrap();
+                        std::mem::take(&mut *waiters)
+                    };
+                    for waker in waiters {
                         waker.wake();
                     }
                     
@@ -196,8 +199,11 @@ impl<F> PinnedDrop for DesConcurrencyLimitFuture<F> {
             self.concurrency_limiter.fetch_sub(1, Ordering::Relaxed);
             
             // Wake up any waiting tasks
-            let mut waiters = self.waiters.lock().unwrap();
-            for waker in waiters.drain(..) {
+            let waiters = {
+                let mut waiters = self.waiters.lock().unwrap();
+                std::mem::take(&mut *waiters)
+            };
+            for waker in waiters {
                 waker.wake();
             }
         }
