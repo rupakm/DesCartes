@@ -19,7 +19,7 @@
 //!
 //! # Basic Usage
 //!
-//! ```ignore
+//! ```
 //! use des_core::{Simulation, Execute, Executor, SimTime};
 //! use des_core::async_runtime::{DesRuntime, RuntimeEvent, sim_sleep};
 //! use std::time::Duration;
@@ -30,11 +30,8 @@
 //!
 //! // Spawn an async task
 //! runtime.spawn(async {
-//!     println!("Task starting");
 //!     sim_sleep(Duration::from_millis(100)).await;
-//!     println!("100ms of simulation time has passed");
 //!     sim_sleep(Duration::from_millis(50)).await;
-//!     println!("Task completed after 150ms total");
 //! });
 //!
 //! // Add runtime to simulation and start it
@@ -63,19 +60,25 @@
 //!
 //! The runtime can manage multiple concurrent async tasks:
 //!
-//! ```ignore
+//! ```
+//! # use des_core::{Simulation, Execute, Executor, SimTime};
+//! # use des_core::async_runtime::{DesRuntime, RuntimeEvent, sim_sleep};
+//! # use std::time::Duration;
+//! # let mut sim = Simulation::default();
+//! # let mut runtime = DesRuntime::new();
 //! // Spawn multiple tasks with different timing
 //! runtime.spawn(async {
 //!     for i in 1..=3 {
-//!         println!("Fast task iteration {}", i);
 //!         sim_sleep(Duration::from_millis(30)).await;
 //!     }
 //! });
 //!
 //! runtime.spawn(async {
 //!     sim_sleep(Duration::from_millis(50)).await;
-//!     println!("Slow task completed");
 //! });
+//! # let runtime_id = sim.add_component(runtime);
+//! # sim.schedule(SimTime::zero(), runtime_id, RuntimeEvent::Poll);
+//! # Executor::timed(SimTime::from_millis(200)).execute(&mut sim);
 //! ```
 //!
 //! Tasks are scheduled and executed based on simulation time, not the order they were spawned.
@@ -183,7 +186,14 @@ where
 /// Get the current simulation time (for use in futures)
 pub fn current_sim_time() -> Option<SimTime> {
     CURRENT_CONTEXT.with(|ctx| {
-        ctx.borrow().map(|ptr| unsafe { (*ptr).current_time })
+        ctx.borrow().and_then(|ptr| {
+            if ptr.is_null() {
+                eprintln!("Warning: CURRENT_CONTEXT contains null pointer");
+                None
+            } else {
+                unsafe { Some((*ptr).current_time) }
+            }
+        })
     })
 }
 
@@ -248,6 +258,11 @@ fn wake_task_internal(task_id: TaskId, runtime_key: Option<Key<RuntimeEvent>>) {
     // First try to register with current context if we're in a polling cycle
     let registered = CURRENT_CONTEXT.with(|ctx| {
         if let Some(ptr) = *ctx.borrow() {
+            // Defensive check: ensure pointer is not null
+            if ptr.is_null() {
+                eprintln!("Warning: CURRENT_CONTEXT contains null pointer");
+                return false;
+            }
             unsafe {
                 (*ptr).register_wake(task_id);
             }
@@ -265,6 +280,11 @@ fn wake_task_internal(task_id: TaskId, runtime_key: Option<Key<RuntimeEvent>>) {
     if let Some(runtime_key) = runtime_key {
         CURRENT_SCHEDULER.with(|sched| {
             if let Some(ptr) = *sched.borrow() {
+                // Defensive check: ensure pointer is not null
+                if ptr.is_null() {
+                    eprintln!("Warning: CURRENT_SCHEDULER contains null pointer");
+                    return;
+                }
                 unsafe {
                     // Schedule the ExternalWake event immediately (at current time)
                     (*ptr).schedule_now(runtime_key, RuntimeEvent::ExternalWake { task_id });
@@ -396,11 +416,12 @@ impl DesRuntime {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use des_core::async_runtime::{DesRuntime, sim_sleep};
+    /// # use std::time::Duration;
     /// let mut runtime = DesRuntime::new();
     /// let task_id = runtime.spawn(async {
     ///     sim_sleep(Duration::from_millis(100)).await;
-    ///     println!("Task completed!");
     /// });
     /// ```
     pub fn spawn<F>(&mut self, future: F) -> TaskId
@@ -565,12 +586,17 @@ impl Component for DesRuntime {
 /// Most users should use the convenience functions `sim_sleep()` and 
 /// `sim_sleep_until()` rather than constructing `SimSleep` directly.
 ///
-/// ```ignore
+/// ```
+/// # use des_core::async_runtime::{sim_sleep, sim_sleep_until};
+/// # use des_core::SimTime;
+/// # use std::time::Duration;
+/// # async fn example() {
 /// // Sleep for a duration
 /// sim_sleep(Duration::from_millis(100)).await;
 ///
 /// // Sleep until a specific time
 /// sim_sleep_until(SimTime::from_secs(5)).await;
+/// # }
 /// ```
 pub struct SimSleep {
     duration: Duration,
@@ -628,6 +654,12 @@ impl Future for SimSleep {
             CURRENT_SCHEDULER.with(|sched| {
                 CURRENT_RUNTIME_KEY.with(|runtime_key| {
                     if let (Some(sched_ptr), Some(runtime_key)) = (*sched.borrow(), *runtime_key.borrow()) {
+                        // Defensive checks for null pointers
+                        if sched_ptr.is_null() {
+                            eprintln!("Warning: CURRENT_SCHEDULER contains null pointer");
+                            return;
+                        }
+                        
                         unsafe {
                             let delay_duration = target - current_time;
                             let delay = SimTime::from_duration(delay_duration);
@@ -671,22 +703,16 @@ impl Future for SimSleep {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use des_core::async_runtime::sim_sleep;
 /// use std::time::Duration;
 ///
 /// async fn server_task() {
-///     loop {
-///         println!("Processing request...");
-///         
-///         // Simulate 50ms of processing time
-///         sim_sleep(Duration::from_millis(50)).await;
-///         
-///         println!("Request completed");
-///         
-///         // Wait 100ms before next request
-///         sim_sleep(Duration::from_millis(100)).await;
-///     }
+///     // Simulate 50ms of processing time
+///     sim_sleep(Duration::from_millis(50)).await;
+///     
+///     // Wait 100ms before next request
+///     sim_sleep(Duration::from_millis(100)).await;
 /// }
 /// ```
 ///
@@ -715,18 +741,16 @@ pub fn sim_sleep(duration: Duration) -> SimSleep {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use des_core::async_runtime::sim_sleep_until;
 /// use des_core::SimTime;
 ///
 /// async fn scheduled_task() {
 ///     // Wake up at exactly 1 second of simulation time
 ///     sim_sleep_until(SimTime::from_secs(1)).await;
-///     println!("It's now 1 second in the simulation");
 ///     
 ///     // Wake up at 5.5 seconds
 ///     sim_sleep_until(SimTime::from_millis(5500)).await;
-///     println!("It's now 5.5 seconds in the simulation");
 /// }
 /// ```
 ///

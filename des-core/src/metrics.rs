@@ -91,15 +91,45 @@ impl MetricBuilder {
 }
 
 /// Simulation-specific metrics recorder that tracks values for analysis
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SimulationMetrics {
     recorded_metrics: Vec<MetricValue>,
+    /// Maximum number of metrics to keep in memory (0 = unlimited)
+    max_metrics: usize,
+}
+
+impl Default for SimulationMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SimulationMetrics {
-    /// Create a new simulation metrics recorder
+    /// Create a new simulation metrics recorder with unlimited storage
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            recorded_metrics: Vec::new(),
+            max_metrics: 0, // 0 = unlimited
+        }
+    }
+
+    /// Create a new simulation metrics recorder with a maximum number of metrics
+    /// 
+    /// When the limit is reached, oldest metrics are removed to make room for new ones.
+    pub fn with_max_metrics(max_metrics: usize) -> Self {
+        Self {
+            recorded_metrics: Vec::new(),
+            max_metrics,
+        }
+    }
+
+    /// Ensure we don't exceed the maximum number of metrics
+    fn enforce_limit(&mut self) {
+        if self.max_metrics > 0 && self.recorded_metrics.len() > self.max_metrics {
+            // Remove oldest metrics to make room
+            let excess = self.recorded_metrics.len() - self.max_metrics;
+            self.recorded_metrics.drain(0..excess);
+        }
     }
 
     /// Record a counter increment
@@ -119,6 +149,8 @@ impl SimulationMetrics {
             timestamp,
             labels: builder.labels_map(),
         });
+        
+        self.enforce_limit();
     }
 
     /// Record a counter increment with a specific value
@@ -138,6 +170,8 @@ impl SimulationMetrics {
             timestamp,
             labels: builder.labels_map(),
         });
+        
+        self.enforce_limit();
     }
 
     /// Record a gauge value
@@ -157,6 +191,8 @@ impl SimulationMetrics {
             timestamp,
             labels: builder.labels_map(),
         });
+        
+        self.enforce_limit();
     }
 
     /// Record a histogram value (typically for latencies, processing times, etc.)
@@ -176,6 +212,8 @@ impl SimulationMetrics {
             timestamp,
             labels: builder.labels_map(),
         });
+        
+        self.enforce_limit();
     }
 
     /// Record a duration as a histogram (converts to milliseconds)
@@ -348,5 +386,35 @@ mod tests {
         assert_eq!(summary.total_gauges, 1);
         assert_eq!(summary.total_histograms, 1);
         assert_eq!(summary.components, 2);
+    }
+
+    #[test]
+    fn test_metrics_with_limit() {
+        let mut metrics = SimulationMetrics::with_max_metrics(2);
+        let timestamp = SimTime::from_duration(Duration::from_secs(1));
+        
+        // Add 3 metrics, should only keep the last 2
+        metrics.increment_counter("metric1", "component", timestamp);
+        metrics.increment_counter("metric2", "component", timestamp);
+        metrics.increment_counter("metric3", "component", timestamp);
+        
+        let recorded = metrics.get_metrics();
+        assert_eq!(recorded.len(), 2);
+        assert_eq!(recorded[0].key, "metric2");
+        assert_eq!(recorded[1].key, "metric3");
+    }
+
+    #[test]
+    fn test_metrics_unlimited() {
+        let mut metrics = SimulationMetrics::new(); // unlimited
+        let timestamp = SimTime::from_duration(Duration::from_secs(1));
+        
+        // Add many metrics
+        for i in 0..100 {
+            metrics.increment_counter(format!("metric{i}"), "component", timestamp);
+        }
+        
+        let recorded = metrics.get_metrics();
+        assert_eq!(recorded.len(), 100);
     }
 }

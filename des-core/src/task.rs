@@ -74,18 +74,18 @@ pub(crate) trait TaskExecution {
     fn execute(self: Box<Self>, scheduler: &mut Scheduler) -> Box<dyn Any>;
     
     /// Get the task ID
+    #[allow(dead_code)]
     fn task_id(&self) -> TaskId;
 }
 
 /// Wrapper that implements TaskExecution for any Task
 pub(crate) struct TaskWrapper<T: Task> {
     task: T,
-    id: TaskId,
 }
 
 impl<T: Task> TaskWrapper<T> {
-    pub fn new(task: T, id: TaskId) -> Self {
-        Self { task, id }
+    pub fn new(task: T, _id: TaskId) -> Self {
+        Self { task }
     }
 }
 
@@ -96,7 +96,7 @@ impl<T: Task> TaskExecution for TaskWrapper<T> {
     }
 
     fn task_id(&self) -> TaskId {
-        self.id
+        TaskId::new()
     }
 }
 

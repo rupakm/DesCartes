@@ -23,6 +23,7 @@ pub enum EventEntry {
 }
 
 impl EventEntry {
+    #[allow(dead_code)]
     pub(crate) fn component_idx(&self) -> Option<Uuid> {
         match self {
             EventEntry::Component(entry) => Some(entry.component),
@@ -30,6 +31,7 @@ impl EventEntry {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn task_id(&self) -> Option<TaskId> {
         match self {
             EventEntry::Component(_) => None,
@@ -47,6 +49,7 @@ impl EventEntry {
     /// Tries to downcast the event entry to one holding an event of type `E`.
     /// If fails, returns `None`.
     #[must_use]
+    #[allow(dead_code)]
     pub(crate) fn downcast<E: fmt::Debug + 'static>(&self) -> Option<EventEntryTyped<'_, E>> {
         match self {
             EventEntry::Component(entry) => entry.downcast(),
@@ -94,15 +97,16 @@ impl ComponentEventEntry {
 
 #[derive(Debug)]
 pub struct TaskEventEntry {
-    event_id: EventId,
     time: SimTime,
     pub(crate) task_id: TaskId,
 }
 
 impl TaskEventEntry {
     pub(crate) fn new(id: EventId, time: SimTime, task_id: TaskId) -> Self {
+        // Note: id parameter kept for API compatibility but not stored
+        // as it's not currently used
+        let _ = id;
         TaskEventEntry {
-            event_id: id,
             time,
             task_id,
         }

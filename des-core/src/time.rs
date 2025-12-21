@@ -124,7 +124,24 @@ impl From<f64> for SimTime {
     /// let time = SimTime::from(1.5); // 1.5 seconds
     /// assert_eq!(time.as_nanos(), 1_500_000_000);
     /// ```
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the input is negative, infinite, or NaN.
     fn from(secs: f64) -> Self {
+        if !secs.is_finite() {
+            panic!("SimTime cannot be created from non-finite value: {secs}");
+        }
+        if secs < 0.0 {
+            panic!("SimTime cannot be negative: {secs}");
+        }
+        
+        // Check for potential overflow when converting to nanoseconds
+        const MAX_SECS: f64 = (u64::MAX as f64) / 1_000_000_000.0;
+        if secs > MAX_SECS {
+            panic!("SimTime value too large: {secs} seconds (max: {MAX_SECS} seconds)");
+        }
+        
         SimTime::from_nanos((secs * 1_000_000_000.0) as u64)
     }
 }
@@ -196,5 +213,31 @@ mod tests {
 
         let t4 = SimTime::from(0.000001); // 1 microsecond
         assert_eq!(t4.as_nanos(), 1_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "SimTime cannot be negative")]
+    fn test_simtime_from_negative_f64() {
+        let _ = SimTime::from(-1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "SimTime cannot be created from non-finite value")]
+    fn test_simtime_from_infinite_f64() {
+        let _ = SimTime::from(f64::INFINITY);
+    }
+
+    #[test]
+    #[should_panic(expected = "SimTime cannot be created from non-finite value")]
+    fn test_simtime_from_nan_f64() {
+        let _ = SimTime::from(f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "SimTime value too large")]
+    fn test_simtime_from_too_large_f64() {
+        // This should be larger than MAX_SECS
+        let max_secs = (u64::MAX as f64) / 1_000_000_000.0;
+        let _ = SimTime::from(max_secs + 1.0);
     }
 }
