@@ -4,7 +4,8 @@
 //! scheduler, using DES components and events to fire timeouts deterministically.
 
 use atomic_waker::AtomicWaker;
-use des_core::{Component, Key, Scheduler, SimTime, Simulation};
+use des_core::{SimTime, Simulation};
+use des_core::task::TimeoutTask;
 use http::Request;
 use pin_project::pin_project;
 use std::future::Future;
@@ -59,7 +60,7 @@ impl<S> DesTimeout<S> {
     }
 }
 
-/// Shared state between timeout future and timeout component
+/// Shared state between timeout future and timeout task
 #[derive(Debug)]
 struct TimeoutState {
     /// Whether the timeout has expired
@@ -109,47 +110,15 @@ impl TimeoutState {
     }
 }
 
-/// Future for timeout operations using DES events
+/// Future for timeout operations using DES tasks
 #[pin_project(PinnedDrop)]
 pub struct DesTimeoutFuture<F> {
     #[pin]
     inner: F,
-    timeout_key: Option<Key<TimeoutEvent>>,
+    timeout_scheduled: bool,
     simulation: Weak<Mutex<Simulation>>,
     timeout_state: Arc<TimeoutState>,
     completed: bool,
-}
-
-/// Event type for timeout components
-#[derive(Debug, Clone)]
-pub enum TimeoutEvent {
-    /// Timeout has expired - fire the timeout
-    Expire,
-}
-
-/// Component that handles timeout expiration via DES events
-struct TimeoutComponent {
-    state: Arc<TimeoutState>,
-}
-
-impl Component for TimeoutComponent {
-    type Event = TimeoutEvent;
-
-    fn process_event(
-        &mut self,
-        _self_id: Key<Self::Event>,
-        event: &Self::Event,
-        _scheduler: &mut Scheduler,
-    ) {
-        match event {
-            TimeoutEvent::Expire => {
-                // Only fire timeout if request hasn't completed yet
-                if !self.state.is_completed() {
-                    self.state.expire();
-                }
-            }
-        }
-    }
 }
 
 impl<S, ReqBody> Service<Request<ReqBody>> for DesTimeout<S>
@@ -173,7 +142,7 @@ where
         // This ensures timeout is relative to when request actually starts
         DesTimeoutFuture {
             inner: inner_future,
-            timeout_key: None,
+            timeout_scheduled: false,
             simulation: self.simulation.clone(),
             timeout_state,
             completed: false,
@@ -196,30 +165,31 @@ where
         }
 
         // Schedule timeout on first poll if not already scheduled
-        if this.timeout_key.is_none() {
+        if !*this.timeout_scheduled {
             if let Some(sim) = this.simulation.upgrade() {
                 if let Ok(mut simulation) = sim.try_lock() {
-                    let current_time = simulation.scheduler.time();
+                    let timeout_state = this.timeout_state.clone();
                     
-                    let timeout_component = TimeoutComponent {
-                        state: this.timeout_state.clone(),
-                    };
-                    let key = simulation.add_component(timeout_component);
+                    // Create a timeout task that will expire the timeout state
+                    let timeout_task = TimeoutTask::new(move |_scheduler| {
+                        // Only fire timeout if request hasn't completed yet
+                        if !timeout_state.is_completed() {
+                            timeout_state.expire();
+                        }
+                    });
                     
-                    // Schedule timeout event at current_time + timeout_duration
-                    let timeout_time = current_time + SimTime::from_duration(this.timeout_state.timeout_duration);
-                    simulation.schedule(
-                        timeout_time,
-                        key,
-                        TimeoutEvent::Expire,
+                    // Schedule the timeout task
+                    simulation.scheduler.schedule_task(
+                        SimTime::from_duration(this.timeout_state.timeout_duration),
+                        timeout_task,
                     );
                     
-                    *this.timeout_key = Some(key);
+                    *this.timeout_scheduled = true;
                 }
             }
         }
 
-        // Store the waker so timeout component can wake us
+        // Store the waker so timeout task can wake us
         this.timeout_state.set_waker(cx.waker());
 
         // Poll the inner future first - this is the critical fix
@@ -246,22 +216,12 @@ where
     }
 }
 
-/// Cleanup timeout component when future is dropped
+/// Cleanup timeout state when future is dropped
 #[pin_project::pinned_drop]
 impl<F> PinnedDrop for DesTimeoutFuture<F> {
     fn drop(self: Pin<&mut Self>) {
         // Mark as completed to prevent timeout from firing
+        // The timeout task will automatically clean up after execution
         self.timeout_state.complete();
-
-        // Remove the timeout component from simulation to prevent resource leak
-        if let Some(timeout_key) = self.timeout_key {
-            if let Some(sim) = self.simulation.upgrade() {
-                if let Ok(mut simulation) = sim.try_lock() {
-                    // Try to remove the component - it's okay if it fails
-                    // (e.g., if simulation is shutting down)
-                    let _ = simulation.remove_component::<TimeoutEvent, TimeoutComponent>(timeout_key);
-                }
-            }
-        }
     }
 }

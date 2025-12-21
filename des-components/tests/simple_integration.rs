@@ -4,6 +4,7 @@
 
 use des_components::{SimpleClient, Server, ClientEvent, ServerEvent};
 use des_core::{Execute, Executor, Simulation, SimTime};
+use des_core::task::PeriodicTask;
 use std::time::Duration;
 
 #[test]
@@ -21,12 +22,15 @@ fn test_client_server_integration() {
         .with_max_requests(5);
     let client_id = sim.add_component(client);
 
-    // Start the client
-    sim.schedule(
+    // Start the client with PeriodicTask
+    let task = PeriodicTask::with_count(
+        move |scheduler| {
+            scheduler.schedule_now(client_id, ClientEvent::SendRequest);
+        },
         SimTime::from_duration(Duration::from_millis(100)),
-        client_id,
-        ClientEvent::SendRequest,
+        5,
     );
+    sim.scheduler.schedule_task(SimTime::zero(), task);
 
     println!("Running simulation for 1 second...\n");
 
@@ -68,12 +72,15 @@ fn test_server_overload_scenario() {
         .with_max_requests(3);
     let client_id = sim.add_component(client);
 
-    // Start the client
-    sim.schedule(
+    // Start the client with PeriodicTask
+    let task = PeriodicTask::with_count(
+        move |scheduler| {
+            scheduler.schedule_now(client_id, ClientEvent::SendRequest);
+        },
         SimTime::from_duration(Duration::from_millis(50)),
-        client_id,
-        ClientEvent::SendRequest,
+        3,
     );
+    sim.scheduler.schedule_task(SimTime::zero(), task);
 
     println!("Running simulation with server overload scenario...\n");
 

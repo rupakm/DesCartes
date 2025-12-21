@@ -3,6 +3,7 @@
 use crate::request::{RequestAttempt, RequestAttemptId, RequestId, Response};
 use crate::server::{Server, ServerEvent, ClientEvent};
 use des_core::{Component, Key, Scheduler, SimTime, Simulation};
+use des_core::task::Task;
 
 use http::Request;
 use pin_project::pin_project;
@@ -78,8 +79,8 @@ impl SchedulerHandle {
         // Increment load
         self.current_load.fetch_add(1, Ordering::Relaxed);
 
-        // Create a response handler component for this specific request
-        let response_handler = TowerResponseHandler::new(
+        // Create a special client component that will schedule the response task when it receives a response
+        let response_bridge = TowerResponseBridge::new(
             attempt.id,
             self.pending_responses.clone(),
             self.current_load.clone(),
@@ -89,14 +90,14 @@ impl SchedulerHandle {
         // Schedule in DES
         if let Some(sim) = self.simulation.upgrade() {
             let mut simulation = sim.lock().unwrap();
-            let handler_key = simulation.add_component(response_handler);
+            let bridge_key = simulation.add_component(response_bridge);
             
             simulation.schedule(
                 SimTime::from_duration(Duration::from_millis(1)),
                 self.server_key,
                 ServerEvent::ProcessRequest {
                     attempt,
-                    client_id: handler_key,
+                    client_id: bridge_key,
                 },
             );
             Ok(())
@@ -114,16 +115,17 @@ impl SchedulerHandle {
     }
 }
 
-/// Minimal component that handles a single Tower request response
-/// This component exists only to bridge the DES event system back to Tower futures
-struct TowerResponseHandler {
+/// Bridge component that receives responses and schedules response tasks
+/// This component exists temporarily to receive the response event and then schedules
+/// a TowerResponseTask to handle the actual response processing
+struct TowerResponseBridge {
     attempt_id: RequestAttemptId,
     pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
     current_load: Arc<AtomicUsize>,
     wakers: Arc<Mutex<Vec<Waker>>>,
 }
 
-impl TowerResponseHandler {
+impl TowerResponseBridge {
     fn new(
         attempt_id: RequestAttemptId,
         pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
@@ -137,8 +139,73 @@ impl TowerResponseHandler {
             wakers,
         }
     }
+}
 
-    fn complete_request(&self, response: Response) {
+impl Component for TowerResponseBridge {
+    type Event = ClientEvent;
+
+    fn process_event(
+        &mut self,
+        _self_id: Key<Self::Event>,
+        event: &Self::Event,
+        scheduler: &mut Scheduler,
+    ) {
+        match event {
+            ClientEvent::ResponseReceived { response } => {
+                // Schedule a task to handle the response
+                let response_task = TowerResponseTask::new(
+                    self.attempt_id,
+                    response.clone(),
+                    self.pending_responses.clone(),
+                    self.current_load.clone(),
+                    self.wakers.clone(),
+                );
+                
+                // Schedule the task to execute immediately
+                scheduler.schedule_task(SimTime::from_duration(Duration::ZERO), response_task);
+                
+                // This bridge component has served its purpose and can be garbage collected
+            }
+            ClientEvent::SendRequest => {
+                // Response bridges don't send requests
+            }
+        }
+    }
+}
+
+/// Task that handles a single Tower request response
+/// This task exists only to bridge the DES event system back to Tower futures
+/// and automatically cleans up after execution
+struct TowerResponseTask {
+    attempt_id: RequestAttemptId,
+    response: Response,
+    pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
+    current_load: Arc<AtomicUsize>,
+    wakers: Arc<Mutex<Vec<Waker>>>,
+}
+
+impl TowerResponseTask {
+    fn new(
+        attempt_id: RequestAttemptId,
+        response: Response,
+        pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
+        current_load: Arc<AtomicUsize>,
+        wakers: Arc<Mutex<Vec<Waker>>>,
+    ) -> Self {
+        Self {
+            attempt_id,
+            response,
+            pending_responses,
+            current_load,
+            wakers,
+        }
+    }
+}
+
+impl Task for TowerResponseTask {
+    type Output = ();
+
+    fn execute(self, _scheduler: &mut Scheduler) -> Self::Output {
         // Decrement load
         self.current_load.fetch_sub(1, Ordering::Relaxed);
 
@@ -147,7 +214,7 @@ impl TowerResponseHandler {
             let mut pending = self.pending_responses.lock().unwrap();
             pending.remove(&self.attempt_id)
         } {
-            let _ = tx.send(response);
+            let _ = tx.send(self.response);
         }
 
         // Wake up any pending poll_ready calls
@@ -158,27 +225,8 @@ impl TowerResponseHandler {
         for waker in wakers {
             waker.wake();
         }
-    }
-}
-
-impl Component for TowerResponseHandler {
-    type Event = ClientEvent;
-
-    fn process_event(
-        &mut self,
-        _self_id: Key<Self::Event>,
-        event: &Self::Event,
-        _scheduler: &mut Scheduler,
-    ) {
-        match event {
-            ClientEvent::ResponseReceived { response } => {
-                self.complete_request(response.clone());
-                // This component has served its purpose and can be garbage collected
-            }
-            ClientEvent::SendRequest => {
-                // Response handlers don't send requests
-            }
-        }
+        
+        // Task automatically cleans up after execution - no manual component removal needed
     }
 }
 

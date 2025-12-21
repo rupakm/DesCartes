@@ -1,6 +1,7 @@
 //! DES-aware circuit breaker layer
 
 use des_core::{SimTime, Simulation};
+use des_core::task::TimeoutTask;
 use http::Request;
 use pin_project::pin_project;
 use std::future::Future;
@@ -63,7 +64,7 @@ pub struct DesCircuitBreaker<S> {
 #[derive(Debug, Clone)]
 enum CircuitBreakerState {
     Closed { failure_count: usize },
-    Open { opened_at: SimTime },
+    Open, // No longer need to store opened_at time
     HalfOpen,
 }
 
@@ -88,16 +89,7 @@ impl<S> DesCircuitBreaker<S> {
         match *state {
             CircuitBreakerState::Closed { .. } => true,
             CircuitBreakerState::HalfOpen => true,
-            CircuitBreakerState::Open { opened_at } => {
-                // Check if recovery timeout has passed
-                if let Some(sim) = self.simulation.upgrade() {
-                    let simulation = sim.lock().unwrap();
-                    let current_time = simulation.scheduler.time();
-                    current_time >= opened_at + SimTime::from_duration(self.recovery_timeout)
-                } else {
-                    false
-                }
-            }
+            CircuitBreakerState::Open => false, // Simply reject when open
         }
     }
 }
@@ -142,20 +134,6 @@ where
             };
         }
 
-        // Transition to half-open if we were open and timeout passed
-        {
-            let mut state = self.state.lock().unwrap();
-            if let CircuitBreakerState::Open { opened_at } = *state {
-                if let Some(sim) = self.simulation.upgrade() {
-                    let simulation = sim.lock().unwrap();
-                    let current_time = simulation.scheduler.time();
-                    if current_time >= opened_at + SimTime::from_duration(self.recovery_timeout) {
-                        *state = CircuitBreakerState::HalfOpen;
-                    }
-                }
-            }
-        }
-
         let inner_future = self.inner.call(req);
         DesCircuitBreakerFuture {
             inner: Some(inner_future),
@@ -198,16 +176,26 @@ where
                         CircuitBreakerState::Closed { failure_count } => {
                             let new_count = failure_count + 1;
                             if new_count >= *this.failure_threshold {
-                                // Transition to Open state
+                                // Transition to Open state and schedule recovery task
+                                *state = CircuitBreakerState::Open;
+                                
+                                // Schedule a timeout task to transition to HalfOpen
                                 if let Some(sim) = this.simulation.upgrade() {
-                                    let simulation = sim.lock().unwrap();
-                                    let current_time = simulation.scheduler.time();
-                                    *state = CircuitBreakerState::Open { opened_at: current_time };
-                                } else {
-                                    // Fallback if simulation is unavailable
-                                    *state = CircuitBreakerState::Open { 
-                                        opened_at: SimTime::from_duration(Duration::ZERO) 
-                                    };
+                                    if let Ok(mut simulation) = sim.try_lock() {
+                                        let state_clone = this.state.clone();
+                                        let recovery_task = TimeoutTask::new(move |_scheduler| {
+                                            // Transition from Open to HalfOpen
+                                            let mut state = state_clone.lock().unwrap();
+                                            if matches!(*state, CircuitBreakerState::Open) {
+                                                *state = CircuitBreakerState::HalfOpen;
+                                            }
+                                        });
+                                        
+                                        simulation.scheduler.schedule_task(
+                                            SimTime::from_duration(*this.recovery_timeout),
+                                            recovery_task,
+                                        );
+                                    }
                                 }
                             } else {
                                 // Stay closed but increment failure count
@@ -216,17 +204,28 @@ where
                         }
                         CircuitBreakerState::HalfOpen => {
                             // Transition back to open on failure in half-open state
+                            *state = CircuitBreakerState::Open;
+                            
+                            // Schedule another recovery task
                             if let Some(sim) = this.simulation.upgrade() {
-                                let simulation = sim.lock().unwrap();
-                                let current_time = simulation.scheduler.time();
-                                *state = CircuitBreakerState::Open { opened_at: current_time };
-                            } else {
-                                *state = CircuitBreakerState::Open { 
-                                    opened_at: SimTime::from_duration(Duration::ZERO) 
-                                };
+                                if let Ok(mut simulation) = sim.try_lock() {
+                                    let state_clone = this.state.clone();
+                                    let recovery_task = TimeoutTask::new(move |_scheduler| {
+                                        // Transition from Open to HalfOpen
+                                        let mut state = state_clone.lock().unwrap();
+                                        if matches!(*state, CircuitBreakerState::Open) {
+                                            *state = CircuitBreakerState::HalfOpen;
+                                        }
+                                    });
+                                    
+                                    simulation.scheduler.schedule_task(
+                                        SimTime::from_duration(*this.recovery_timeout),
+                                        recovery_task,
+                                    );
+                                }
                             }
                         }
-                        CircuitBreakerState::Open { .. } => {
+                        CircuitBreakerState::Open => {
                             // Already open, no state change needed
                         }
                     }

@@ -49,26 +49,6 @@ impl SimpleClient {
         self
     }
 
-    /// Check if we should send more requests
-    fn should_send_request(&self) -> bool {
-        if let Some(max) = self.max_requests {
-            self.requests_sent < max
-        } else {
-            true
-        }
-    }
-
-    /// Schedule the next request
-    fn schedule_next_request(&self, self_id: Key<ClientEvent>, scheduler: &mut Scheduler) {
-        if self.should_send_request() {
-            scheduler.schedule(
-                SimTime::from_duration(self.request_interval),
-                self_id,
-                ClientEvent::SendRequest,
-            );
-        }
-    }
-
     /// Get metrics for this client
     pub fn get_metrics(&self) -> &SimulationMetrics {
         &self.metrics
@@ -114,8 +94,7 @@ impl Component for SimpleClient {
                 self.metrics.increment_counter("requests_sent", &self.name, scheduler.time());
                 self.metrics.record_gauge("total_requests", &self.name, self.requests_sent as f64, scheduler.time());
                 
-                // Schedule next request if we haven't reached the limit
-                self.schedule_next_request(self_id, scheduler);
+                // No need to manually schedule next request - PeriodicTask handles this
                 
                 // In a real implementation, we would send the attempt to a server
                 // For now, we'll simulate an immediate successful response
@@ -161,6 +140,7 @@ impl Component for SimpleClient {
 mod tests {
     use super::*;
     use des_core::{Execute, Executor, Simulation};
+    use des_core::task::PeriodicTask;
 
     #[test]
     fn test_simple_client() {
@@ -172,12 +152,15 @@ mod tests {
         
         let client_id = sim.add_component(client);
         
-        // Schedule the first request
-        sim.schedule(
+        // Start the periodic request generation
+        let task = PeriodicTask::with_count(
+            move |scheduler| {
+                scheduler.schedule_now(client_id, ClientEvent::SendRequest);
+            },
             SimTime::from_duration(Duration::from_millis(100)),
-            client_id,
-            ClientEvent::SendRequest,
+            3,
         );
+        sim.scheduler.schedule_task(SimTime::zero(), task);
         
         // Run simulation for 1 second
         Executor::timed(SimTime::from_duration(Duration::from_secs(1))).execute(&mut sim);
@@ -196,15 +179,17 @@ mod tests {
         
         let client_id = sim.add_component(client);
         
-        // Schedule the first request
-        sim.schedule(
+        // Start the periodic request generation (unlimited)
+        let task = PeriodicTask::new(
+            move |scheduler| {
+                scheduler.schedule_now(client_id, ClientEvent::SendRequest);
+            },
             SimTime::from_duration(Duration::from_millis(50)),
-            client_id,
-            ClientEvent::SendRequest,
         );
+        sim.scheduler.schedule_task(SimTime::zero(), task);
         
-        // Run simulation for 500ms (should send 10 requests)
-        Executor::timed(SimTime::from_duration(Duration::from_millis(500))).execute(&mut sim);
+        // Run simulation for 495ms (should send 10 requests: at 0, 50, 100, 150, 200, 250, 300, 350, 400, 450ms)
+        Executor::timed(SimTime::from_duration(Duration::from_millis(495))).execute(&mut sim);
         
         // Verify the client sent requests
         let client = sim.remove_component::<ClientEvent, SimpleClient>(client_id).unwrap();
