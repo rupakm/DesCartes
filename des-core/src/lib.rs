@@ -11,6 +11,7 @@ pub mod metrics;
 pub mod scheduler;
 pub mod time;
 pub mod types;
+pub mod task;
 
 pub mod formal;
 
@@ -27,6 +28,7 @@ pub use execute::{Executor, Execute};
 pub use metrics::{MetricEmitter, MetricValue, MetricType, MetricBuilder, SimulationMetrics, MetricsSummary};
 // pub use request::{Request, RequestAttempt, RequestStatus, AttemptStatus, Response, ResponseStatus};
 pub use scheduler::{EventEntry, Scheduler};
+pub use task::{Task, TaskId, TaskHandle, ClosureTask, TimeoutTask, RetryTask, PeriodicTask};
 
 
 
@@ -87,10 +89,12 @@ where
     C: Component<Event = E> + 'static,
 {
     fn process_event_entry(&mut self, entry: EventEntry, scheduler: &mut Scheduler) {
-        let typed_entry = entry
-            .downcast::<E>()
-            .expect("Failed to downcast event entry.");
-        self.process_event(typed_entry.component_key, typed_entry.event, scheduler);
+        if let EventEntry::Component(component_entry) = entry {
+            let typed_entry = component_entry
+                .downcast::<E>()
+                .expect("Failed to downcast event entry.");
+            self.process_event(typed_entry.component_key, typed_entry.event, scheduler);
+        }
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
@@ -112,10 +116,17 @@ impl Components {
         entry: EventEntry,
         scheduler: &mut Scheduler,
     ) {
-        self.components
-            .get_mut(&entry.component_idx())
-            .unwrap()
-            .process_event_entry(entry, scheduler);
+        match entry {
+            EventEntry::Component(component_entry) => {
+                if let Some(component) = self.components.get_mut(&component_entry.component) {
+                    component.process_event_entry(EventEntry::Component(component_entry), scheduler);
+                }
+            }
+            EventEntry::Task(task_entry) => {
+                // Execute the task
+                scheduler.execute_task(task_entry.task_id);
+            }
+        }
     }
 
     /// Registers a new component and returns its ID.

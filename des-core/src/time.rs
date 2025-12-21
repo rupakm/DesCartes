@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::ops::{Add, Sub};
+use std::ops::{Add, Sub, Mul};
 use std::time::Duration;
 
 /// Simulation time with nanosecond precision
@@ -98,6 +98,14 @@ impl Sub<SimTime> for SimTime {
 
     fn sub(self, rhs: SimTime) -> Self::Output {
         self.duration_since(rhs)
+    }
+}
+
+impl Mul<u64> for SimTime {
+    type Output = SimTime;
+
+    fn mul(self, rhs: u64) -> Self::Output {
+        SimTime(self.0.saturating_mul(rhs))
     }
 }
 
