@@ -14,6 +14,7 @@ This crate provides composable building blocks for simulating distributed system
 - **Queue Management**: FIFO and priority queues with capacity limits
 - **Rate Limiting**: Token bucket and concurrency limiting
 - **Circuit Breakers**: Failure detection and recovery patterns
+- **Retry Logic**: Exponential backoff with RetryTask integration
 - **Load Balancing**: Round-robin and random load balancing strategies
 - **Comprehensive Testing**: Unit and integration tests for all components
 
@@ -221,6 +222,28 @@ use des_components::DesTimeout;
 let timeout_service = DesTimeout::new(
     base_service,
     Duration::from_millis(1000),
+    Arc::downgrade(&simulation)
+);
+```
+
+### Retry
+
+```rust
+use des_components::{DesRetryLayer, DesRetryService};
+
+// Using retry layer
+let retry_layer = DesRetryLayer::new(
+    3, // max attempts
+    Duration::from_millis(100), // base delay
+    Arc::downgrade(&simulation)
+);
+let retry_service = retry_layer.layer(base_service);
+
+// Using direct retry service
+let retry_service = DesRetryService::new(
+    base_service,
+    5, // max attempts
+    Duration::from_millis(200), // base delay
     Arc::downgrade(&simulation)
 );
 ```

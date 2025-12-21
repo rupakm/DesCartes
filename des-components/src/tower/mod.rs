@@ -19,6 +19,7 @@ pub mod load_balancer;
 pub mod circuit_breaker;
 pub mod limit;
 pub mod hedge;
+pub mod retry;
 
 pub use service::{DesService, DesServiceBuilder, SchedulerHandle};
 pub use timeout::{DesTimeout, DesTimeoutLayer};
@@ -26,9 +27,10 @@ pub use load_balancer::{DesLoadBalancer, DesLoadBalanceStrategy, DesLoadBalancer
 pub use circuit_breaker::{DesCircuitBreaker, DesCircuitBreakerLayer};
 pub use limit::{DesRateLimit, DesRateLimitLayer, DesConcurrencyLimit, DesConcurrencyLimitLayer, DesGlobalConcurrencyLimit, DesGlobalConcurrencyLimitLayer};
 pub use hedge::{DesHedge, DesHedgeLayer};
+pub use retry::{DesRetry, DesRetryLayer, DesRetryPolicy, exponential_backoff_layer, ExponentialBackoff};
 
 /// Errors that can occur in the DES Tower integration
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum ServiceError {
     #[error("Service is not ready to accept requests")]
     NotReady,
@@ -41,7 +43,7 @@ pub enum ServiceError {
     #[error("Internal simulation error: {0}")]
     Internal(String),
     #[error("HTTP error: {0}")]
-    Http(#[from] http::Error),
+    Http(String), // Changed from http::Error to String for Clone compatibility
 }
 
 /// A simple HTTP body type for our simulation
@@ -103,7 +105,7 @@ pub(crate) fn response_to_http(
             HttpResponse::builder()
                 .status(StatusCode::OK)
                 .body(body)
-                .map_err(ServiceError::Http)
+                .map_err(|e| ServiceError::Http(e.to_string()))
         }
         ResponseStatus::Error { code, message } => {
             let status = StatusCode::from_u16(code as u16)
@@ -112,7 +114,7 @@ pub(crate) fn response_to_http(
             HttpResponse::builder()
                 .status(status)
                 .body(SimBody::new(message))
-                .map_err(ServiceError::Http)
+                .map_err(|e| ServiceError::Http(e.to_string()))
         }
     }
 }
