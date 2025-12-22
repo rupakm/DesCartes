@@ -247,12 +247,9 @@ fn test_exponential_traffic_single_server_with_queue() {
     
     // Get server metrics if available
     let final_server = simulation.remove_component::<ServerEvent, Server>(server_key).unwrap();
-    let server_metrics = final_server.get_metrics();
-    println!("Server metrics recorded: {} total metrics", server_metrics.get_metrics().len());
-    
-    // Look for request-related metrics
-    let request_metrics = server_metrics.get_component_metrics("test-server");
-    println!("Server component metrics: {}", request_metrics.len());
+    println!("Server processed {} requests", final_server.requests_processed);
+    // Note: With the new metrics system, metrics are recorded globally
+    // and can be accessed through the metrics registry, not through the component
 }
 
 #[test]
@@ -494,12 +491,10 @@ fn test_exponential_traffic_load_balancer_three_servers() {
     let final_server2 = simulation.remove_component::<ServerEvent, Server>(server2_key).unwrap();
     let final_server3 = simulation.remove_component::<ServerEvent, Server>(server3_key).unwrap();
     
-    let s1_metrics = final_server1.get_metrics();
-    println!("Server 1 metrics: {} total", s1_metrics.get_metrics().len());
+    println!("Server 1 processed: {} requests", final_server1.requests_processed);
     
-    let s2_metrics = final_server2.get_metrics();
-    println!("Server 2 metrics: {} total", s2_metrics.get_metrics().len());
+    println!("Server 2 processed: {} requests", final_server2.requests_processed);
     
-    let s3_metrics = final_server3.get_metrics();
-    println!("Server 3 metrics: {} total", s3_metrics.get_metrics().len());
+    println!("Server 3 processed: {} requests", final_server3.requests_processed);
+    // Note: With the new metrics system, metrics are recorded globally
 }

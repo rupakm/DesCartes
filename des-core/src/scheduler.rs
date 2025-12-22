@@ -5,6 +5,7 @@ use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
 use std::rc::Rc;
 use uuid::Uuid;
+use tracing::{debug, trace};
 
 use crate::{Key, SimTime};
 use crate::types::EventId;
@@ -209,9 +210,31 @@ impl Scheduler {
         event: E,
     ) {
         self.next_event_id += 1;
-        let time = self.time() + time;
-        let component_entry = ComponentEventEntry::new(EventId(self.next_event_id), time, component, event);
+        let absolute_time = self.time() + time;
+        let event_id = EventId(self.next_event_id);
+        
+        // Log event scheduling
+        trace!(
+            event_id = ?event_id,
+            event_type = std::any::type_name::<E>(),
+            scheduled_time = ?absolute_time,
+            current_time = ?self.time(),
+            component_id = ?component.id(),
+            "Event scheduled"
+        );
+        
+        let component_entry = ComponentEventEntry::new(event_id, absolute_time, component, event);
         self.events.push(EventEntry::Component(component_entry));
+        
+        // Log scheduler state periodically
+        if self.next_event_id % 1000 == 0 {
+            debug!(
+                current_time = ?self.time(),
+                pending_events = self.events.len(),
+                total_events_scheduled = self.next_event_id,
+                "Scheduler state update"
+            );
+        }
     }
 
     /// Schedules `event` to be executed for `component` at `self.time()`.

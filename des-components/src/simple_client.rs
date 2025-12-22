@@ -3,8 +3,8 @@
 //! This is a minimal example showing how to create components that work
 //! with the new Component trait and event-driven simulation system.
 
-use crate::request::{RequestAttempt, RequestAttemptId, RequestId, Response};
-use des_core::{Component, Key, Scheduler, SimTime, SimulationMetrics};
+use des_core::{Component, Key, Scheduler, SimTime, RequestAttempt, RequestAttemptId, RequestId, Response};
+use des_metrics::SimulationMetrics;
 use std::time::Duration;
 
 /// Simple client component that generates periodic requests
@@ -91,8 +91,8 @@ impl Component for SimpleClient {
                 self.next_attempt_id += 1;
                 
                 // Record metrics
-                self.metrics.increment_counter("requests_sent", &self.name, scheduler.time());
-                self.metrics.record_gauge("total_requests", &self.name, self.requests_sent as f64, scheduler.time());
+                self.metrics.increment_counter("requests_sent", &[("component", &self.name)]);
+                self.metrics.record_gauge("total_requests", self.requests_sent as f64, &[("component", &self.name)]);
                 
                 // No need to manually schedule next request - PeriodicTask handles this
                 
@@ -123,14 +123,14 @@ impl Component for SimpleClient {
                 
                 // Record response metrics
                 if response.is_success() {
-                    self.metrics.increment_counter("responses_success", &self.name, scheduler.time());
+                    self.metrics.increment_counter("responses_success", &[("component", &self.name)]);
                 } else {
-                    self.metrics.increment_counter("responses_failure", &self.name, scheduler.time());
+                    self.metrics.increment_counter("responses_failure", &[("component", &self.name)]);
                 }
                 
                 // Calculate and record response time
                 let response_time = scheduler.time().duration_since(response.completed_at);
-                self.metrics.record_histogram("response_time_ms", &self.name, response_time.as_millis() as f64, scheduler.time());
+                self.metrics.record_histogram("response_time_ms", response_time.as_millis() as f64, &[("component", &self.name)]);
             }
         }
     }

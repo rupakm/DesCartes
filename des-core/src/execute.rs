@@ -1,4 +1,5 @@
 use crate::{Simulation, SimTime};
+use tracing::{debug, info, trace, warn, instrument};
 
 /// Simulation execution trait.
 pub trait Execute {
@@ -62,8 +63,14 @@ impl Executor {
 }
 
 impl Execute for Executor {
+    #[instrument(skip(sim), fields(end_condition = ?self.end_condition))]
     fn execute(self, sim: &mut Simulation) {
+        info!("Starting simulation execution");
         run_with(sim, self.end_condition, |_| {});
+        info!(
+            final_time = ?sim.scheduler.time(),
+            "Simulation execution completed"
+        );
     }
 }
 
@@ -79,8 +86,14 @@ impl<F> Execute for ExecutorWithSideEffect<F>
 where
     F: Fn(&Simulation),
 {
+    #[instrument(skip(sim, self), fields(end_condition = ?self.end_condition))]
     fn execute(self, sim: &mut Simulation) {
+        info!("Starting simulation execution with side effects");
         run_with(sim, self.end_condition, self.side_effect);
+        info!(
+            final_time = ?sim.scheduler.time(),
+            "Simulation execution with side effects completed"
+        );
     }
 }
 
@@ -88,6 +101,9 @@ fn run_with<F>(sim: &mut Simulation, end_condition: EndCondition, side_effect: F
 where
     F: Fn(&Simulation),
 {
+    debug!(?end_condition, "Starting simulation run");
+    let start_time = sim.scheduler.time();
+    
     let step_fn = |sim: &mut Simulation| {
         let result = sim.step();
         if result {
@@ -95,38 +111,101 @@ where
         }
         result
     };
+    
     match end_condition {
-        EndCondition::Time(time) => execute_until(sim, time, step_fn),
-        EndCondition::NoEvents => execute_until_empty(sim, step_fn),
-        EndCondition::Steps(steps) => execute_steps(sim, steps, step_fn),
+        EndCondition::Time(time) => {
+            debug!(?time, "Executing until time limit");
+            execute_until(sim, time, step_fn)
+        },
+        EndCondition::NoEvents => {
+            debug!("Executing until no events remain");
+            execute_until_empty(sim, step_fn)
+        },
+        EndCondition::Steps(steps) => {
+            debug!(steps, "Executing for fixed number of steps");
+            execute_steps(sim, steps, step_fn)
+        },
     }
+    
+    let final_time = sim.scheduler.time();
+    let time_elapsed = final_time - start_time;
+    
+    debug!(
+        start_time = ?start_time,
+        final_time = ?final_time,
+        time_elapsed = ?time_elapsed,
+        "Simulation run completed"
+    );
 }
 
 fn execute_until_empty<F>(sim: &mut Simulation, step: F)
 where
     F: Fn(&mut Simulation) -> bool,
 {
-    while step(sim) {}
+    let mut steps = 0;
+    while step(sim) {
+        steps += 1;
+        if steps % 10000 == 0 {
+            trace!(
+                steps,
+                current_time = ?sim.scheduler.time(),
+                "Execution progress"
+            );
+        }
+    }
+    debug!(steps, "Executed until no events remained");
 }
 
 fn execute_until<F>(sim: &mut Simulation, time: SimTime, step: F)
 where
     F: Fn(&mut Simulation) -> bool,
 {
+    let mut steps = 0;
     while sim.scheduler.peek().is_some_and(|e| e.time() <= time) {
         step(sim);
+        steps += 1;
+        if steps % 10000 == 0 {
+            trace!(
+                steps,
+                current_time = ?sim.scheduler.time(),
+                time_limit = ?time,
+                "Execution progress"
+            );
+        }
     }
+    debug!(steps, final_time = ?sim.scheduler.time(), "Executed until time limit");
 }
 
 fn execute_steps<F>(sim: &mut Simulation, steps: usize, step: F)
 where
     F: Fn(&mut Simulation) -> bool,
 {
-    for _ in 0..steps {
+    let mut executed = 0;
+    for i in 0..steps {
         if !step(sim) {
+            debug!(
+                requested_steps = steps,
+                executed_steps = executed,
+                "Execution stopped early - no more events"
+            );
             break;
         }
+        executed += 1;
+        if i % 10000 == 0 && i > 0 {
+            trace!(
+                executed_steps = executed,
+                total_steps = steps,
+                current_time = ?sim.scheduler.time(),
+                "Execution progress"
+            );
+        }
     }
+    debug!(
+        requested_steps = steps,
+        executed_steps = executed,
+        final_time = ?sim.scheduler.time(),
+        "Step-limited execution completed"
+    );
 }
 
 #[cfg(test)]

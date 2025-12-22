@@ -2,7 +2,19 @@
 //!
 //! This crate provides comprehensive metrics collection, statistical analysis,
 //! and structured logging capabilities for simulation observability.
+//!
+//! The crate leverages the standard Rust metrics ecosystem while adding
+//! simulation-specific functionality like request tracking and high-resolution
+//! latency analysis.
 
 pub mod error;
+pub mod request_tracker;
+pub mod simulation_metrics;
 
-pub use error::{MetricsError, LogError};
+// Re-export key types
+pub use error::{LogError, MetricsError};
+pub use request_tracker::{LatencyStats as RequestLatencyStats, RequestTracker, RequestTrackerStats};
+pub use simulation_metrics::{LatencyStats, SimulationMetrics, setup_prometheus_metrics, setup_prometheus_metrics_with_config};
+
+// Re-export standard metrics for convenience
+pub use metrics::{counter, gauge, histogram};

@@ -6,9 +6,7 @@
 use crate::builder::{validate_non_empty, Set, Unset, Validate, ValidationResult};
 use crate::dists::ArrivalPattern;
 use crate::error::RequestError;
-use crate::request::{Request, RequestAttempt, RequestAttemptId, RequestId, RequestStatus, AttemptStatus, Response};
-// use crate::server::Server;
-use des_core::{Component, SimError, SimTime};
+use des_core::{Component, SimError, SimTime, Request, RequestAttempt, RequestAttemptId, RequestId, RequestStatus, AttemptStatus, Response};
 // TODO: Update to use new Component-based API instead of Environment
 use std::time::Duration;
 

@@ -4,8 +4,7 @@
 //! (FIFO, priority-based) and capacity management.
 
 use crate::error::QueueError;
-use crate::request::RequestAttempt;
-use des_core::SimTime;
+use des_core::{SimTime, RequestAttempt};
 use serde::{Deserialize, Serialize};
 use std::collections::{BinaryHeap, VecDeque};
 use uuid::Uuid;
@@ -275,7 +274,7 @@ impl Queue for FifoQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::request::{RequestAttemptId, RequestId};
+    use des_core::{RequestAttemptId, RequestId};
 
     fn create_test_item(id: u64, time: u64) -> QueueItem {
         let attempt = RequestAttempt::new(
@@ -601,7 +600,7 @@ impl Queue for PriorityQueue {
 #[cfg(test)]
 mod priority_queue_tests {
     use super::*;
-    use crate::request::{RequestAttemptId, RequestId};
+    use des_core::{RequestAttemptId, RequestId};
 
     fn create_test_item_with_priority(id: u64, time: u64, priority: u32) -> QueueItem {
         let attempt = RequestAttempt::new(

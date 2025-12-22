@@ -4,7 +4,7 @@
 //! distributed systems. It distinguishes between logical requests (from the client's
 //! perspective) and individual request attempts (actual network/server interactions).
 
-use des_core::SimTime;
+use crate::SimTime;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

@@ -89,6 +89,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use std::time::Duration;
+use tracing::{debug, trace, warn, instrument};
 
 use crate::scheduler::Scheduler;
 use crate::{Component, Key, SimTime};
@@ -424,14 +425,19 @@ impl DesRuntime {
     ///     sim_sleep(Duration::from_millis(100)).await;
     /// });
     /// ```
+    #[instrument(skip(self, future), fields(task_id))]
     pub fn spawn<F>(&mut self, future: F) -> TaskId
     where
         F: Future<Output = ()> + 'static,
     {
-        self.spawn_boxed(Box::pin(future))
+        let task_id = self.spawn_boxed(Box::pin(future));
+        tracing::Span::current().record("task_id", tracing::field::debug(&task_id));
+        debug!("Spawned new async task");
+        task_id
     }
 
     /// Spawn a boxed future
+    #[instrument(skip(self, future), fields(task_id))]
     pub fn spawn_boxed(&mut self, future: Pin<Box<dyn Future<Output = ()>>>) -> TaskId {
         let task_id = TaskId(self.next_task_id);
         self.next_task_id += 1;
@@ -440,6 +446,14 @@ impl DesRuntime {
 
         self.tasks.insert(task_id, task);
         self.ready_queue.push_back(task_id);
+        
+        tracing::Span::current().record("task_id", tracing::field::debug(&task_id));
+        debug!(
+            task_count = self.tasks.len(),
+            ready_count = self.ready_queue.len(),
+            "Spawned boxed async task"
+        );
+        
         task_id
     }
 
@@ -454,6 +468,7 @@ impl DesRuntime {
     }
 
     /// Poll a single task
+    #[instrument(skip(self, context, scheduler), fields(task_id = ?task_id))]
     fn poll_task(&mut self, task_id: TaskId, context: &mut AsyncContext, scheduler: &mut Scheduler) -> Option<Poll<()>> {
         let task = self.tasks.get_mut(&task_id)?;
 
@@ -463,10 +478,21 @@ impl DesRuntime {
         // Store the waker for potential timer callbacks
         self.task_wakers.insert(task_id, waker.clone());
 
+        trace!("Polling async task");
+
         // Set up thread-local context and poll
         let result = with_async_context(context, scheduler, task_id, self.runtime_key, || {
             task.future.as_mut().poll(&mut cx)
         });
+
+        match result {
+            Poll::Ready(()) => {
+                debug!("Async task completed");
+            }
+            Poll::Pending => {
+                trace!("Async task returned Pending");
+            }
+        }
 
         Some(result)
     }
@@ -481,9 +507,20 @@ impl DesRuntime {
     ///
     /// Tasks that return `Poll::Pending` remain in the runtime and will
     /// be woken later by timer events or external wake calls.
+    #[instrument(skip(self, context, scheduler), fields(
+        ready_tasks = self.ready_queue.len(),
+        total_tasks = self.tasks.len(),
+        current_time = ?context.current_time
+    ))]
     fn poll_ready_tasks(&mut self, context: &mut AsyncContext, scheduler: &mut Scheduler) {
+        let initial_ready_count = self.ready_queue.len();
+        debug!("Starting to poll ready tasks");
+
         // Process ready queue first
         let ready: Vec<TaskId> = self.ready_queue.drain(..).collect();
+
+        let mut completed_count = 0;
+        let mut pending_count = 0;
 
         for task_id in ready {
             if let Some(poll_result) = self.poll_task(task_id, context, scheduler) {
@@ -492,31 +529,54 @@ impl DesRuntime {
                         // Task completed, remove it
                         self.tasks.remove(&task_id);
                         self.task_wakers.remove(&task_id);
+                        completed_count += 1;
+                        trace!(?task_id, "Task completed and removed");
                     }
                     Poll::Pending => {
                         // Task is waiting - timer should have been scheduled if needed
+                        pending_count += 1;
+                        trace!(?task_id, "Task is pending");
                     }
                 }
             }
         }
 
         // Add any tasks that were woken during polling back to ready queue
+        let woken_count = context.pending_wakes.len();
         for task_id in context.pending_wakes.drain(..) {
             if self.tasks.contains_key(&task_id) && !self.ready_queue.contains(&task_id) {
                 self.ready_queue.push_back(task_id);
+                trace!(?task_id, "Task woken during polling cycle");
             }
         }
+
+        debug!(
+            initial_ready = initial_ready_count,
+            completed = completed_count,
+            pending = pending_count,
+            woken = woken_count,
+            remaining_tasks = self.tasks.len(),
+            new_ready = self.ready_queue.len(),
+            "Completed polling cycle"
+        );
     }
 
     /// Wake a specific task
+    #[instrument(skip(self), fields(task_id = ?task_id))]
     pub fn wake_task(&mut self, task_id: TaskId) {
         if self.tasks.contains_key(&task_id) {
             if let Some(waker) = self.task_wakers.get(&task_id) {
                 waker.wake_by_ref();
+                trace!("Woke task via waker");
             }
             if !self.ready_queue.contains(&task_id) {
                 self.ready_queue.push_back(task_id);
+                debug!("Added task to ready queue");
+            } else {
+                trace!("Task already in ready queue");
             }
+        } else {
+            warn!("Attempted to wake non-existent task");
         }
     }
 }
@@ -524,6 +584,12 @@ impl DesRuntime {
 impl Component for DesRuntime {
     type Event = RuntimeEvent;
 
+    #[instrument(skip(self, scheduler), fields(
+        event_type = ?event,
+        current_time = ?scheduler.time(),
+        task_count = self.tasks.len(),
+        ready_count = self.ready_queue.len()
+    ))]
     fn process_event(
         &mut self,
         self_id: Key<Self::Event>,
@@ -533,6 +599,7 @@ impl Component for DesRuntime {
         // Store runtime key for waker callbacks
         if self.runtime_key.is_none() {
             self.runtime_key = Some(self_id);
+            debug!("Runtime key initialized");
         }
         
         // Create async context for this polling cycle
@@ -540,9 +607,11 @@ impl Component for DesRuntime {
 
         match event {
             RuntimeEvent::Poll => {
+                debug!("Processing Poll event");
                 self.poll_ready_tasks(&mut context, scheduler);
             }
             RuntimeEvent::ExternalWake { task_id } => {
+                debug!(?task_id, "Processing ExternalWake event");
                 self.wake_task(*task_id);
                 self.poll_ready_tasks(&mut context, scheduler);
             }
@@ -551,6 +620,7 @@ impl Component for DesRuntime {
                 // In practice, users would call spawn() directly on the runtime
                 // This event is for spawning from other components
                 // For now, we'll just trigger a poll
+                debug!("Processing Spawn event");
                 self.poll_ready_tasks(&mut context, scheduler);
             }
         }
@@ -558,7 +628,10 @@ impl Component for DesRuntime {
         // Only schedule another poll if there are ready tasks
         // This prevents continuous polling - tasks are woken by ExternalWake events
         if !self.ready_queue.is_empty() {
+            trace!("Scheduling next poll - ready tasks remain");
             scheduler.schedule_now(self_id, RuntimeEvent::Poll);
+        } else {
+            trace!("No ready tasks - not scheduling next poll");
         }
     }
 }

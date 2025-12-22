@@ -123,20 +123,20 @@
     - Track failure counts and state transitions
     - _Requirements: 2.5_
 
-- [ ] 12. Implement metrics collection system
-  - [ ] 12.1 Create MetricsCollector and backend trait
+- [x] 12. Implement metrics collection system
+  - [x] 12.1 Create MetricsCollector and backend trait
     - Define MetricsBackend trait with record() and flush()
     - Implement MetricsCollector with pluggable backend
     - Create Metric enum (Counter, Gauge, Histogram)
     - Implement InMemoryBackend for testing
     - _Requirements: 7.1, 7.2_
-  - [ ] 12.2 Implement RequestTracker
+  - [x] 12.2 Implement RequestTracker
     - Create RequestTracker to track active and completed requests/attempts
     - Write start_request(), start_attempt(), complete_attempt(), complete_request()
     - Implement latency calculation methods for requests and attempts
     - Compute goodput, throughput, retry_rate, timeout_rate
     - _Requirements: 7.1, 7.3, 7.4_
-  - [ ] 12.3 Implement MetricSeries and statistics
+  - [x] 12.3 Implement MetricSeries and statistics
     - Create MetricSeries to store time-series data
     - Implement mean(), percentile(), variance() calculations
     - Create LatencyStats struct with p50, p95, p99, p999

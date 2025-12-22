@@ -4,8 +4,7 @@
 //! by sending events between them.
 
 use des_components::{Server, ServerEvent, ClientEvent};
-use des_components::request::{RequestAttempt, RequestAttemptId, RequestId};
-use des_core::{Component, Execute, Executor, Key, Scheduler, Simulation, SimTime};
+use des_core::{Component, Execute, Executor, Key, Scheduler, Simulation, SimTime, RequestAttempt, RequestAttemptId, RequestId};
 use std::time::Duration;
 
 /// Client that actually sends requests to a specific server

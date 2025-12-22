@@ -6,7 +6,6 @@
 pub mod builder;
 pub mod dists;
 // pub mod client;  // TODO: Update to use new Component API
-pub mod request;
 pub mod error;
 
 pub mod simple_client;
@@ -27,7 +26,7 @@ pub use error::{ComponentError, QueueError, ThrottleError, RequestError};
 pub mod queue;
 pub use queue::{FifoQueue, PriorityQueue, Queue, QueueItem};
 
-pub use request::{Request, RequestAttempt, RequestId, RequestAttemptId, RequestStatus, AttemptStatus, Response, ResponseStatus};
+pub use des_core::{Request, RequestAttempt, RequestId, RequestAttemptId, RequestStatus, AttemptStatus, Response, ResponseStatus};
 
 
 

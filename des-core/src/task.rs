@@ -13,6 +13,7 @@ use std::any::Any;
 use std::fmt;
 use std::marker::PhantomData;
 use uuid::Uuid;
+use tracing::{debug, info, trace, warn, instrument};
 
 /// Unique identifier for tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -127,8 +128,12 @@ where
 {
     type Output = R;
 
+    #[instrument(skip(self, scheduler), fields(task_type = "ClosureTask"))]
     fn execute(self, scheduler: &mut Scheduler) -> Self::Output {
-        (self.closure)(scheduler)
+        debug!("Executing closure task");
+        let result = (self.closure)(scheduler);
+        trace!("Closure task completed");
+        result
     }
 }
 
@@ -153,8 +158,11 @@ where
 {
     type Output = ();
 
+    #[instrument(skip(self, scheduler), fields(task_type = "TimeoutTask"))]
     fn execute(self, scheduler: &mut Scheduler) -> Self::Output {
-        (self.callback)(scheduler)
+        debug!("Executing timeout task");
+        (self.callback)(scheduler);
+        trace!("Timeout task completed");
     }
 }
 
@@ -193,17 +201,41 @@ where
 {
     type Output = Result<R, E>;
 
+    #[instrument(skip(self, scheduler), fields(
+        task_type = "RetryTask",
+        attempt = self.current_attempt + 1,
+        max_attempts = self.max_attempts
+    ))]
     fn execute(mut self, scheduler: &mut Scheduler) -> Self::Output {
         self.current_attempt += 1;
         
+        debug!("Executing retry task");
+        
         match (self.operation)(scheduler) {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                info!(
+                    attempt = self.current_attempt,
+                    "Retry task succeeded"
+                );
+                Ok(result)
+            }
             Err(error) => {
                 if self.current_attempt >= self.max_attempts {
+                    warn!(
+                        attempt = self.current_attempt,
+                        max_attempts = self.max_attempts,
+                        "Retry task failed - max attempts reached"
+                    );
                     Err(error)
                 } else {
                     // Schedule retry with exponential backoff
                     let delay = self.base_delay * (2_u64.pow(self.current_attempt - 1));
+                    debug!(
+                        attempt = self.current_attempt,
+                        next_delay = ?delay,
+                        "Retry task failed - scheduling retry"
+                    );
+                    
                     let task_id = TaskId::new();
                     let wrapper = TaskWrapper::new(self, task_id);
                     scheduler.schedule_task_at(
@@ -259,7 +291,14 @@ where
 {
     type Output = ();
 
+    #[instrument(skip(self, scheduler), fields(
+        task_type = "PeriodicTask",
+        interval = ?self.interval,
+        remaining = ?self.remaining_executions
+    ))]
     fn execute(mut self, scheduler: &mut Scheduler) -> Self::Output {
+        debug!("Executing periodic task");
+        
         // Execute the callback
         (self.callback)(scheduler);
 
@@ -267,8 +306,12 @@ where
         if let Some(remaining) = &mut self.remaining_executions {
             *remaining -= 1;
             if *remaining == 0 {
+                info!("Periodic task completed - no more executions");
                 return; // No more executions
             }
+            debug!(remaining = *remaining, "Periodic task continuing");
+        } else {
+            trace!("Periodic task continuing indefinitely");
         }
 
         // Schedule next execution
@@ -279,6 +322,11 @@ where
             scheduler.time() + interval,
             task_id,
             Box::new(wrapper),
+        );
+        
+        debug!(
+            next_execution_time = ?(scheduler.time() + interval),
+            "Scheduled next periodic task execution"
         );
     }
 }

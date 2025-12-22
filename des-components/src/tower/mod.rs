@@ -90,9 +90,9 @@ impl HttpBody for SimBody {
 
 /// Convert DES Response to HTTP response
 pub(crate) fn response_to_http(
-    response: crate::request::Response,
+    response: des_core::Response,
 ) -> Result<HttpResponse<SimBody>, ServiceError> {
-    use crate::request::ResponseStatus;
+    use des_core::ResponseStatus;
     
     match response.status {
         ResponseStatus::Ok => {

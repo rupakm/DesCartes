@@ -1,8 +1,7 @@
 //! DES-backed Tower Service implementation
 
-use crate::request::{RequestAttempt, RequestAttemptId, RequestId, Response};
-use crate::server::{Server, ServerEvent, ClientEvent};
-use des_core::{Component, Key, Scheduler, SimTime, Simulation};
+use crate::{Server, ServerEvent, ClientEvent};
+use des_core::{Component, Key, Scheduler, SimTime, Simulation, RequestAttempt, RequestAttemptId, RequestId, Response};
 use des_core::task::Task;
 
 use http::Request;
