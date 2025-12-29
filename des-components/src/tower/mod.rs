@@ -380,7 +380,7 @@ mod tests {
         // The response should be ready now
         let response = match Pin::new(&mut response_future).poll(&mut cx) {
             Poll::Ready(Ok(response)) => response,
-            Poll::Ready(Err(e)) => panic!("Request failed: {:?}", e),
+            Poll::Ready(Err(e)) => panic!("Request failed: {e:?}"),
             Poll::Pending => panic!("Response should be ready after simulation steps"),
         };
 
@@ -414,7 +414,7 @@ mod tests {
         for i in 0..5 {
             let req = Request::builder()
                 .method(Method::GET)
-                .uri(format!("/rate-limit-test/{}", i))
+                .uri(format!("/rate-limit-test/{i}"))
                 .body(SimBody::empty())
                 .unwrap();
             futures.push(rate_limit_service.call(req));
@@ -443,7 +443,7 @@ mod tests {
                 Poll::Ready(Err(ServiceError::Overloaded)) => {
                     rate_limited += 1;
                 }
-                Poll::Ready(Err(e)) => panic!("Unexpected error: {:?}", e),
+                Poll::Ready(Err(e)) => panic!("Unexpected error: {e:?}"),
                 Poll::Pending => {
                     // Might be rate limited
                     rate_limited += 1;
@@ -451,7 +451,7 @@ mod tests {
             }
         }
 
-        println!("Rate limit test - Successes: {}, Rate limited: {}", successes, rate_limited);
+        println!("Rate limit test - Successes: {successes}, Rate limited: {rate_limited}");
         
         // Should allow burst capacity (3) and rate limit the rest (2)
         assert!(successes <= 3, "Should not exceed burst capacity");
@@ -602,7 +602,7 @@ mod tests {
             
             let req = Request::builder()
                 .method(Method::GET)
-                .uri(format!("/sequential/{}", i))
+                .uri(format!("/sequential/{i}"))
                 .body(SimBody::empty())
                 .unwrap();
             let mut future = concurrency_service.call(req);
@@ -749,7 +749,7 @@ mod tests {
             assert!(matches!(global_service1.poll_ready(&mut cx), Poll::Ready(Ok(()))));
             let req = Request::builder()
                 .method(Method::GET)
-                .uri(format!("/fair-1-{}", round))
+                .uri(format!("/fair-1-{round}"))
                 .body(SimBody::empty())
                 .unwrap();
             let future = global_service1.call(req);
@@ -932,7 +932,7 @@ mod tests {
                 // Success! Layer composition works
             }
             Poll::Ready(Err(e)) => {
-                panic!("Composed service failed with error: {:?}", e);
+                panic!("Composed service failed with error: {e:?}");
             }
             Poll::Pending => {
                 panic!("Composed service still pending after simulation steps");
@@ -992,10 +992,10 @@ mod tests {
                 // Success - request completed before timeout
             }
             Poll::Ready(Err(ServiceError::Timeout { duration })) => {
-                panic!("Request should not have timed out (timeout was {:?}, service time was 1ms)", duration);
+                panic!("Request should not have timed out (timeout was {duration:?}, service time was 1ms)");
             }
             Poll::Ready(Err(e)) => {
-                panic!("Unexpected error: {:?}", e);
+                panic!("Unexpected error: {e:?}");
             }
             Poll::Pending => {
                 // Try polling again after more simulation steps
@@ -1013,7 +1013,7 @@ mod tests {
                         // Success after more steps
                     }
                     Poll::Ready(Err(e)) => {
-                        panic!("Request failed after more simulation steps: {:?}", e);
+                        panic!("Request failed after more simulation steps: {e:?}");
                     }
                     Poll::Pending => {
                         panic!("Request should have completed after sufficient simulation steps");
@@ -1108,7 +1108,7 @@ mod tests {
                     panic!("Request should have timed out, not succeeded");
                 }
                 Poll::Ready(Err(e)) => {
-                    panic!("Expected timeout error, got: {:?}", e);
+                    panic!("Expected timeout error, got: {e:?}");
                 }
                 Poll::Pending => {
                     panic!("Request should have timed out after sufficient simulation steps");
@@ -1190,7 +1190,7 @@ mod tests {
             
             let req = Request::builder()
                 .method(Method::GET)
-                .uri(format!("/fail/{}", i))
+                .uri(format!("/fail/{i}"))
                 .body(SimBody::empty())
                 .unwrap();
             let mut future = circuit_breaker_service.call(req);
@@ -1200,7 +1200,7 @@ mod tests {
                 Poll::Ready(Err(ServiceError::Internal(_))) => {
                     // Expected failure from FailingService
                 }
-                other => panic!("Expected failure, got: {:?}", other),
+                other => panic!("Expected failure, got: {other:?}"),
             }
         }
 
@@ -1209,7 +1209,7 @@ mod tests {
             Poll::Ready(Err(ServiceError::Overloaded)) => {
                 // Expected - circuit breaker is now open
             }
-            other => panic!("Expected circuit breaker to be open, got: {:?}", other),
+            other => panic!("Expected circuit breaker to be open, got: {other:?}"),
         }
     }
 

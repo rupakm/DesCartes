@@ -8,8 +8,102 @@ use crate::request_tracker::{RequestTracker, RequestTrackerStats};
 use des_core::SimTime;
 use hdrhistogram::Histogram as HdrHistogram;
 use metrics::{counter, gauge, histogram};
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::time::Duration;
+
+/// Key for identifying metrics with labels
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct MetricKey {
+    name: String,
+    labels: BTreeMap<String, String>,
+}
+
+impl MetricKey {
+    fn new(name: &str, labels: &[(&str, &str)]) -> Self {
+        let labels_map = labels.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        Self {
+            name: name.to_string(),
+            labels: labels_map,
+        }
+    }
+    
+    fn simple(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            labels: BTreeMap::new(),
+        }
+    }
+}
+
+/// Internal storage for retrievable metrics
+#[derive(Debug, Default)]
+struct MetricStorage {
+    counters: HashMap<MetricKey, u64>,
+    gauges: HashMap<MetricKey, f64>,
+    histograms: HashMap<MetricKey, Vec<f64>>,
+}
+
+/// Statistics for histogram metrics
+#[derive(Debug, Clone)]
+pub struct HistogramStats {
+    pub count: usize,
+    pub sum: f64,
+    pub min: f64,
+    pub max: f64,
+    pub mean: f64,
+    pub median: f64,
+    pub p95: f64,
+    pub p99: f64,
+}
+
+impl HistogramStats {
+    fn from_values(mut values: Vec<f64>) -> Self {
+        if values.is_empty() {
+            return Self {
+                count: 0,
+                sum: 0.0,
+                min: 0.0,
+                max: 0.0,
+                mean: 0.0,
+                median: 0.0,
+                p95: 0.0,
+                p99: 0.0,
+            };
+        }
+        
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let count = values.len();
+        let sum: f64 = values.iter().sum();
+        let mean = sum / count as f64;
+        
+        let percentile = |p: f64| -> f64 {
+            let index = ((count as f64 - 1.0) * p).round() as usize;
+            values[index.min(count - 1)]
+        };
+        
+        Self {
+            count,
+            sum,
+            min: values[0],
+            max: values[count - 1],
+            mean,
+            median: percentile(0.5),
+            p95: percentile(0.95),
+            p99: percentile(0.99),
+        }
+    }
+}
+
+/// Complete snapshot of all metrics
+#[derive(Debug, Clone)]
+pub struct MetricsSnapshot {
+    pub counters: Vec<(String, BTreeMap<String, String>, u64)>,
+    pub gauges: Vec<(String, BTreeMap<String, String>, f64)>,
+    pub histograms: Vec<(String, BTreeMap<String, String>, HistogramStats)>,
+    pub timestamp: SimTime,
+}
 
 /// Simulation-specific metrics collector that wraps the standard metrics ecosystem
 #[derive(Debug)]
@@ -18,6 +112,8 @@ pub struct SimulationMetrics {
     request_tracker: RequestTracker,
     /// High-resolution histograms for latency analysis
     latency_histograms: HashMap<String, HdrHistogram<u64>>,
+    /// Internal storage for retrievable metrics
+    storage: MetricStorage,
     /// Simulation start time for relative timing
     start_time: SimTime,
 }
@@ -34,6 +130,7 @@ impl SimulationMetrics {
         Self {
             request_tracker: RequestTracker::new(),
             latency_histograms: HashMap::new(),
+            storage: MetricStorage::default(),
             start_time: SimTime::zero(),
         }
     }
@@ -43,6 +140,7 @@ impl SimulationMetrics {
         Self {
             request_tracker: RequestTracker::with_max_completed(max_completed),
             latency_histograms: HashMap::new(),
+            storage: MetricStorage::default(),
             start_time: SimTime::zero(),
         }
     }
@@ -53,7 +151,12 @@ impl SimulationMetrics {
     }
 
     /// Record a counter increment using the standard metrics crate
-    pub fn increment_counter(&self, name: &str, labels: &[(&str, &str)]) {
+    pub fn increment_counter(&mut self, name: &str, labels: &[(&str, &str)]) {
+        // Store internally for retrieval
+        let key = MetricKey::new(name, labels);
+        *self.storage.counters.entry(key).or_insert(0) += 1;
+        
+        // Also record in standard metrics for monitoring
         // Convert everything to owned strings to satisfy the metrics macros
         let name_owned = name.to_string();
         match labels.len() {
@@ -79,7 +182,12 @@ impl SimulationMetrics {
     }
 
     /// Record a counter increment with a specific value
-    pub fn increment_counter_by(&self, name: &str, value: u64, labels: &[(&str, &str)]) {
+    pub fn increment_counter_by(&mut self, name: &str, value: u64, labels: &[(&str, &str)]) {
+        // Store internally for retrieval
+        let key = MetricKey::new(name, labels);
+        *self.storage.counters.entry(key).or_insert(0) += value;
+        
+        // Also record in standard metrics
         let name_owned = name.to_string();
         match labels.len() {
             0 => counter!(name_owned).increment(value),
@@ -103,7 +211,12 @@ impl SimulationMetrics {
     }
 
     /// Record a gauge value using the standard metrics crate
-    pub fn record_gauge(&self, name: &str, value: f64, labels: &[(&str, &str)]) {
+    pub fn record_gauge(&mut self, name: &str, value: f64, labels: &[(&str, &str)]) {
+        // Store internally for retrieval
+        let key = MetricKey::new(name, labels);
+        self.storage.gauges.insert(key, value);
+        
+        // Also record in standard metrics
         let name_owned = name.to_string();
         match labels.len() {
             0 => gauge!(name_owned).set(value),
@@ -127,7 +240,12 @@ impl SimulationMetrics {
     }
 
     /// Record a histogram value using the standard metrics crate
-    pub fn record_histogram(&self, name: &str, value: f64, labels: &[(&str, &str)]) {
+    pub fn record_histogram(&mut self, name: &str, value: f64, labels: &[(&str, &str)]) {
+        // Store internally for retrieval
+        let key = MetricKey::new(name, labels);
+        self.storage.histograms.entry(key).or_insert_with(Vec::new).push(value);
+        
+        // Also record in standard metrics
         let name_owned = name.to_string();
         match labels.len() {
             0 => histogram!(name_owned).record(value),
@@ -151,7 +269,7 @@ impl SimulationMetrics {
     }
 
     /// Record a duration as a histogram (converts to milliseconds)
-    pub fn record_duration(&self, name: &str, duration: Duration, labels: &[(&str, &str)]) {
+    pub fn record_duration(&mut self, name: &str, duration: Duration, labels: &[(&str, &str)]) {
         let millis = duration.as_secs_f64() * 1000.0;
         self.record_histogram(name, millis, labels);
     }
@@ -208,15 +326,100 @@ impl SimulationMetrics {
     pub fn clear(&mut self) {
         self.request_tracker.clear();
         self.latency_histograms.clear();
+        self.storage = MetricStorage::default();
+    }
+
+    // === METRICS RETRIEVAL METHODS ===
+
+    /// Get a counter value by name and labels
+    pub fn get_counter(&self, name: &str, labels: &[(&str, &str)]) -> Option<u64> {
+        let key = MetricKey::new(name, labels);
+        self.storage.counters.get(&key).copied()
+    }
+
+    /// Get a counter value by name only (no labels)
+    pub fn get_counter_simple(&self, name: &str) -> Option<u64> {
+        self.get_counter(name, &[])
+    }
+
+    /// Get a gauge value by name and labels
+    pub fn get_gauge(&self, name: &str, labels: &[(&str, &str)]) -> Option<f64> {
+        let key = MetricKey::new(name, labels);
+        self.storage.gauges.get(&key).copied()
+    }
+
+    /// Get a gauge value by name only (no labels)
+    pub fn get_gauge_simple(&self, name: &str) -> Option<f64> {
+        self.get_gauge(name, &[])
+    }
+
+    /// Get histogram statistics by name and labels
+    pub fn get_histogram_stats(&self, name: &str, labels: &[(&str, &str)]) -> Option<HistogramStats> {
+        let key = MetricKey::new(name, labels);
+        self.storage.histograms.get(&key).map(|values| {
+            HistogramStats::from_values(values.clone())
+        })
+    }
+
+    /// Get histogram statistics by name only (no labels)
+    pub fn get_histogram_stats_simple(&self, name: &str) -> Option<HistogramStats> {
+        self.get_histogram_stats(name, &[])
+    }
+
+    /// List all counter metrics with their labels and values
+    pub fn list_counters(&self) -> Vec<(String, BTreeMap<String, String>, u64)> {
+        self.storage.counters.iter()
+            .map(|(key, value)| (key.name.clone(), key.labels.clone(), *value))
+            .collect()
+    }
+
+    /// List all gauge metrics with their labels and values
+    pub fn list_gauges(&self) -> Vec<(String, BTreeMap<String, String>, f64)> {
+        self.storage.gauges.iter()
+            .map(|(key, value)| (key.name.clone(), key.labels.clone(), *value))
+            .collect()
+    }
+
+    /// List all histogram metric names
+    pub fn list_histograms(&self) -> Vec<String> {
+        self.storage.histograms.keys()
+            .map(|key| key.name.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// Get a complete snapshot of all metrics
+    pub fn get_metrics_snapshot(&self) -> MetricsSnapshot {
+        let counters = self.list_counters();
+        let gauges = self.list_gauges();
+        let histograms = self.storage.histograms.iter()
+            .map(|(key, values)| {
+                let stats = HistogramStats::from_values(values.clone());
+                (key.name.clone(), key.labels.clone(), stats)
+            })
+            .collect();
+
+        MetricsSnapshot {
+            counters,
+            gauges,
+            histograms,
+            timestamp: SimTime::zero(), // TODO: Use actual simulation time
+        }
+    }
+
+    /// Reset all stored metric values (but keep structure)
+    pub fn reset_metrics(&mut self) {
+        self.storage = MetricStorage::default();
     }
 
     /// Record a component-specific metric with automatic labeling
-    pub fn record_component_counter(&self, component: &str, metric: &str, value: u64) {
+    pub fn record_component_counter(&mut self, component: &str, metric: &str, value: u64) {
         self.increment_counter_by(metric, value, &[("component", component)]);
     }
 
     /// Record a component-specific gauge with automatic labeling
-    pub fn record_component_gauge(&self, component: &str, metric: &str, value: f64) {
+    pub fn record_component_gauge(&mut self, component: &str, metric: &str, value: f64) {
         self.record_gauge(metric, value, &[("component", component)]);
     }
 
@@ -291,7 +494,7 @@ pub mod helpers {
 
     /// Record request processing metrics
     pub fn record_request_processed(
-        metrics: &SimulationMetrics,
+        metrics: &mut SimulationMetrics,
         component: &str,
         success: bool,
         latency: Duration,
@@ -313,7 +516,7 @@ pub mod helpers {
     }
 
     /// Record queue depth changes
-    pub fn record_queue_depth(metrics: &SimulationMetrics, component: &str, depth: usize) {
+    pub fn record_queue_depth(metrics: &mut SimulationMetrics, component: &str, depth: usize) {
         metrics.record_gauge(
             "queue_depth",
             depth as f64,
@@ -323,7 +526,7 @@ pub mod helpers {
 
     /// Record server utilization
     pub fn record_server_utilization(
-        metrics: &SimulationMetrics,
+        metrics: &mut SimulationMetrics,
         component: &str,
         active_requests: usize,
         capacity: usize,
@@ -349,7 +552,7 @@ pub mod helpers {
 
     /// Record throughput metrics
     pub fn record_throughput(
-        metrics: &SimulationMetrics,
+        metrics: &mut SimulationMetrics,
         component: &str,
         requests_per_second: f64,
     ) {
@@ -382,6 +585,38 @@ mod tests {
         
         // Test duration
         metrics.record_duration("test_duration", Duration::from_millis(100), &[("component", "test")]);
+        
+        // Test retrieval
+        assert_eq!(metrics.get_counter("test_counter", &[("component", "test")]), Some(1));
+        assert_eq!(metrics.get_counter("test_counter_by", &[("component", "test")]), Some(5));
+        assert_eq!(metrics.get_gauge("test_gauge", &[("component", "test")]), Some(42.0));
+        
+        let histogram_stats = metrics.get_histogram_stats("test_histogram", &[("component", "test")]);
+        assert!(histogram_stats.is_some());
+        assert_eq!(histogram_stats.unwrap().count, 1);
+    }
+
+    #[test]
+    fn test_metrics_retrieval() {
+        let mut metrics = SimulationMetrics::new();
+        
+        // Test simple retrieval (no labels)
+        metrics.increment_counter("simple_counter", &[]);
+        metrics.record_gauge("simple_gauge", 3.14, &[]);
+        
+        assert_eq!(metrics.get_counter_simple("simple_counter"), Some(1));
+        assert_eq!(metrics.get_gauge_simple("simple_gauge"), Some(3.14));
+        
+        // Test non-existent metrics
+        assert_eq!(metrics.get_counter_simple("nonexistent"), None);
+        assert_eq!(metrics.get_gauge_simple("nonexistent"), None);
+        
+        // Test listing
+        let counters = metrics.list_counters();
+        assert!(!counters.is_empty());
+        
+        let gauges = metrics.list_gauges();
+        assert!(!gauges.is_empty());
     }
 
     #[test]
@@ -418,11 +653,17 @@ mod tests {
 
     #[test]
     fn test_helper_functions() {
-        let metrics = SimulationMetrics::new();
+        let mut metrics = SimulationMetrics::new();
         
-        helpers::record_request_processed(&metrics, "server1", true, Duration::from_millis(100));
-        helpers::record_queue_depth(&metrics, "server1", 5);
-        helpers::record_server_utilization(&metrics, "server1", 8, 10);
-        helpers::record_throughput(&metrics, "server1", 150.5);
+        helpers::record_request_processed(&mut metrics, "server1", true, Duration::from_millis(100));
+        helpers::record_queue_depth(&mut metrics, "server1", 5);
+        helpers::record_server_utilization(&mut metrics, "server1", 8, 10);
+        helpers::record_throughput(&mut metrics, "server1", 150.5);
+        
+        // Test that metrics were recorded
+        assert!(metrics.get_counter("requests_processed_total", &[("component", "server1"), ("status", "success")]).is_some());
+        assert_eq!(metrics.get_gauge("queue_depth", &[("component", "server1")]), Some(5.0));
+        assert_eq!(metrics.get_gauge("server_utilization", &[("component", "server1")]), Some(0.8));
+        assert_eq!(metrics.get_gauge("throughput_rps", &[("component", "server1")]), Some(150.5));
     }
 }

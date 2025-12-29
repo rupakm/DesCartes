@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run --package des-components --example task_usage
 
-use des_components::{SimpleClient, ClientEvent};
+use des_components::{SimpleClient, ClientEvent, ExponentialBackoffPolicy};
 use des_core::{
     Execute, Executor, Simulation, SimTime,
     task::{TimeoutTask, PeriodicTask, ClosureTask},
@@ -159,9 +159,13 @@ fn client_with_tasks_example() {
     
     let mut sim = Simulation::default();
     
-    // Create a client
-    let client = SimpleClient::new("example-client".to_string(), Duration::from_millis(75))
-        .with_max_requests(4);
+    // Create a client with exponential backoff retry policy
+    let client = SimpleClient::with_exponential_backoff(
+        "example-client".to_string(),
+        Duration::from_millis(75),
+        2, // max retries
+        Duration::from_millis(25), // base delay
+    ).with_max_requests(4);
     let client_id = sim.add_component(client);
     
     // Use PeriodicTask to generate requests
@@ -191,7 +195,7 @@ fn client_with_tasks_example() {
     Executor::timed(SimTime::from_duration(Duration::from_millis(350))).execute(&mut sim);
     
     // Check final client state
-    let final_client = sim.remove_component::<ClientEvent, SimpleClient>(client_id).unwrap();
+    let final_client = sim.remove_component::<ClientEvent, SimpleClient<ExponentialBackoffPolicy>>(client_id).unwrap();
     println!("   ✅ Client sent {} requests (expected 4)", final_client.requests_sent);
     
     println!("\n=== All Examples Completed ===");

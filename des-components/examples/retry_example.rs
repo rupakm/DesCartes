@@ -55,8 +55,8 @@ fn basic_retry_task_example() {
     let result = retry_task.execute(&mut sim.scheduler);
     
     match result {
-        Ok(value) => println!("   ✅ RetryTask succeeded: {}", value),
-        Err(e) => println!("   ❌ RetryTask failed: {}", e),
+        Ok(value) => println!("   ✅ RetryTask succeeded: {value}"),
+        Err(e) => println!("   ❌ RetryTask failed: {e}"),
     }
     
     println!("   📊 Total attempts made: {}\n", attempt_count.load(Ordering::Relaxed));
@@ -105,7 +105,7 @@ fn exponential_backoff_example() {
         move |scheduler| -> Result<(), &'static str> {
             let current_time = scheduler.time();
             execution_times_clone.lock().unwrap().push(current_time);
-            println!("   ⏰ Retry attempt at {:?}", current_time);
+            println!("   ⏰ Retry attempt at {current_time:?}");
             Err("Always fails")
         },
         4, // max attempts

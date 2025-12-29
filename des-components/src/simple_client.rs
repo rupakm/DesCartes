@@ -380,9 +380,10 @@ mod tests {
         assert_eq!(client.requests_sent, 3);
         
         // Check that some metrics were recorded
-        let _metrics = client.get_metrics();
-        // Since we can't retrieve counter values, just check that requests were sent
-        assert!(client.requests_sent > 0);
+        let metrics = client.get_metrics();
+        // Now we can retrieve counter values for testing!
+        assert!(metrics.get_counter("requests_sent", &[("component", "test-client")]).unwrap_or(0) > 0);
+        assert_eq!(metrics.get_counter("requests_sent", &[("component", "test-client")]), Some(3));
     }
 
     #[test]
