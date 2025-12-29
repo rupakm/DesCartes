@@ -1,4 +1,98 @@
 //! DES-backed Tower Service implementation
+//!
+//! This module provides a Tower Service implementation that integrates with the discrete
+//! event simulation framework. It allows Tower-based services and middleware to run
+//! within simulated environments with precise timing control.
+//!
+//! # Overview
+//!
+//! The [`DesService`] struct implements the Tower [`Service`] trait, enabling it to be
+//! used with Tower's ecosystem of middleware layers like rate limiting, circuit breakers,
+//! timeouts, and load balancing. Unlike traditional services that use real network I/O,
+//! this service operates within simulation time and uses the DES scheduler for timing.
+//!
+//! # Key Components
+//!
+//! - [`DesService`]: The main service implementation that processes HTTP requests
+//! - [`DesServiceBuilder`]: Builder pattern for constructing services with validation
+//! - [`SchedulerHandle`]: Interface for interacting with the DES scheduler
+//! - [`DesServiceFuture`]: Future returned by service calls
+//!
+//! # Usage Example
+//!
+//! ```rust
+//! use des_components::tower::{DesServiceBuilder, ServiceError};
+//! use des_core::Simulation;
+//! use http::{Request, Method};
+//! use std::sync::{Arc, Mutex};
+//! use std::time::Duration;
+//! use tower::Service;
+//!
+//! # async fn example() -> Result<(), ServiceError> {
+//! // Create simulation
+//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//!
+//! // Build the service
+//! let mut service = DesServiceBuilder::new("web-server".to_string())
+//!     .thread_capacity(10)
+//!     .service_time(Duration::from_millis(50))
+//!     .build(simulation.clone())?;
+//!
+//! // Create an HTTP request
+//! let request = Request::builder()
+//!     .method(Method::GET)
+//!     .uri("/api/users")
+//!     .body(crate::tower::SimBody::from_static("request body"))?;
+//!
+//! // Process the request (returns a Future)
+//! let response_future = service.call(request);
+//!
+//! // In a real application, you would await the future and run the simulation
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Integration with Tower Middleware
+//!
+//! The service can be composed with Tower layers for advanced functionality:
+//!
+//! ```rust
+//! use des_components::tower::{DesServiceBuilder, DesRateLimitLayer, DesConcurrencyLimitLayer};
+//! use tower::ServiceBuilder;
+//! use std::time::Duration;
+//!
+//! # async fn middleware_example() {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! // Create base service
+//! let base_service = DesServiceBuilder::new("api-server".to_string())
+//!     .thread_capacity(5)
+//!     .service_time(Duration::from_millis(100))
+//!     .build(simulation.clone())
+//!     .unwrap();
+//!
+//! // Compose with middleware layers
+//! let service = ServiceBuilder::new()
+//!     .layer(DesRateLimitLayer::new(10.0, 20, std::sync::Arc::downgrade(&simulation)))
+//!     .layer(DesConcurrencyLimitLayer::new(3))
+//!     .service(base_service);
+//! # }
+//! ```
+//!
+//! # Simulation Integration
+//!
+//! The service integrates with the DES framework by:
+//!
+//! 1. **Timing Control**: All operations use simulation time instead of wall-clock time
+//! 2. **Event Scheduling**: Service processing is scheduled as discrete events
+//! 3. **Resource Management**: Thread capacity and queuing are simulated accurately
+//! 4. **Deterministic Behavior**: Results are reproducible across simulation runs
+//!
+//! # Performance Characteristics
+//!
+//! - **Service Time**: Configurable processing time per request
+//! - **Capacity**: Maximum number of concurrent requests
+//! - **Queuing**: Automatic backpressure when capacity is exceeded
+//! - **Metrics**: Built-in tracking of throughput, latency, and utilization
 
 use crate::{Server, ServerEvent, ClientEvent};
 use des_core::{Component, Key, Scheduler, SimTime, Simulation, RequestAttempt, RequestAttemptId, RequestId, Response};

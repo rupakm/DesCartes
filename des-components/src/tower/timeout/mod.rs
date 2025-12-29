@@ -1,7 +1,185 @@
 //! DES-aware timeout layer with proper event scheduling
 //!
-//! This module provides a timeout implementation that properly integrates with the DES
-//! scheduler, using DES components and events to fire timeouts deterministically.
+//! This module provides timeout functionality that integrates seamlessly with the
+//! discrete event simulation framework. Unlike traditional timeout implementations
+//! that rely on system timers, this module uses DES tasks and events to provide
+//! deterministic, reproducible timeout behavior.
+//!
+//! # Timeout Implementation
+//!
+//! ## DES Integration
+//! - **Event-Based Timing**: Timeouts are scheduled as DES tasks, not system timers
+//! - **Simulation Time**: All timeouts use simulation time, not wall-clock time
+//! - **Deterministic Behavior**: Identical timeout behavior across simulation runs
+//! - **Precise Control**: Exact timeout timing without system timer jitter
+//!
+//! ## Timeout Lifecycle
+//! 1. **Request Start**: Timeout task is scheduled when request begins
+//! 2. **Concurrent Execution**: Request processing and timeout run in parallel
+//! 3. **Race Condition**: First completion (success or timeout) wins
+//! 4. **Cleanup**: Losing operation is automatically cleaned up
+//!
+//! # Configuration
+//!
+//! ## Timeout Duration
+//! The maximum time to wait for a request to complete. Consider:
+//! - **Service Characteristics**: Typical response time distribution
+//! - **User Experience**: Acceptable latency for your application
+//! - **Resource Usage**: Balance between responsiveness and resource consumption
+//!
+//! # Usage Examples
+//!
+//! ## Basic Timeout Setup
+//!
+//! ```rust,no_run
+//! use des_components::tower::{DesServiceBuilder, DesTimeout};
+//! use des_core::Simulation;
+//! use std::sync::{Arc, Mutex};
+//! use std::time::Duration;
+//!
+//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//!
+//! let base_service = DesServiceBuilder::new("backend".to_string())
+//!     .thread_capacity(5)
+//!     .service_time(Duration::from_millis(200))
+//!     .build(simulation.clone())?;
+//!
+//! // Add 1 second timeout
+//! let timeout_service = DesTimeout::new(
+//!     base_service,
+//!     Duration::from_secs(1),
+//!     Arc::downgrade(&simulation),
+//! );
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Using Tower Layer Pattern
+//!
+//! ```rust,no_run
+//! use des_components::tower::{DesServiceBuilder, DesTimeoutLayer};
+//! use tower::Layer;
+//! use std::time::Duration;
+//!
+//! # fn layer_example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! let base_service = DesServiceBuilder::new("backend".to_string())
+//!     .thread_capacity(10)
+//!     .service_time(Duration::from_millis(100))
+//!     .build(simulation.clone())?;
+//!
+//! // Apply timeout layer
+//! let timeout_service = DesTimeoutLayer::new(
+//!     Duration::from_millis(500),
+//!     Arc::downgrade(&simulation),
+//! ).layer(base_service);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Timeout with Retry Logic
+//!
+//! ```rust,no_run
+//! use des_components::tower::*;
+//! use tower::ServiceBuilder;
+//! use std::time::Duration;
+//!
+//! # fn retry_example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! let base_service = DesServiceBuilder::new("backend".to_string())
+//!     .thread_capacity(3)
+//!     .service_time(Duration::from_millis(300))
+//!     .build(simulation.clone())?;
+//!
+//! // Combine timeout with retry for robust error handling
+//! let service = ServiceBuilder::new()
+//!     .layer(DesRetryLayer::new(
+//!         DesRetryPolicy::new(3),
+//!         Arc::downgrade(&simulation),
+//!     ))
+//!     .layer(DesTimeoutLayer::new(
+//!         Duration::from_millis(400),  // Timeout per attempt
+//!         Arc::downgrade(&simulation),
+//!     ))
+//!     .service(base_service);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Error Handling
+//!
+//! ## Timeout Errors
+//! When a timeout occurs, the service returns `ServiceError::Timeout` containing:
+//! - **Duration**: The configured timeout duration
+//! - **Context**: Clear indication that the request timed out
+//!
+//! ## Request Completion Race
+//! The implementation handles the race between request completion and timeout:
+//! - **Success First**: Normal response is returned, timeout is cancelled
+//! - **Timeout First**: Timeout error is returned, request is cancelled
+//! - **Atomic State**: Uses atomic operations to prevent double-completion
+//!
+//! # Performance Characteristics
+//!
+//! ## Memory Usage
+//! - **Per-Request State**: Minimal shared state between request and timeout
+//! - **Atomic Operations**: Lock-free coordination using atomic primitives
+//! - **Automatic Cleanup**: Resources are cleaned up when futures are dropped
+//!
+//! ## Timing Accuracy
+//! - **DES Precision**: Timeouts fire at exact simulation time
+//! - **No Jitter**: Deterministic timing without system timer variations
+//! - **Reproducible**: Identical behavior across simulation runs
+//!
+//! ## Scalability
+//! - **O(1) Operations**: Constant time timeout scheduling and cancellation
+//! - **Concurrent Requests**: Supports arbitrary number of concurrent timeouts
+//! - **Resource Bounded**: Timeout tasks are automatically cleaned up
+//!
+//! # Advanced Usage
+//!
+//! ## Dynamic Timeout Configuration
+//! ```rust,no_run
+//! # use des_components::tower::*;
+//! # use std::time::Duration;
+//! # fn dynamic_example() {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! // Different timeouts for different request types
+//! let fast_timeout = DesTimeoutLayer::new(
+//!     Duration::from_millis(100),
+//!     Arc::downgrade(&simulation),
+//! );
+//!
+//! let slow_timeout = DesTimeoutLayer::new(
+//!     Duration::from_secs(5),
+//!     Arc::downgrade(&simulation),
+//! );
+//! # }
+//! ```
+//!
+//! ## Timeout Monitoring
+//! Monitor timeout effectiveness through:
+//! - **Timeout Rate**: Percentage of requests that timeout
+//! - **Response Time Distribution**: P95, P99 latencies vs. timeout threshold
+//! - **Resource Utilization**: Impact of timeouts on system capacity
+//!
+//! # Implementation Details
+//!
+//! ## Thread Safety
+//! - **AtomicWaker**: Lock-free waker registration for timeout notifications
+//! - **Atomic State**: Thread-safe coordination between request and timeout
+//! - **Weak References**: Prevents circular dependencies with simulation
+//!
+//! ## Resource Management
+//! - **PinnedDrop**: Automatic cleanup when futures are dropped
+//! - **Task Lifecycle**: Timeout tasks are automatically cleaned up after execution
+//! - **Memory Safety**: No resource leaks even with cancelled requests
+//!
+//! ## Integration Points
+//! - **DES Scheduler**: Uses TimeoutTask for precise event scheduling
+//! - **Tower Ecosystem**: Compatible with all standard Tower middleware
+//! - **HTTP Bodies**: Works with SimBody and other HTTP body types
 
 use atomic_waker::AtomicWaker;
 use des_core::{SimTime, Simulation};

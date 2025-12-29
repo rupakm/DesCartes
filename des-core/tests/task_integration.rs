@@ -1,6 +1,6 @@
 //! Integration tests for the Task system
 
-use des_core::{Simulation, Execute, Executor, SimTime, Task, TaskHandle, ClosureTask, TimeoutTask};
+use des_core::{Simulation, Execute, Executor, SimTime, Task, TaskHandle};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 

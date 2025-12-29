@@ -72,7 +72,7 @@ impl SimulationMetrics {
             },
             _ => {
                 // For more complex cases, build a flattened key
-                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{}_{}", k, v)).collect::<Vec<_>>().join("_"));
+                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{k}_{v}")).collect::<Vec<_>>().join("_"));
                 counter!(key).increment(1);
             }
         }
@@ -96,7 +96,7 @@ impl SimulationMetrics {
                 counter!(name_owned, k1 => v1, k2 => v2).increment(value);
             },
             _ => {
-                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{}_{}", k, v)).collect::<Vec<_>>().join("_"));
+                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{k}_{v}")).collect::<Vec<_>>().join("_"));
                 counter!(key).increment(value);
             }
         }
@@ -120,7 +120,7 @@ impl SimulationMetrics {
                 gauge!(name_owned, k1 => v1, k2 => v2).set(value);
             },
             _ => {
-                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{}_{}", k, v)).collect::<Vec<_>>().join("_"));
+                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{k}_{v}")).collect::<Vec<_>>().join("_"));
                 gauge!(key).set(value);
             }
         }
@@ -144,7 +144,7 @@ impl SimulationMetrics {
                 histogram!(name_owned, k1 => v1, k2 => v2).record(value);
             },
             _ => {
-                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{}_{}", k, v)).collect::<Vec<_>>().join("_"));
+                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{k}_{v}")).collect::<Vec<_>>().join("_"));
                 histogram!(key).record(value);
             }
         }

@@ -19,6 +19,18 @@ pub enum SimError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Task execution failed: {message}")]
+    TaskExecutionFailed { message: String },
+
+    #[error("Scheduler error: {message}")]
+    SchedulerError { message: String },
+
+    #[error("Time validation error: expected non-negative time")]
+    InvalidTime,
+
+    #[error("Component not found with ID: {id}")]
+    ComponentNotFound { id: String },
 }
 
 /// Errors related to event scheduling and handling
@@ -35,4 +47,16 @@ pub enum EventError {
 
     #[error("Event queue is empty")]
     EmptyQueue,
+
+    #[error("Event scheduling failed: cannot schedule event in the past")]
+    ScheduleInPast,
+
+    #[error("Event type mismatch: expected {expected}, got {actual}")]
+    TypeMismatch { expected: String, actual: String },
+
+    #[error("Event processing timeout after {duration:?}")]
+    ProcessingTimeout { duration: std::time::Duration },
+
+    #[error("Maximum event queue size exceeded: {current}/{max}")]
+    QueueOverflow { current: usize, max: usize },
 }

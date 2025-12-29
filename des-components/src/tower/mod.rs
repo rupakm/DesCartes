@@ -1,9 +1,185 @@
 //! Tower Service trait integration for DES components
 //!
-//! This module provides implementations of the Tower Service trait that allow
-//! Tower-based services and middleware to run within our discrete event simulation.
+//! This module provides comprehensive implementations of the Tower Service trait that allow
+//! Tower-based services and middleware to run within discrete event simulations.
 //! This enables testing of real-world service architectures under simulated
-//! network conditions, failures, and performance characteristics.
+//! network conditions, failures, and performance characteristics with deterministic,
+//! reproducible results.
+//!
+//! # Overview
+//!
+//! The Tower ecosystem provides a powerful set of composable middleware for building
+//! robust network services. This module adapts Tower's abstractions to work within
+//! the DES framework, providing:
+//!
+//! - **Deterministic Timing**: All operations use simulation time instead of wall-clock time
+//! - **Event-Driven Architecture**: Service operations are scheduled as discrete events
+//! - **Reproducible Results**: Identical simulation parameters produce identical outcomes
+//! - **Performance Testing**: Measure latency, throughput, and resource utilization
+//! - **Failure Simulation**: Test circuit breakers, retries, and timeouts under controlled conditions
+//!
+//! # Core Components
+//!
+//! ## Base Service (`DesService`)
+//! The foundation service that processes HTTP requests within the simulation:
+//! - Configurable thread capacity and service times
+//! - Automatic backpressure when capacity is exceeded
+//! - Integration with DES scheduler for timing control
+//!
+//! ## Middleware Layers
+//! All standard Tower middleware adapted for DES:
+//! - **Rate Limiting**: Token bucket algorithm with simulated time
+//! - **Concurrency Limiting**: Per-service and global concurrency control
+//! - **Circuit Breaker**: Failure detection and recovery with DES timing
+//! - **Timeout**: Request timeouts using simulation events
+//! - **Retry**: Exponential backoff with deterministic timing
+//! - **Load Balancing**: Round-robin, random, and least-connections strategies
+//! - **Hedging**: Request duplication for latency reduction
+//!
+//! # Usage Patterns
+//!
+//! ## Basic Service Creation
+//!
+//! ```rust,no_run
+//! use des_components::tower::{DesServiceBuilder, ServiceError};
+//! use des_core::Simulation;
+//! use std::sync::{Arc, Mutex};
+//! use std::time::Duration;
+//!
+//! # fn example() -> Result<(), ServiceError> {
+//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//!
+//! let service = DesServiceBuilder::new("web-server".to_string())
+//!     .thread_capacity(10)
+//!     .service_time(Duration::from_millis(50))
+//!     .build(simulation.clone())?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Middleware Composition
+//!
+//! ```rust,no_run
+//! use des_components::tower::*;
+//! use tower::ServiceBuilder;
+//! use std::time::Duration;
+//!
+//! # fn middleware_example() -> Result<(), ServiceError> {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! let base_service = DesServiceBuilder::new("api-server".to_string())
+//!     .thread_capacity(5)
+//!     .service_time(Duration::from_millis(100))
+//!     .build(simulation.clone())?;
+//!
+//! let service = ServiceBuilder::new()
+//!     .layer(DesTimeoutLayer::new(Duration::from_secs(5), std::sync::Arc::downgrade(&simulation)))
+//!     .layer(DesRateLimitLayer::new(10.0, 20, std::sync::Arc::downgrade(&simulation)))
+//!     .layer(DesConcurrencyLimitLayer::new(3))
+//!     .layer(DesRetryLayer::new(
+//!         DesRetryPolicy::new(3),
+//!         std::sync::Arc::downgrade(&simulation)
+//!     ))
+//!     .service(base_service);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Load Balancing Multiple Services
+//!
+//! ```rust,no_run
+//! use des_components::tower::*;
+//!
+//! # fn load_balancing_example() -> Result<(), ServiceError> {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! let services = (0..3).map(|i| {
+//!     DesServiceBuilder::new(format!("server-{}", i))
+//!         .thread_capacity(5)
+//!         .service_time(std::time::Duration::from_millis(100))
+//!         .build(simulation.clone())
+//! }).collect::<Result<Vec<_>, _>>()?;
+//!
+//! let load_balancer = DesLoadBalancer::round_robin(services);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Performance Characteristics
+//!
+//! ## Timing Model
+//! - **Service Time**: Configurable processing time per request
+//! - **Queue Delays**: Automatic when capacity is exceeded
+//! - **Network Latency**: Can be modeled through service times
+//! - **Middleware Overhead**: Each layer adds minimal simulation overhead
+//!
+//! ## Resource Management
+//! - **Thread Pools**: Simulated with configurable capacity
+//! - **Memory Usage**: Tracked through request queuing
+//! - **Connection Limits**: Enforced through concurrency limiters
+//! - **Rate Limits**: Token bucket with configurable refill rates
+//!
+//! ## Metrics and Observability
+//! - **Request Latency**: End-to-end timing through simulation
+//! - **Throughput**: Requests processed per simulation time unit
+//! - **Error Rates**: Circuit breaker and retry statistics
+//! - **Resource Utilization**: Thread pool and queue occupancy
+//!
+//! # Testing Scenarios
+//!
+//! ## Load Testing
+//! ```rust,no_run
+//! # use des_components::tower::*;
+//! # use std::time::Duration;
+//! # fn load_test_example() {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! // Simulate high load with rate limiting
+//! let service = DesServiceBuilder::new("load-test".to_string())
+//!     .thread_capacity(2)  // Limited capacity
+//!     .service_time(Duration::from_millis(200))  // Slow processing
+//!     .build(simulation.clone()).unwrap();
+//!
+//! let rate_limited = DesRateLimit::new(
+//!     service,
+//!     100.0,  // 100 requests per second
+//!     50,     // Burst capacity
+//!     std::sync::Arc::downgrade(&simulation),
+//! );
+//! # }
+//! ```
+//!
+//! ## Failure Testing
+//! ```rust,no_run
+//! # use des_components::tower::*;
+//! # use std::time::Duration;
+//! # fn failure_test_example() {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! // Test circuit breaker behavior
+//! let service = DesServiceBuilder::new("failure-test".to_string())
+//!     .thread_capacity(1)
+//!     .service_time(Duration::from_millis(100))
+//!     .build(simulation.clone()).unwrap();
+//!
+//! let circuit_breaker = DesCircuitBreaker::new(
+//!     service,
+//!     3,  // Failure threshold
+//!     Duration::from_secs(10),  // Recovery timeout
+//!     std::sync::Arc::downgrade(&simulation),
+//! );
+//! # }
+//! ```
+//!
+//! # Integration with Standard Tower
+//!
+//! All DES services implement the standard Tower `Service` trait, making them
+//! compatible with existing Tower middleware and utilities. The key differences:
+//!
+//! - **Timing**: Uses simulation time instead of system time
+//! - **Determinism**: Reproducible behavior across runs
+//! - **Event Scheduling**: Operations are scheduled as discrete events
+//! - **Resource Modeling**: Accurate simulation of system resources
+//!
+//! This allows you to test Tower-based applications in a controlled environment
+//! before deploying to production, validating behavior under various load and
+//! failure conditions.
 
 use bytes::Bytes;
 use http::{Response as HttpResponse, StatusCode};
@@ -44,6 +220,12 @@ pub enum ServiceError {
     Internal(String),
     #[error("HTTP error: {0}")]
     Http(String), // Changed from http::Error to String for Clone compatibility
+    #[error("Circuit breaker is in invalid state")]
+    CircuitBreakerInvalidState,
+    #[error("Rate limiter is in invalid state")]
+    RateLimiterInvalidState,
+    #[error("HTTP response builder error: {message}")]
+    HttpResponseBuilder { message: String },
 }
 
 /// A simple HTTP body type for our simulation
@@ -105,7 +287,7 @@ pub(crate) fn response_to_http(
             HttpResponse::builder()
                 .status(StatusCode::OK)
                 .body(body)
-                .map_err(|e| ServiceError::Http(e.to_string()))
+                .map_err(|e| ServiceError::HttpResponseBuilder { message: e.to_string() })
         }
         ResponseStatus::Error { code, message } => {
             let status = StatusCode::from_u16(code as u16)
@@ -114,7 +296,7 @@ pub(crate) fn response_to_http(
             HttpResponse::builder()
                 .status(status)
                 .body(SimBody::new(message))
-                .map_err(|e| ServiceError::Http(e.to_string()))
+                .map_err(|e| ServiceError::HttpResponseBuilder { message: e.to_string() })
         }
     }
 }
@@ -876,21 +1058,25 @@ mod tests {
         let result1 = Pin::new(&mut future).poll(&mut cx);
         assert!(matches!(result1, Poll::Pending), "Request should be pending initially");
 
-        // Run simulation step by step, polling the future periodically
-        // This simulates how a real async runtime would work
+        // Run simulation to completion - timeout should fire before request completes
         let mut timeout_detected = false;
         
-        for step in 0..300 {
+        // Run simulation until timeout or request completion
+        for _ in 0..1000 {
             // Run one simulation step
-            {
+            let should_poll = {
                 let mut sim = simulation.lock().unwrap();
                 if !sim.step() {
                     break;
                 }
-            } // Release lock automatically
+                
+                // Check current simulation time
+                let current_time = sim.scheduler.time();
+                current_time >= des_core::SimTime::from_duration(Duration::from_millis(50))
+            };
             
-            // Poll the future every step to check for timeout
-            if step % 1 == 0 {  // Poll every step
+            // Poll future if we've passed timeout threshold
+            if should_poll {
                 let result = Pin::new(&mut future).poll(&mut cx);
                 match result {
                     Poll::Ready(Err(ServiceError::Timeout { duration })) => {
@@ -902,7 +1088,7 @@ mod tests {
                         panic!("Request should have timed out, not succeeded");
                     }
                     Poll::Ready(Err(e)) => {
-                        panic!("Expected timeout error, got: {:?}", e);
+                        panic!("Expected timeout error, got: {e:?}");
                     }
                     Poll::Pending => {
                         // Continue simulation

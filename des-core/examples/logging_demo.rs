@@ -5,7 +5,7 @@
 
 use des_core::{
     Component, Executor, Key, Simulation, SimTime,
-    init_simulation_logging_with_level, init_detailed_simulation_logging,
+    init_detailed_simulation_logging,
 };
 use std::time::Duration;
 use tracing::{info, debug};

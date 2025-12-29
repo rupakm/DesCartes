@@ -2,7 +2,7 @@
 
 use des_core::{
     Simulation, Execute, Executor, SimTime, Component, Key, 
-    Task, TaskHandle, async_runtime::{DesRuntime, RuntimeEvent, sim_sleep}
+    async_runtime::{DesRuntime, RuntimeEvent, sim_sleep}
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -19,12 +19,14 @@ fn test_task_component_async_integration() {
     
     // 1. Add a Component that uses Tasks
     #[derive(Debug)]
+    #[allow(dead_code)]
     enum ServerEvent {
         ProcessRequest { id: u32 },
         RequestTimeout { id: u32 },
     }
     
     struct TaskUsingServer {
+        #[allow(dead_code)]
         name: String,
         log: Arc<Mutex<Vec<String>>>,
     }
@@ -34,21 +36,21 @@ fn test_task_component_async_integration() {
         
         fn process_event(
             &mut self,
-            self_id: Key<Self::Event>,
+            _self_id: Key<Self::Event>,
             event: &Self::Event,
             scheduler: &mut des_core::Scheduler,
         ) {
             match event {
                 ServerEvent::ProcessRequest { id } => {
-                    self.log.lock().unwrap().push(format!("Server: Processing request {}", id));
+                    self.log.lock().unwrap().push(format!("Server: Processing request {id}"));
                     
                     // Schedule a timeout task for this request
                     let log_clone = self.log.clone();
                     let request_id = *id;
                     scheduler.timeout(
                         SimTime::from_duration(Duration::from_millis(100)),
-                        move |scheduler| {
-                            log_clone.lock().unwrap().push(format!("Task: Request {} timed out", request_id));
+                        move |_scheduler| {
+                            log_clone.lock().unwrap().push(format!("Task: Request {request_id} timed out"));
                             // Could schedule a timeout event back to the component
                         }
                     );
@@ -58,12 +60,12 @@ fn test_task_component_async_integration() {
                     scheduler.schedule_closure(
                         SimTime::from_duration(Duration::from_millis(50)),
                         move |_scheduler| {
-                            log_clone2.lock().unwrap().push(format!("Task: Request {} completed", request_id));
+                            log_clone2.lock().unwrap().push(format!("Task: Request {request_id} completed"));
                         }
                     );
                 }
                 ServerEvent::RequestTimeout { id } => {
-                    self.log.lock().unwrap().push(format!("Server: Request {} timed out", id));
+                    self.log.lock().unwrap().push(format!("Server: Request {id} timed out"));
                 }
             }
         }
@@ -128,7 +130,7 @@ fn test_task_component_async_integration() {
         SimTime::from_duration(Duration::from_millis(40)),
         move |scheduler| {
             counter += 1;
-            log_clone4.lock().unwrap().push(format!("Task: Periodic task #{}", counter));
+            log_clone4.lock().unwrap().push(format!("Task: Periodic task #{counter}"));
             
             if counter < 3 {
                 // Schedule next execution
@@ -137,7 +139,7 @@ fn test_task_component_async_integration() {
                     SimTime::from_duration(Duration::from_millis(30)),
                     move |scheduler_inner| {
                         counter += 1;
-                        log_clone_inner.lock().unwrap().push(format!("Task: Periodic task #{}", counter));
+                        log_clone_inner.lock().unwrap().push(format!("Task: Periodic task #{counter}"));
                         
                         if counter < 3 {
                             // One more execution
@@ -222,7 +224,7 @@ fn test_task_cancellation_demo() {
         SimTime::from_duration(Duration::from_millis(25)),
         move |scheduler| {
             let cancelled = scheduler.cancel_task(handle1);
-            println!("Task cancellation result: {}", cancelled);
+            println!("Task cancellation result: {cancelled}");
             assert!(cancelled, "Task should have been successfully cancelled");
         }
     );
@@ -280,9 +282,9 @@ fn test_task_return_values_demo() {
     let result2 = sim.scheduler.get_task_result(handle2);
     let result3 = sim.scheduler.get_task_result(handle3);
     
-    println!("Task 1 result: {:?}", result1);
-    println!("Task 2 result: {:?}", result2);
-    println!("Task 3 result: {:?}", result3);
+    println!("Task 1 result: {result1:?}");
+    println!("Task 2 result: {result2:?}");
+    println!("Task 3 result: {result3:?}");
     
     assert_eq!(result1, Some(42));
     assert_eq!(result2, Some("Hello from task!".to_string()));

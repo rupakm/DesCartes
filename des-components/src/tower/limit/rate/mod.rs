@@ -191,7 +191,7 @@ where
         if let Some(inner) = this.inner.as_mut().as_pin_mut() {
             inner.poll(cx)
         } else {
-            Poll::Ready(Err(ServiceError::Internal("Rate limit future in invalid state".to_string())))
+            Poll::Ready(Err(ServiceError::RateLimiterInvalidState))
         }
     }
 }

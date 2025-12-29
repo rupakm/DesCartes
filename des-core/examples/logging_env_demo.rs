@@ -14,7 +14,7 @@ use des_core::{
     init_simulation_logging_with_level,
 };
 use std::time::Duration;
-use tracing::{info, debug, trace};
+use tracing::{info, debug};
 
 #[derive(Debug)]
 struct SimpleComponent {

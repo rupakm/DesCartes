@@ -5,12 +5,17 @@
 
 pub mod builder;
 pub mod dists;
-// pub mod client;  // TODO: Update to use new Component API
+// Note: client.rs was removed due to incompatibility with current Component API
+// Use simple_client.rs for basic client functionality
 pub mod error;
 
 pub mod simple_client;
 pub mod server;
 pub mod tower;
+
+// Export distribution patterns
+pub use dists::{ArrivalPattern, ServiceTimeDistribution, ConstantArrivalPattern, ConstantServiceTime};
+
 pub use simple_client::{SimpleClient, ClientEvent};
 pub use server::{Server, ServerEvent};
 pub use tower::{DesService, DesServiceBuilder, SchedulerHandle, ServiceError, SimBody};

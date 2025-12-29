@@ -1,7 +1,240 @@
 //! DES-aware retry layer using Tower's retry infrastructure
 //!
-//! This module provides a retry implementation that integrates with the DES
-//! scheduler while reusing Tower's Policy trait and backoff implementations.
+//! This module provides retry functionality that integrates with the discrete event
+//! simulation framework while leveraging Tower's established retry patterns and policies.
+//! The implementation provides deterministic retry behavior with configurable backoff
+//! strategies, all using simulation time for reproducible results.
+//!
+//! # Retry Strategy
+//!
+//! ## Policy-Based Retries
+//! The retry layer uses Tower's `Policy` trait, enabling:
+//! - **Flexible Retry Logic**: Custom policies for different error types
+//! - **Backoff Strategies**: Exponential, linear, or custom backoff patterns
+//! - **Attempt Limits**: Maximum number of retry attempts per request
+//! - **Error Classification**: Selective retries based on error types
+//!
+//! ## DES Integration
+//! - **Simulation Time**: All retry delays use simulation time, not wall-clock time
+//! - **Event Scheduling**: Retry delays are scheduled as DES tasks
+//! - **Deterministic Behavior**: Identical retry patterns across simulation runs
+//! - **Precise Timing**: Exact backoff timing without system timer jitter
+//!
+//! # Retry Policies
+//!
+//! ## DesRetryPolicy
+//! A simple policy that retries on specific error types:
+//! - **Retryable Errors**: Timeouts, overload, internal errors, not ready
+//! - **Non-Retryable Errors**: Cancelled requests, HTTP errors, response builder errors
+//! - **Attempt Tracking**: Counts attempts up to the maximum limit
+//!
+//! ## Custom Policies
+//! Implement Tower's `Policy` trait for custom retry logic:
+//! ```rust,no_run
+//! use tower::retry::Policy;
+//! use des_components::tower::ServiceError;
+//!
+//! struct CustomRetryPolicy {
+//!     max_attempts: usize,
+//!     current_attempts: usize,
+//! }
+//!
+//! impl<Request, Response> Policy<Request, Response, ServiceError> for CustomRetryPolicy
+//! where Request: Clone
+//! {
+//!     type Future = std::future::Ready<()>;
+//!
+//!     fn retry(&mut self, _req: &mut Request, result: &mut Result<Response, ServiceError>) -> Option<Self::Future> {
+//!         // Custom retry logic here
+//!         None
+//!     }
+//!
+//!     fn clone_request(&mut self, req: &Request) -> Option<Request> {
+//!         Some(req.clone())
+//!     }
+//! }
+//! ```
+//!
+//! # Usage Examples
+//!
+//! ## Basic Retry Setup
+//!
+//! ```rust,no_run
+//! use des_components::tower::{DesServiceBuilder, DesRetry, DesRetryPolicy};
+//! use des_core::Simulation;
+//! use std::sync::{Arc, Mutex};
+//! use std::time::Duration;
+//!
+//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//!
+//! let base_service = DesServiceBuilder::new("backend".to_string())
+//!     .thread_capacity(3)
+//!     .service_time(Duration::from_millis(100))
+//!     .build(simulation.clone())?;
+//!
+//! // Retry up to 3 times with default policy
+//! let retry_service = DesRetry::new(
+//!     DesRetryPolicy::new(3),
+//!     base_service,
+//!     Arc::downgrade(&simulation),
+//! );
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Using Tower Layer Pattern
+//!
+//! ```rust,no_run
+//! use des_components::tower::{DesServiceBuilder, DesRetryLayer, DesRetryPolicy};
+//! use tower::Layer;
+//! use std::time::Duration;
+//!
+//! # fn layer_example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! let base_service = DesServiceBuilder::new("backend".to_string())
+//!     .thread_capacity(5)
+//!     .service_time(Duration::from_millis(200))
+//!     .build(simulation.clone())?;
+//!
+//! // Apply retry layer
+//! let retry_service = DesRetryLayer::new(
+//!     DesRetryPolicy::new(5),  // Maximum 5 retry attempts
+//!     Arc::downgrade(&simulation),
+//! ).layer(base_service);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Exponential Backoff
+//!
+//! ```rust,no_run
+//! use des_components::tower::{DesServiceBuilder, exponential_backoff_layer};
+//! use std::time::Duration;
+//!
+//! # fn backoff_example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! let base_service = DesServiceBuilder::new("backend".to_string())
+//!     .thread_capacity(2)
+//!     .service_time(Duration::from_millis(150))
+//!     .build(simulation.clone())?;
+//!
+//! // Exponential backoff with 3 retries
+//! let retry_service = exponential_backoff_layer(
+//!     3,
+//!     Arc::downgrade(&simulation),
+//! ).layer(base_service);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Integration with Other Middleware
+//!
+//! ```rust,no_run
+//! use des_components::tower::*;
+//! use tower::ServiceBuilder;
+//! use std::time::Duration;
+//!
+//! # fn integration_example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! let base_service = DesServiceBuilder::new("backend".to_string())
+//!     .thread_capacity(3)
+//!     .service_time(Duration::from_millis(100))
+//!     .build(simulation.clone())?;
+//!
+//! // Comprehensive error handling stack
+//! let service = ServiceBuilder::new()
+//!     .layer(DesTimeoutLayer::new(
+//!         Duration::from_secs(2),
+//!         Arc::downgrade(&simulation),
+//!     ))
+//!     .layer(DesRetryLayer::new(
+//!         DesRetryPolicy::new(3),
+//!         Arc::downgrade(&simulation),
+//!     ))
+//!     .layer(DesCircuitBreakerLayer::new(
+//!         5,
+//!         Duration::from_secs(30),
+//!         Arc::downgrade(&simulation),
+//!     ))
+//!     .service(base_service);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Error Classification
+//!
+//! ## Retryable Errors
+//! The default policy retries these error types:
+//! - **`ServiceError::Timeout`**: Request timeouts (may succeed on retry)
+//! - **`ServiceError::Overloaded`**: Service overload (may recover)
+//! - **`ServiceError::Internal`**: Internal service errors (may be transient)
+//! - **`ServiceError::NotReady`**: Service not ready (may become ready)
+//! - **`ServiceError::CircuitBreakerInvalidState`**: Circuit breaker issues
+//! - **`ServiceError::RateLimiterInvalidState`**: Rate limiter issues
+//!
+//! ## Non-Retryable Errors
+//! These errors are not retried by default:
+//! - **`ServiceError::Cancelled`**: Explicitly cancelled requests
+//! - **`ServiceError::Http`**: HTTP protocol errors
+//! - **`ServiceError::HttpResponseBuilder`**: Response construction errors
+//!
+//! # Performance Characteristics
+//!
+//! ## State Management
+//! - **Stateful Policies**: Policies track attempt counts and backoff state
+//! - **Request Cloning**: Requests are cloned for each retry attempt
+//! - **Memory Bounded**: State is cleaned up after max attempts or success
+//!
+//! ## Timing Behavior
+//! - **Deterministic Delays**: All backoff timing uses simulation time
+//! - **Precise Scheduling**: Retry delays scheduled as DES tasks
+//! - **No Jitter**: Consistent timing across simulation runs
+//!
+//! ## Resource Usage
+//! - **CPU**: Minimal overhead for retry logic and state management
+//! - **Memory**: O(1) per active retry operation
+//! - **Network**: Multiplies request volume by average retry attempts
+//!
+//! # Backoff Strategies
+//!
+//! ## Fixed Delay
+//! Current implementation uses a fixed 100ms delay between retries.
+//! This can be extended to support:
+//! - **Exponential Backoff**: Increasing delays (100ms, 200ms, 400ms, ...)
+//! - **Linear Backoff**: Fixed increment delays (100ms, 200ms, 300ms, ...)
+//! - **Jittered Backoff**: Random variation to prevent thundering herd
+//!
+//! ## Custom Backoff
+//! Implement custom backoff by extending the retry future to:
+//! - Poll backoff futures from Tower's retry policies
+//! - Schedule appropriate DES tasks for delay timing
+//! - Support complex backoff algorithms
+//!
+//! # Monitoring and Observability
+//!
+//! Track retry effectiveness through:
+//! - **Retry Rate**: Percentage of requests that require retries
+//! - **Attempt Distribution**: Histogram of retry attempts per request
+//! - **Success Rate**: Percentage of requests that eventually succeed
+//! - **Latency Impact**: Additional latency from retry delays
+//!
+//! # Best Practices
+//!
+//! ## Retry Limits
+//! - **Conservative Limits**: Start with 3-5 retry attempts
+//! - **Exponential Backoff**: Use increasing delays to reduce load
+//! - **Circuit Breaker Integration**: Combine with circuit breakers for protection
+//!
+//! ## Error Handling
+//! - **Selective Retries**: Only retry transient, recoverable errors
+//! - **Timeout Integration**: Set appropriate timeouts per retry attempt
+//! - **Monitoring**: Track retry patterns to identify systemic issues
+//!
+//! ## Resource Management
+//! - **Request Limits**: Consider total resource usage with retries
+//! - **Backoff Tuning**: Balance between responsiveness and load reduction
+//! - **Failure Detection**: Use retries to improve, not mask, reliability issues
 
 use des_core::{SimTime, Simulation};
 use des_core::task::TimeoutTask;
@@ -273,6 +506,9 @@ where
                 ServiceError::NotReady => true,
                 ServiceError::Cancelled => false,
                 ServiceError::Http(_) => false,
+                ServiceError::CircuitBreakerInvalidState => true,
+                ServiceError::RateLimiterInvalidState => true,
+                ServiceError::HttpResponseBuilder { .. } => false,
             }
         };
 
