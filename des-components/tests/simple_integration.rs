@@ -2,7 +2,7 @@
 //!
 //! This demonstrates the new Component-based API with a client-server interaction.
 
-use des_components::{SimpleClient, Server, ClientEvent, ServerEvent};
+use des_components::{SimpleClient, Server, ClientEvent, ServerEvent, ExponentialBackoffPolicy};
 use des_core::{Execute, Executor, Simulation, SimTime};
 use des_core::task::PeriodicTask;
 use std::time::Duration;
@@ -17,9 +17,13 @@ fn test_client_server_integration() {
     let server = Server::new("web-server".to_string(), 2, Duration::from_millis(50));
     let server_id = sim.add_component(server);
 
-    // Create a client that sends 5 requests every 100ms
-    let client = SimpleClient::new("web-client".to_string(), Duration::from_millis(100))
-        .with_max_requests(5);
+    // Create a client that sends 5 requests every 100ms with exponential backoff
+    let client = SimpleClient::with_exponential_backoff(
+        "web-client".to_string(), 
+        Duration::from_millis(100),
+        3, // max retries
+        Duration::from_millis(50), // base delay
+    ).with_max_requests(5);
     let client_id = sim.add_component(client);
 
     // Start the client with PeriodicTask
@@ -40,7 +44,7 @@ fn test_client_server_integration() {
     println!("\n=== Simulation Complete ===\n");
 
     // Check results
-    let client = sim.remove_component::<ClientEvent, SimpleClient>(client_id).unwrap();
+    let client = sim.remove_component::<ClientEvent, SimpleClient<ExponentialBackoffPolicy>>(client_id).unwrap();
     let server = sim.remove_component::<ServerEvent, Server>(server_id).unwrap();
 
     println!("Final Results:");
@@ -67,9 +71,13 @@ fn test_server_overload_scenario() {
     let server = Server::new("slow-server".to_string(), 1, Duration::from_millis(200));
     let server_id = sim.add_component(server);
 
-    // Create a fast client that sends 3 requests every 50ms
-    let client = SimpleClient::new("fast-client".to_string(), Duration::from_millis(50))
-        .with_max_requests(3);
+    // Create a fast client that sends 3 requests every 50ms with exponential backoff
+    let client = SimpleClient::with_exponential_backoff(
+        "fast-client".to_string(),
+        Duration::from_millis(50),
+        2, // max retries
+        Duration::from_millis(25), // base delay
+    ).with_max_requests(3);
     let client_id = sim.add_component(client);
 
     // Start the client with PeriodicTask
@@ -90,7 +98,7 @@ fn test_server_overload_scenario() {
     println!("\n=== Simulation Complete ===\n");
 
     // Check results
-    let client = sim.remove_component::<ClientEvent, SimpleClient>(client_id).unwrap();
+    let client = sim.remove_component::<ClientEvent, SimpleClient<ExponentialBackoffPolicy>>(client_id).unwrap();
     let server = sim.remove_component::<ServerEvent, Server>(server_id).unwrap();
 
     println!("Final Results:");

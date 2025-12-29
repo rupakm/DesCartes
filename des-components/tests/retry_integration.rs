@@ -21,7 +21,7 @@ fn test_retry_task_basic_functionality() {
     let retry_task = RetryTask::new(
         move |_scheduler| -> Result<String, &'static str> {
             let attempts = attempt_count_clone.fetch_add(1, Ordering::Relaxed) + 1;
-            println!("   Attempt {} executed", attempts);
+            println!("   Attempt {attempts} executed");
             Ok("Success!".to_string())
         },
         3, // max attempts
@@ -49,7 +49,7 @@ fn test_retry_task_with_failures() {
     let retry_task = RetryTask::new(
         move |_scheduler| -> Result<i32, &'static str> {
             let attempts = attempt_count_clone.fetch_add(1, Ordering::Relaxed) + 1;
-            println!("   Attempt {} executed", attempts);
+            println!("   Attempt {attempts} executed");
             
             if attempts == 1 {
                 Err("First attempt fails")
@@ -65,7 +65,7 @@ fn test_retry_task_with_failures() {
     
     // Note: Current RetryTask implementation returns the first result
     // The retry scheduling happens in the background
-    println!("   Result: {:?}", result);
+    println!("   Result: {result:?}");
     println!("   Attempts made: {}", attempt_count.load(Ordering::Relaxed));
     
     // The first execution should have happened
@@ -86,7 +86,7 @@ fn test_retry_task_max_attempts() {
     let retry_task = RetryTask::new(
         move |_scheduler| -> Result<(), &'static str> {
             let attempts = attempt_count_clone.fetch_add(1, Ordering::Relaxed) + 1;
-            println!("   Attempt {} executed (always fails)", attempts);
+            println!("   Attempt {attempts} executed (always fails)");
             Err("Always fails")
         },
         2, // max attempts
@@ -166,7 +166,7 @@ fn test_retry_task_with_scheduler_integration() {
         move |scheduler| -> Result<(), &'static str> {
             let current_time = scheduler.time();
             execution_times_clone.lock().unwrap().push(current_time);
-            println!("   Executed at {:?}", current_time);
+            println!("   Executed at {current_time:?}");
             Err("Fail to show timing")
         },
         1, // Only one attempt to keep test simple
@@ -223,7 +223,7 @@ fn test_retry_task_exponential_backoff_calculation() {
         base_delay * multiplier as u32
     }).collect::<Vec<_>>();
     
-    println!("   Base delay: {:?}", base_delay);
+    println!("   Base delay: {base_delay:?}");
     println!("   Exponential backoff sequence:");
     for (i, delay) in delays.iter().enumerate() {
         println!("     Attempt {}: {:?}", i + 1, delay);

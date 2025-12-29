@@ -160,6 +160,12 @@ impl Component for ExponentialClient {
                     }
                 }
             }
+            ClientEvent::RequestTimeout { .. } => {
+                // This test client doesn't handle timeouts
+            }
+            ClientEvent::RetryRequest { .. } => {
+                // This test client doesn't handle retries
+            }
         }
     }
 }
@@ -235,7 +241,7 @@ fn test_exponential_traffic_single_server_with_queue() {
     
     if metrics.responses_received > 0 {
         let avg_latency = metrics.total_latency / metrics.responses_received as u32;
-        println!("Average latency: {:?}", avg_latency);
+        println!("Average latency: {avg_latency:?}");
         println!("Min latency: {:?}", metrics.min_latency.unwrap_or_default());
         println!("Max latency: {:?}", metrics.max_latency.unwrap_or_default());
         
@@ -441,6 +447,12 @@ fn test_exponential_traffic_load_balancer_three_servers() {
                         }
                     }
                 }
+                ClientEvent::RequestTimeout { .. } => {
+                    // This test client doesn't handle timeouts
+                }
+                ClientEvent::RetryRequest { .. } => {
+                    // This test client doesn't handle retries
+                }
             }
         }
     }
@@ -476,7 +488,7 @@ fn test_exponential_traffic_load_balancer_three_servers() {
     
     if lb_metrics.responses_received > 0 {
         let avg_latency = lb_metrics.total_latency / lb_metrics.responses_received as u32;
-        println!("Average latency: {:?}", avg_latency);
+        println!("Average latency: {avg_latency:?}");
         println!("Min latency: {:?}", lb_metrics.min_latency.unwrap_or_default());
         println!("Max latency: {:?}", lb_metrics.max_latency.unwrap_or_default());
         

@@ -262,6 +262,12 @@ impl Component for TowerResponseBridge {
             ClientEvent::SendRequest => {
                 // Response bridges don't send requests
             }
+            ClientEvent::RequestTimeout { .. } => {
+                // Response bridges don't handle timeouts directly
+            }
+            ClientEvent::RetryRequest { .. } => {
+                // Response bridges don't handle retries directly
+            }
         }
     }
 }

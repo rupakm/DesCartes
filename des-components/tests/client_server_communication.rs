@@ -121,6 +121,12 @@ impl Component for CommunicatingClient {
                     scheduler.time()
                 );
             }
+            ClientEvent::RequestTimeout { .. } => {
+                // This test client doesn't handle timeouts
+            }
+            ClientEvent::RetryRequest { .. } => {
+                // This test client doesn't handle retries
+            }
         }
     }
 }

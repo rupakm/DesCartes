@@ -7,7 +7,7 @@
 //! - PeriodicTask in SimpleClient (periodic behavior, termination)
 
 use des_components::{
-    SimpleClient, ClientEvent,
+    SimpleClient, ClientEvent, ExponentialBackoffPolicy,
 };
 use des_core::{
     Execute, Executor, Simulation, SimTime,
@@ -25,8 +25,12 @@ fn test_periodic_task_behavior() {
     let mut sim = Simulation::default();
     
     // Create client with specific request count
-    let client = SimpleClient::new("periodic-client".to_string(), Duration::from_millis(50))
-        .with_max_requests(5);
+    let client = SimpleClient::with_exponential_backoff(
+        "periodic-client".to_string(),
+        Duration::from_millis(50),
+        3, // max retries
+        Duration::from_millis(25), // base delay
+    ).with_max_requests(5);
     let client_id = sim.add_component(client);
     
     // Use PeriodicTask with count limit
@@ -44,7 +48,7 @@ fn test_periodic_task_behavior() {
     Executor::timed(SimTime::from_duration(Duration::from_millis(300))).execute(&mut sim);
     
     // Verify client sent exactly 5 requests
-    let client = sim.remove_component::<ClientEvent, SimpleClient>(client_id).unwrap();
+    let client = sim.remove_component::<ClientEvent, SimpleClient<ExponentialBackoffPolicy>>(client_id).unwrap();
     assert_eq!(client.requests_sent, 5, "Client should have sent exactly 5 requests");
     
     println!("PeriodicTask sent {} requests as expected", client.requests_sent);
@@ -77,7 +81,7 @@ fn test_periodic_task_automatic_termination() {
     let final_count = counter.load(Ordering::Relaxed);
     assert_eq!(final_count, 3, "PeriodicTask should have executed exactly 3 times");
     
-    println!("PeriodicTask executed {} times and terminated correctly", final_count);
+    println!("PeriodicTask executed {final_count} times and terminated correctly");
 }
 
 /// Test Task cleanup behavior under various conditions
@@ -149,12 +153,10 @@ fn test_task_timing_precision() {
     let execution_times = Arc::new(Mutex::new(Vec::new()));
     
     // Schedule tasks at specific times
-    let expected_times = vec![
-        Duration::from_millis(10),
+    let expected_times = [Duration::from_millis(10),
         Duration::from_millis(25),
         Duration::from_millis(50),
-        Duration::from_millis(100),
-    ];
+        Duration::from_millis(100)];
     
     for (i, &delay) in expected_times.iter().enumerate() {
         let times_clone = execution_times.clone();
@@ -178,7 +180,7 @@ fn test_task_timing_precision() {
         assert_eq!(task_id, i, "Tasks should execute in order");
         
         let expected_time = SimTime::from_duration(expected_delay);
-        assert_eq!(actual_time, expected_time, "Task {} should execute at precise time", i);
+        assert_eq!(actual_time, expected_time, "Task {i} should execute at precise time");
     }
     
     println!("Task timing precision test completed successfully");
@@ -261,7 +263,7 @@ fn test_mixed_task_integration() {
     // Verify execution order and timing
     println!("Task execution results:");
     for result in final_results.iter() {
-        println!("  {}", result);
+        println!("  {result}");
     }
     
     // Should have closure and periodic at 0, periodic at 30, timeout at 45, periodic at 60

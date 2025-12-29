@@ -411,6 +411,12 @@ mod tests {
                 ClientEvent::SendRequest => {
                     // TestClient doesn't send requests, only receives responses
                 }
+                ClientEvent::RequestTimeout { .. } => {
+                    // TestClient doesn't handle timeouts
+                }
+                ClientEvent::RetryRequest { .. } => {
+                    // TestClient doesn't handle retries
+                }
             }
         }
     }
