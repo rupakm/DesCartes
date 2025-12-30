@@ -100,7 +100,7 @@
 //! // Apply retry layer
 //! let retry_service = DesRetryLayer::new(
 //!     DesRetryPolicy::new(5),  // Maximum 5 retry attempts
-//!     Arc::downgrade(&simulation),
+//!     std::sync::Arc::downgrade(&simulation),
 //! ).layer(base_service);
 //! # Ok(())
 //! # }
@@ -110,6 +110,7 @@
 //!
 //! ```rust,no_run
 //! use des_components::tower::{DesServiceBuilder, exponential_backoff_layer};
+//! use tower::Layer;
 //! use std::time::Duration;
 //!
 //! # fn backoff_example() -> Result<(), Box<dyn std::error::Error>> {
@@ -122,7 +123,7 @@
 //! // Exponential backoff with 3 retries
 //! let retry_service = exponential_backoff_layer(
 //!     3,
-//!     Arc::downgrade(&simulation),
+//!     std::sync::Arc::downgrade(&simulation),
 //! ).layer(base_service);
 //! # Ok(())
 //! # }
@@ -146,16 +147,16 @@
 //! let service = ServiceBuilder::new()
 //!     .layer(DesTimeoutLayer::new(
 //!         Duration::from_secs(2),
-//!         Arc::downgrade(&simulation),
+//!         std::sync::Arc::downgrade(&simulation),
 //!     ))
 //!     .layer(DesRetryLayer::new(
 //!         DesRetryPolicy::new(3),
-//!         Arc::downgrade(&simulation),
+//!         std::sync::Arc::downgrade(&simulation),
 //!     ))
 //!     .layer(DesCircuitBreakerLayer::new(
 //!         5,
 //!         Duration::from_secs(30),
-//!         Arc::downgrade(&simulation),
+//!         std::sync::Arc::downgrade(&simulation),
 //!     ))
 //!     .service(base_service);
 //! # Ok(())

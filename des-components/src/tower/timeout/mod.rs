@@ -72,7 +72,7 @@
 //! // Apply timeout layer
 //! let timeout_service = DesTimeoutLayer::new(
 //!     Duration::from_millis(500),
-//!     Arc::downgrade(&simulation),
+//!     std::sync::Arc::downgrade(&simulation),
 //! ).layer(base_service);
 //! # Ok(())
 //! # }
@@ -96,11 +96,11 @@
 //! let service = ServiceBuilder::new()
 //!     .layer(DesRetryLayer::new(
 //!         DesRetryPolicy::new(3),
-//!         Arc::downgrade(&simulation),
+//!         std::sync::Arc::downgrade(&simulation),
 //!     ))
 //!     .layer(DesTimeoutLayer::new(
 //!         Duration::from_millis(400),  // Timeout per attempt
-//!         Arc::downgrade(&simulation),
+//!         std::sync::Arc::downgrade(&simulation),
 //!     ))
 //!     .service(base_service);
 //! # Ok(())
@@ -148,12 +148,12 @@
 //! // Different timeouts for different request types
 //! let fast_timeout = DesTimeoutLayer::new(
 //!     Duration::from_millis(100),
-//!     Arc::downgrade(&simulation),
+//!     std::sync::Arc::downgrade(&simulation),
 //! );
 //!
 //! let slow_timeout = DesTimeoutLayer::new(
 //!     Duration::from_secs(5),
-//!     Arc::downgrade(&simulation),
+//!     std::sync::Arc::downgrade(&simulation),
 //! );
 //! # }
 //! ```

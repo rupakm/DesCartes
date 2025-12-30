@@ -18,7 +18,7 @@ pub mod tower;
 pub use dists::{ArrivalPattern, ServiceTimeDistribution, ConstantArrivalPattern, ConstantServiceTime};
 
 pub use simple_client::{SimpleClient, ClientEvent};
-pub use retry_policy::{RetryPolicy, ExponentialBackoffPolicy, TokenBucketRetryPolicy, SuccessBasedRetryPolicy};
+pub use retry_policy::{RetryPolicy, ExponentialBackoffPolicy, TokenBucketRetryPolicy, SuccessBasedRetryPolicy, NoRetryPolicy, FixedRetryPolicy};
 pub use server::{Server, ServerEvent};
 pub use tower::{DesService, DesServiceBuilder, SchedulerHandle, ServiceError, SimBody};
 pub use tower::{DesTimeout, DesLoadBalancer, DesCircuitBreaker, DesLoadBalanceStrategy, DesRateLimit, DesConcurrencyLimit, DesGlobalConcurrencyLimit, DesHedge};

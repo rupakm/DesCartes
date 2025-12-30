@@ -325,6 +325,92 @@ impl RetryPolicy for SuccessBasedRetryPolicy {
     }
 }
 
+/// No retry policy - never retries failed requests
+#[derive(Clone)]
+pub struct NoRetryPolicy;
+
+impl NoRetryPolicy {
+    /// Create a new no-retry policy
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for NoRetryPolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RetryPolicy for NoRetryPolicy {
+    fn should_retry(&mut self, _attempt: &RequestAttempt, _response: Option<&Response>) -> Option<Duration> {
+        // Never retry
+        None
+    }
+
+    fn reset(&mut self) {
+        // Nothing to reset
+    }
+
+    fn max_attempts(&self) -> usize {
+        1 // Only the initial attempt
+    }
+}
+
+/// Fixed retry policy that performs a fixed number of retries with a fixed delay
+#[derive(Clone)]
+pub struct FixedRetryPolicy {
+    /// Maximum number of retry attempts
+    max_attempts: usize,
+    /// Current attempt number (1-indexed)
+    current_attempt: usize,
+    /// Fixed delay between retry attempts
+    retry_delay: Duration,
+}
+
+impl FixedRetryPolicy {
+    /// Create a new fixed retry policy
+    ///
+    /// # Arguments
+    /// * `max_attempts` - Maximum number of retry attempts (not including the initial attempt)
+    /// * `retry_delay` - Fixed delay between retry attempts
+    pub fn new(max_attempts: usize, retry_delay: Duration) -> Self {
+        Self {
+            max_attempts,
+            current_attempt: 0,
+            retry_delay,
+        }
+    }
+
+    /// Check if the error/response is retryable
+    fn is_retryable(&self, response: Option<&Response>) -> bool {
+        match response {
+            Some(resp) => !resp.is_success(), // Retry on any error response
+            None => true, // Retry on timeout (no response)
+        }
+    }
+}
+
+impl RetryPolicy for FixedRetryPolicy {
+    fn should_retry(&mut self, _attempt: &RequestAttempt, response: Option<&Response>) -> Option<Duration> {
+        self.current_attempt += 1;
+        
+        if self.current_attempt > self.max_attempts || !self.is_retryable(response) {
+            return None;
+        }
+        
+        Some(self.retry_delay)
+    }
+
+    fn reset(&mut self) {
+        self.current_attempt = 0;
+    }
+
+    fn max_attempts(&self) -> usize {
+        self.max_attempts
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,5 +535,91 @@ mod tests {
         let delay = policy.should_retry(&attempt, Some(&error_response));
         assert!(delay.is_some());
         assert_eq!(delay.unwrap(), Duration::from_millis(100)); // Back to base delay
+    }
+
+    #[test]
+    fn test_no_retry_policy() {
+        let mut policy = NoRetryPolicy::new();
+        let attempt = create_test_attempt();
+        let error_response = create_error_response();
+
+        // Should never retry, regardless of response
+        let delay = policy.should_retry(&attempt, Some(&error_response));
+        assert!(delay.is_none());
+
+        // Should not retry even on timeout (no response)
+        let delay = policy.should_retry(&attempt, None);
+        assert!(delay.is_none());
+
+        // Max attempts should be 1 (only initial attempt)
+        assert_eq!(policy.max_attempts(), 1);
+    }
+
+    #[test]
+    fn test_no_retry_policy_default() {
+        let mut policy = NoRetryPolicy::default();
+        let attempt = create_test_attempt();
+        let error_response = create_error_response();
+
+        let delay = policy.should_retry(&attempt, Some(&error_response));
+        assert!(delay.is_none());
+    }
+
+    #[test]
+    fn test_fixed_retry_policy() {
+        let mut policy = FixedRetryPolicy::new(3, Duration::from_millis(500));
+        let attempt = create_test_attempt();
+        let error_response = create_error_response();
+
+        // First retry - should use fixed delay
+        let delay = policy.should_retry(&attempt, Some(&error_response));
+        assert!(delay.is_some());
+        assert_eq!(delay.unwrap(), Duration::from_millis(500));
+
+        // Second retry - should use same fixed delay
+        let delay = policy.should_retry(&attempt, Some(&error_response));
+        assert!(delay.is_some());
+        assert_eq!(delay.unwrap(), Duration::from_millis(500));
+
+        // Third retry - should use same fixed delay
+        let delay = policy.should_retry(&attempt, Some(&error_response));
+        assert!(delay.is_some());
+        assert_eq!(delay.unwrap(), Duration::from_millis(500));
+
+        // Fourth attempt should be rejected (exceeded max_attempts)
+        let delay = policy.should_retry(&attempt, Some(&error_response));
+        assert!(delay.is_none());
+    }
+
+    #[test]
+    fn test_fixed_retry_policy_no_retry_on_success() {
+        let mut policy = FixedRetryPolicy::new(3, Duration::from_millis(500));
+        let attempt = create_test_attempt();
+        let success_response = create_success_response();
+
+        // Should not retry on success
+        let delay = policy.should_retry(&attempt, Some(&success_response));
+        assert!(delay.is_none());
+    }
+
+    #[test]
+    fn test_fixed_retry_policy_reset() {
+        let mut policy = FixedRetryPolicy::new(2, Duration::from_millis(200));
+        let attempt = create_test_attempt();
+        let error_response = create_error_response();
+
+        // Make some attempts
+        policy.should_retry(&attempt, Some(&error_response));
+        policy.should_retry(&attempt, Some(&error_response));
+
+        // Should be at max attempts now
+        let delay = policy.should_retry(&attempt, Some(&error_response));
+        assert!(delay.is_none());
+
+        // Reset and try again
+        policy.reset();
+        let delay = policy.should_retry(&attempt, Some(&error_response));
+        assert!(delay.is_some());
+        assert_eq!(delay.unwrap(), Duration::from_millis(200));
     }
 }

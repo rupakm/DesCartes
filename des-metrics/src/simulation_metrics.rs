@@ -29,6 +29,7 @@ impl MetricKey {
         }
     }
     
+    #[allow(dead_code)]
     fn simple(name: &str) -> Self {
         Self {
             name: name.to_string(),

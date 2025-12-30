@@ -50,7 +50,7 @@
 //! ## Using Tower Layer Pattern
 //!
 //! ```rust,no_run
-//! use des_components::tower::{DesServiceBuilder, DesLoadBalancerLayer, DesLoadBalanceStrategy};
+//! use des_components::tower::{DesServiceBuilder, DesLoadBalancerLayer};
 //! use tower::Layer;
 //!
 //! # fn layer_example() -> Result<(), Box<dyn std::error::Error>> {
@@ -73,7 +73,7 @@
 //! use des_components::tower::DesLoadBalancer;
 //!
 //! # fn random_example() {
-//! # let services = vec![];
+//! # let services: Vec<des_components::tower::DesService> = vec![];
 //! // Create random load balancer with specific seed for reproducible results
 //! let load_balancer = DesLoadBalancer::random_with_seed(services, 12345);
 //! # }

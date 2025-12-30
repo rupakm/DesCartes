@@ -21,14 +21,14 @@
 //! # Usage Example
 //!
 //! ```rust
-//! use des_components::tower::{DesServiceBuilder, ServiceError};
+//! use des_components::tower::{DesServiceBuilder, ServiceError, SimBody};
 //! use des_core::Simulation;
 //! use http::{Request, Method};
 //! use std::sync::{Arc, Mutex};
 //! use std::time::Duration;
 //! use tower::Service;
 //!
-//! # async fn example() -> Result<(), ServiceError> {
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create simulation
 //! let simulation = Arc::new(Mutex::new(Simulation::default()));
 //!
@@ -42,7 +42,7 @@
 //! let request = Request::builder()
 //!     .method(Method::GET)
 //!     .uri("/api/users")
-//!     .body(crate::tower::SimBody::from_static("request body"))?;
+//!     .body(SimBody::from_static("request body"))?;
 //!
 //! // Process the request (returns a Future)
 //! let response_future = service.call(request);

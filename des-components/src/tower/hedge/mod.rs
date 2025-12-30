@@ -87,7 +87,7 @@
 //! let hedged_service = DesHedgeLayer::new(
 //!     Duration::from_millis(100),  // hedge after 100ms
 //!     3,                           // maximum 3 hedged requests
-//!     Arc::downgrade(&simulation),
+//!     std::sync::Arc::downgrade(&simulation),
 //! ).layer(base_service);
 //! # Ok(())
 //! # }
@@ -113,7 +113,7 @@
 //!     .layer(DesHedgeLayer::new(
 //!         Duration::from_millis(75),
 //!         2,
-//!         Arc::downgrade(&simulation),
+//!         std::sync::Arc::downgrade(&simulation),
 //!     ))
 //!     .service(load_balancer);
 //! # Ok(())

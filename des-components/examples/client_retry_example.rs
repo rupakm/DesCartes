@@ -73,6 +73,31 @@ fn exponential_backoff_example() {
     println!("      - Requests sent: {}", client.requests_sent);
     println!("      - Active requests: {}", client.active_requests.len());
     println!("      - Policy max attempts: {}", client.retry_policy.max_attempts());
+    
+    // Assert metrics based on expected behavior
+    let component_label = [("component", client.name.as_str())];
+    
+    // Should have sent exactly 3 requests
+    assert_eq!(metrics.get_counter("requests_sent", &component_label), Some(3));
+    assert_eq!(metrics.get_gauge("total_requests", &component_label), Some(3.0));
+    
+    // Should have some attempts (at least the original requests)
+    let attempts_sent = metrics.get_counter("attempts_sent", &component_label).unwrap_or(0);
+    assert!(attempts_sent >= 3, "Should have at least 3 attempts (original requests), got {}", attempts_sent);
+    
+    // Check for successful responses (requests are actually succeeding)
+    let successes = metrics.get_counter("responses_success", &component_label).unwrap_or(0);
+    let failures = metrics.get_counter("responses_failure", &component_label).unwrap_or(0);
+    let timeouts = metrics.get_counter("requests_timeout", &component_label).unwrap_or(0);
+    
+    // Should have some responses (either success or failure)
+    assert!(successes + failures + timeouts > 0, "Should have some responses or timeouts");
+    
+    // If requests are succeeding, we might not have retries
+    let retries_scheduled = metrics.get_counter("retries_scheduled", &component_label).unwrap_or(0);
+    
+    println!("      ✅ Assertions passed: {} attempts, {} successes, {} failures, {} timeouts, {} retries", 
+             attempts_sent, successes, failures, timeouts, retries_scheduled);
     println!();
 }
 
@@ -117,6 +142,31 @@ fn token_bucket_example() {
     println!("      - Requests sent: {}", client.requests_sent);
     println!("      - Active requests: {}", client.active_requests.len());
     println!("      - Policy max attempts: {}", client.retry_policy.max_attempts());
+    
+    // Assert metrics for token bucket behavior
+    let component_label = [("component", client.name.as_str())];
+    
+    // Should have sent exactly 4 requests
+    assert_eq!(metrics.get_counter("requests_sent", &component_label), Some(4));
+    assert_eq!(metrics.get_gauge("total_requests", &component_label), Some(4.0));
+    
+    // Should have some attempts (at least the original requests)
+    let attempts_sent = metrics.get_counter("attempts_sent", &component_label).unwrap_or(0);
+    assert!(attempts_sent >= 4, "Should have at least 4 attempts (original requests), got {}", attempts_sent);
+    
+    // Check response metrics
+    let successes = metrics.get_counter("responses_success", &component_label).unwrap_or(0);
+    let failures = metrics.get_counter("responses_failure", &component_label).unwrap_or(0);
+    let timeouts = metrics.get_counter("requests_timeout", &component_label).unwrap_or(0);
+    
+    // Should have some responses
+    assert!(successes + failures + timeouts > 0, "Should have some responses or timeouts");
+    
+    // Token bucket behavior - may or may not have retries depending on success rate
+    let retries_scheduled = metrics.get_counter("retries_scheduled", &component_label).unwrap_or(0);
+    
+    println!("      ✅ Assertions passed: {} attempts, {} successes, {} failures, {} timeouts, {} retries", 
+             attempts_sent, successes, failures, timeouts, retries_scheduled);
     println!();
 }
 
@@ -162,6 +212,32 @@ fn success_based_example() {
     println!("      - Requests sent: {}", client.requests_sent);
     println!("      - Active requests: {}", client.active_requests.len());
     println!("      - Policy max attempts: {}", client.retry_policy.max_attempts());
+    
+    // Assert metrics for success-based adaptive behavior
+    let component_label = [("component", client.name.as_str())];
+    
+    // Should have sent exactly 5 requests
+    assert_eq!(metrics.get_counter("requests_sent", &component_label), Some(5));
+    assert_eq!(metrics.get_gauge("total_requests", &component_label), Some(5.0));
+    
+    // Should have some attempts (at least the original requests)
+    let attempts_sent = metrics.get_counter("attempts_sent", &component_label).unwrap_or(0);
+    assert!(attempts_sent >= 5, "Should have at least 5 attempts (original requests), got {}", attempts_sent);
+    
+    // Check response metrics
+    let successes = metrics.get_counter("responses_success", &component_label).unwrap_or(0);
+    let failures = metrics.get_counter("responses_failure", &component_label).unwrap_or(0);
+    let timeouts = metrics.get_counter("requests_timeout", &component_label).unwrap_or(0);
+    
+    // Should have some responses
+    assert!(successes + failures + timeouts > 0, "Should have some responses or timeouts");
+    
+    // Success-based policy adapts based on success rate
+    let retries_scheduled = metrics.get_counter("retries_scheduled", &component_label).unwrap_or(0);
+    let permanently_failed = metrics.get_counter("requests_failed_permanently", &component_label).unwrap_or(0);
+    
+    println!("      ✅ Assertions passed: {} attempts, {} successes, {} failures, {} timeouts, {} retries, {} permanent failures", 
+             attempts_sent, successes, failures, timeouts, retries_scheduled, permanently_failed);
     println!();
 }
 
@@ -215,6 +291,11 @@ fn policy_comparison_example() {
     let token_client = sim.remove_component::<ClientEvent, SimpleClient<TokenBucketRetryPolicy>>(token_id).unwrap();
     let success_client = sim.remove_component::<ClientEvent, SimpleClient<SuccessBasedRetryPolicy>>(success_id).unwrap();
     
+    // Get metrics for assertions
+    let exp_metrics = exp_client.get_metrics();
+    let token_metrics = token_client.get_metrics();
+    let success_metrics = success_client.get_metrics();
+    
     println!("   📊 Policy Comparison Results:");
     println!("   
    | Policy          | Requests | Active | Max Attempts |
@@ -233,6 +314,32 @@ fn policy_comparison_example() {
             max_attempts,
         );
     }
+    
+    // Assert that all clients sent their expected number of requests
+    assert_eq!(exp_client.requests_sent, 3, "Exponential client should have sent 3 requests");
+    assert_eq!(token_client.requests_sent, 3, "Token bucket client should have sent 3 requests");
+    assert_eq!(success_client.requests_sent, 3, "Success-based client should have sent 3 requests");
+    
+    // Assert that all clients have recorded metrics
+    let exp_label = [("component", exp_client.name.as_str())];
+    let token_label = [("component", token_client.name.as_str())];
+    let success_label = [("component", success_client.name.as_str())];
+    
+    assert_eq!(exp_metrics.get_counter("requests_sent", &exp_label), Some(3));
+    assert_eq!(token_metrics.get_counter("requests_sent", &token_label), Some(3));
+    assert_eq!(success_metrics.get_counter("requests_sent", &success_label), Some(3));
+    
+    // All should have some attempts (at least the original requests)
+    let exp_attempts = exp_metrics.get_counter("attempts_sent", &exp_label).unwrap_or(0);
+    let token_attempts = token_metrics.get_counter("attempts_sent", &token_label).unwrap_or(0);
+    let success_attempts = success_metrics.get_counter("attempts_sent", &success_label).unwrap_or(0);
+    
+    assert!(exp_attempts >= 3, "Exponential client should have at least 3 attempts");
+    assert!(token_attempts >= 3, "Token bucket client should have at least 3 attempts");
+    assert!(success_attempts >= 3, "Success-based client should have at least 3 attempts");
+    
+    println!("   ✅ Comparison assertions passed: All clients sent 3 requests with {} + {} + {} total attempts", 
+             exp_attempts, token_attempts, success_attempts);
     println!();
 }
 

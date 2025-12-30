@@ -61,7 +61,7 @@
 //!     base_service,
 //!     3,                              // failure_threshold
 //!     Duration::from_secs(30),        // recovery_timeout
-//!     Arc::downgrade(&simulation),
+//!     std::sync::Arc::downgrade(&simulation),
 //! );
 //! # Ok(())
 //! # }
@@ -85,7 +85,7 @@
 //! let protected_service = DesCircuitBreakerLayer::new(
 //!     5,                              // failure_threshold
 //!     Duration::from_secs(60),        // recovery_timeout
-//!     Arc::downgrade(&simulation),
+//!     std::sync::Arc::downgrade(&simulation),
 //! ).layer(base_service);
 //! # Ok(())
 //! # }
@@ -96,6 +96,7 @@
 //! ```rust,no_run
 //! use des_components::tower::*;
 //! use tower::ServiceBuilder;
+//! use std::sync::Arc;
 //! use std::time::Duration;
 //!
 //! # fn integration_example() -> Result<(), Box<dyn std::error::Error>> {
