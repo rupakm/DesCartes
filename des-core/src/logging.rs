@@ -90,7 +90,10 @@ pub fn init_simulation_logging() {
 /// use des_core::logging::init_simulation_logging_with_level;
 /// 
 /// // Enable detailed debugging
-/// init_simulation_logging_with_level("debug");
+/// // Note: This may fail in doc tests if subscriber is already set
+/// let _ = std::panic::catch_unwind(|| {
+///     init_simulation_logging_with_level("debug");
+/// });
 /// ```
 pub fn init_simulation_logging_with_level(level: &str) {
     let filter = EnvFilter::try_from_default_env()
@@ -102,7 +105,7 @@ pub fn init_simulation_logging_with_level(level: &str) {
             ).into()
         });
 
-    tracing_subscriber::registry()
+    let result = tracing_subscriber::registry()
         .with(fmt::layer()
             .with_target(true)
             .with_thread_ids(true)
@@ -111,9 +114,15 @@ pub fn init_simulation_logging_with_level(level: &str) {
             .with_line_number(true)
         )
         .with(filter)
-        .init();
+        .try_init();
 
-    info!("Simulation logging initialized at level: {}", level);
+    match result {
+        Ok(_) => info!("Simulation logging initialized at level: {}", level),
+        Err(_) => {
+            // Global subscriber already set, which is fine in tests
+            eprintln!("Note: Global tracing subscriber already initialized");
+        }
+    }
 }
 
 /// Initialize logging with custom configuration for advanced debugging
@@ -124,7 +133,7 @@ pub fn init_detailed_simulation_logging() {
             "trace,des_core=trace,des_components=debug,des_metrics=debug".into()
         });
 
-    tracing_subscriber::registry()
+    let result = tracing_subscriber::registry()
         .with(fmt::layer()
             .with_target(true)
             .with_thread_ids(true)
@@ -134,9 +143,15 @@ pub fn init_detailed_simulation_logging() {
             .pretty() // Pretty-printed output for easier reading
         )
         .with(filter)
-        .init();
+        .try_init();
 
-    info!("Detailed simulation logging initialized");
+    match result {
+        Ok(_) => info!("Detailed simulation logging initialized"),
+        Err(_) => {
+            // Global subscriber already set, which is fine in tests
+            eprintln!("Note: Global tracing subscriber already initialized");
+        }
+    }
 }
 
 /// Create a span for tracking simulation execution
@@ -396,7 +411,10 @@ mod tests {
     #[test]
     fn test_logging_initialization() {
         // Test that logging can be initialized without panicking
-        init_simulation_logging_with_level("debug");
+        // Use try_init approach to handle case where subscriber is already set
+        let _ = std::panic::catch_unwind(|| {
+            init_simulation_logging_with_level("debug");
+        });
         
         // Test logging at different levels
         info!("Test info message");

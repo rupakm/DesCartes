@@ -15,9 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // we'll demonstrate the concepts without async execution
     demonstrate_task_patterns();
     
-    println!("\n=== Tower Task Integration Concepts Demonstrated ===");
-    println!("For full async examples, enable tokio runtime features in Cargo.toml");
-    
+    println!("\n=== Tower Task Integration Concepts Demonstrated ===");    
     Ok(())
 }
 
@@ -52,7 +50,7 @@ fn demonstrate_task_patterns() {
     println!("   ```");
     println!();
     
-    println!("3. PeriodicTask for Rate Limiting (potential future enhancement):");
+    println!("3. PeriodicTask for Rate Limiting:");
     println!("   ```rust");
     println!("   let refill_task = PeriodicTask::new(move |_scheduler| {{");
     println!("       let current = tokens.load(Ordering::Relaxed);");
@@ -60,13 +58,6 @@ fn demonstrate_task_patterns() {
     println!("       tokens.store(new_tokens, Ordering::Relaxed);");
     println!("   }}, refill_interval);");
     println!("   ```");
-    println!();
-    
-    println!("Benefits of Task-based approach:");
-    println!("• Automatic cleanup - no manual component removal needed");
-    println!("• Precise timing - tasks execute at exact simulation times");
-    println!("• Lower overhead - no persistent state in component registry");
-    println!("• Clearer intent - one-shot operations are obvious");
     println!();
     
     println!("Key Task implementations in des-components:");
