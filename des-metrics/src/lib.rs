@@ -8,6 +8,7 @@
 //! latency analysis.
 
 pub mod error;
+pub mod export;
 pub mod request_tracker;
 pub mod simulation_metrics;
 

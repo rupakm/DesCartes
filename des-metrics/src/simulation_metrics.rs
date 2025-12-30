@@ -244,7 +244,7 @@ impl SimulationMetrics {
     pub fn record_histogram(&mut self, name: &str, value: f64, labels: &[(&str, &str)]) {
         // Store internally for retrieval
         let key = MetricKey::new(name, labels);
-        self.storage.histograms.entry(key).or_insert_with(Vec::new).push(value);
+        self.storage.histograms.entry(key).or_default().push(value);
         
         // Also record in standard metrics
         let name_owned = name.to_string();
@@ -427,6 +427,51 @@ impl SimulationMetrics {
     /// Record a component-specific latency with automatic labeling
     pub fn record_component_latency(&mut self, component: &str, metric: &str, latency: Duration) {
         self.record_latency(metric, latency, &[("component", component)]);
+    }
+
+    // === EXPORT METHODS ===
+
+    /// Export metrics to JSON format
+    ///
+    /// # Arguments
+    /// * `path` - Output file path
+    /// * `pretty` - Whether to pretty-print the JSON (adds whitespace for readability)
+    ///
+    /// # Example
+    /// ```no_run
+    /// use des_metrics::SimulationMetrics;
+    ///
+    /// let metrics = SimulationMetrics::new();
+    /// // ... collect metrics ...
+    /// metrics.export_json("results/metrics.json", true).unwrap();
+    /// ```
+    pub fn export_json(&self, path: impl AsRef<std::path::Path>, pretty: bool) -> Result<(), crate::error::MetricsError> {
+        crate::export::export_json(self, path, pretty)
+    }
+
+    /// Export metrics to CSV format
+    ///
+    /// Creates multiple CSV files with suffixes for different metric types:
+    /// - `{base}_counters.csv` - Counter metrics
+    /// - `{base}_gauges.csv` - Gauge metrics
+    /// - `{base}_histograms.csv` - Histogram statistics
+    /// - `{base}_request_stats.csv` - Request tracker statistics
+    ///
+    /// # Arguments
+    /// * `path` - Base output file path
+    /// * `include_labels` - Whether to include label columns in the output
+    ///
+    /// # Example
+    /// ```no_run
+    /// use des_metrics::SimulationMetrics;
+    ///
+    /// let metrics = SimulationMetrics::new();
+    /// // ... collect metrics ...
+    /// metrics.export_csv("results/metrics.csv", true).unwrap();
+    /// // Creates: results/metrics_counters.csv, results/metrics_gauges.csv, etc.
+    /// ```
+    pub fn export_csv(&self, path: impl AsRef<std::path::Path>, include_labels: bool) -> Result<(), crate::error::MetricsError> {
+        crate::export::export_csv(self, path, include_labels)
     }
 }
 

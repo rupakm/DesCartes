@@ -32,6 +32,9 @@ pub enum MetricsError {
 
     #[error("Attempt not found: {0}")]
     AttemptNotFound(RequestAttemptId),
+
+    #[error("Export error: {0}")]
+    ExportError(String),
 }
 
 /// Errors related to logging
