@@ -26,3 +26,4 @@ futures = "0.3"
 
 [dev-dependencies]
 proptest = { workspace = true }
+des-viz = { path = "../des-viz" }

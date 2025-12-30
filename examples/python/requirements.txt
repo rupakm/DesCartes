@@ -1,0 +1,20 @@
+# Python dependencies for DesCartes metrics analysis
+
+# Data manipulation
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.14.0
+
+# Statistical analysis
+scipy>=1.10.0
+
+# Jupyter notebook
+jupyter>=1.0.0
+ipywidgets>=8.0.0
+
+# Optional: Interactive dashboards
+streamlit>=1.20.0
