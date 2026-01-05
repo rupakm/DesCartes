@@ -308,7 +308,7 @@ impl RetryPolicy for SuccessBasedRetryPolicy {
         }
 
         // Only retry on failures
-        let is_success = response.map_or(false, |r| r.is_success());
+        let is_success = response.is_some_and(|r| r.is_success());
         if is_success {
             return None;
         }

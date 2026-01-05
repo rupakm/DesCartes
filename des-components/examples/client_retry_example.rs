@@ -8,7 +8,7 @@
 //! Run with: cargo run --package des-components --example client_retry_example
 
 use des_components::{
-    SimpleClient, RetryPolicy, ExponentialBackoffPolicy, 
+    SimpleClient, Server, RetryPolicy, ExponentialBackoffPolicy, 
     TokenBucketRetryPolicy, SuccessBasedRetryPolicy, ClientEvent
 };
 use des_core::{Simulation, SimTime, Execute, Executor, task::PeriodicTask};
@@ -39,6 +39,10 @@ fn exponential_backoff_example() {
     
     let mut sim = Simulation::default();
     
+    // Create a server first
+    let server = Server::new("exponential-server".to_string(), 1, Duration::from_millis(100));
+    let server_id = sim.add_component(server);
+    
     // Create client with exponential backoff policy
     let retry_policy = ExponentialBackoffPolicy::new(4, Duration::from_millis(100))
         .with_multiplier(2.0)
@@ -47,6 +51,7 @@ fn exponential_backoff_example() {
     
     let client = SimpleClient::new(
         "exponential-client".to_string(),
+        server_id, // Add server key
         Duration::from_millis(500), // Send request every 500ms
         retry_policy,
     ).with_timeout(Duration::from_millis(200)); // Short timeout to trigger retries
@@ -107,6 +112,10 @@ fn token_bucket_example() {
     
     let mut sim = Simulation::default();
     
+    // Create a server first
+    let server = Server::new("token-bucket-server".to_string(), 1, Duration::from_millis(100));
+    let server_id = sim.add_component(server);
+    
     // Create client with token bucket policy
     let retry_policy = TokenBucketRetryPolicy::new(
         5, // max attempts
@@ -116,6 +125,7 @@ fn token_bucket_example() {
     
     let client = SimpleClient::new(
         "token-bucket-client".to_string(),
+        server_id, // Add server key
         Duration::from_millis(300),
         retry_policy,
     ).with_timeout(Duration::from_millis(150));
@@ -176,6 +186,10 @@ fn success_based_example() {
     
     let mut sim = Simulation::default();
     
+    // Create a server first
+    let server = Server::new("success-based-server".to_string(), 1, Duration::from_millis(100));
+    let server_id = sim.add_component(server);
+    
     // Create client with success-based policy
     let retry_policy = SuccessBasedRetryPolicy::new(
         4, // max attempts
@@ -186,6 +200,7 @@ fn success_based_example() {
     
     let client = SimpleClient::new(
         "success-based-client".to_string(),
+        server_id, // Add server key
         Duration::from_millis(400),
         retry_policy,
     ).with_timeout(Duration::from_millis(180));
@@ -247,9 +262,20 @@ fn policy_comparison_example() {
     
     let mut sim = Simulation::default();
     
+    // Create servers for each client
+    let exp_server = Server::new("exp-server".to_string(), 1, Duration::from_millis(100));
+    let exp_server_id = sim.add_component(exp_server);
+    
+    let token_server = Server::new("token-server".to_string(), 1, Duration::from_millis(100));
+    let token_server_id = sim.add_component(token_server);
+    
+    let success_server = Server::new("success-server".to_string(), 1, Duration::from_millis(100));
+    let success_server_id = sim.add_component(success_server);
+    
     // Create three clients with different policies
     let exp_client = SimpleClient::with_exponential_backoff(
         "exp-compare".to_string(),
+        exp_server_id, // Add server key
         Duration::from_millis(1000), // 1 request per second
         3,
         Duration::from_millis(100),
@@ -257,12 +283,14 @@ fn policy_comparison_example() {
     
     let token_client = SimpleClient::new(
         "token-compare".to_string(),
+        token_server_id, // Add server key
         Duration::from_millis(1000),
         TokenBucketRetryPolicy::new(3, 2, 0.5),
     ).with_timeout(Duration::from_millis(200));
     
     let success_client = SimpleClient::new(
         "success-compare".to_string(),
+        success_server_id, // Add server key
         Duration::from_millis(1000),
         SuccessBasedRetryPolicy::new(3, Duration::from_millis(100), 5),
     ).with_timeout(Duration::from_millis(200));

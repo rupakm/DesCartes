@@ -9,11 +9,13 @@
 
 pub mod error;
 pub mod export;
+pub mod mmk_time_series;
 pub mod request_tracker;
 pub mod simulation_metrics;
 
 // Re-export key types
 pub use error::{LogError, MetricsError};
+pub use mmk_time_series::{TimeSeriesPoint, ExponentialMovingAverage, TimeSeriesCollector, MmkTimeSeriesMetrics};
 pub use request_tracker::{LatencyStats as RequestLatencyStats, RequestTracker, RequestTrackerStats};
 pub use simulation_metrics::{LatencyStats, SimulationMetrics, setup_prometheus_metrics, setup_prometheus_metrics_with_config};
 

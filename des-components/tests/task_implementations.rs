@@ -7,7 +7,7 @@
 //! - PeriodicTask in SimpleClient (periodic behavior, termination)
 
 use des_components::{
-    SimpleClient, ClientEvent, ExponentialBackoffPolicy,
+    SimpleClient, ClientEvent, ExponentialBackoffPolicy, Server,
 };
 use des_core::{
     Execute, Executor, Simulation, SimTime,
@@ -24,9 +24,14 @@ fn test_periodic_task_behavior() {
 
     let mut sim = Simulation::default();
     
+    // Create a server first
+    let server = Server::new("periodic-server".to_string(), 1, Duration::from_millis(100));
+    let server_id = sim.add_component(server);
+    
     // Create client with specific request count
     let client = SimpleClient::with_exponential_backoff(
         "periodic-client".to_string(),
+        server_id, // Add the server key
         Duration::from_millis(50),
         3, // max retries
         Duration::from_millis(25), // base delay

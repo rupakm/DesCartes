@@ -159,9 +159,14 @@ fn client_with_tasks_example() {
     
     let mut sim = Simulation::default();
     
+    // Create a server first
+    let server = des_components::Server::new("example-server".to_string(), 1, Duration::from_millis(50));
+    let server_id = sim.add_component(server);
+    
     // Create a client with exponential backoff retry policy
     let client = SimpleClient::with_exponential_backoff(
         "example-client".to_string(),
+        server_id,
         Duration::from_millis(75),
         2, // max retries
         Duration::from_millis(25), // base delay

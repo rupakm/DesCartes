@@ -88,9 +88,13 @@ fn client_metrics_example() {
     
     let mut sim = Simulation::default();
     
+    // Create a server first
+    let server = des_components::Server::new("metrics-server".to_string(), 1, Duration::from_millis(50));
+    let server_id = sim.add_component(server);
+    
     // Create client with retry policy
     let retry_policy = ExponentialBackoffPolicy::new(3, Duration::from_millis(50));
-    let client = SimpleClient::new("metrics-client".to_string(), Duration::from_millis(200), retry_policy)
+    let client = SimpleClient::new("metrics-client".to_string(), server_id, Duration::from_millis(200), retry_policy)
         .with_max_requests(5)
         .with_timeout(Duration::from_millis(100));
     

@@ -6,6 +6,7 @@
 pub mod latency;
 pub mod throughput;
 pub mod percentiles;
+pub mod time_series;
 
 use crate::error::VizError;
 use des_metrics::simulation_metrics::MetricsSnapshot;

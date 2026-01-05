@@ -20,6 +20,7 @@ fn test_client_server_integration() {
     // Create a client that sends 5 requests every 100ms with exponential backoff
     let client = SimpleClient::with_exponential_backoff(
         "web-client".to_string(), 
+        server_id, // Add the server key
         Duration::from_millis(100),
         3, // max retries
         Duration::from_millis(50), // base delay
@@ -74,6 +75,7 @@ fn test_server_overload_scenario() {
     // Create a fast client that sends 3 requests every 50ms with exponential backoff
     let client = SimpleClient::with_exponential_backoff(
         "fast-client".to_string(),
+        server_id, // Add the server key
         Duration::from_millis(50),
         2, // max retries
         Duration::from_millis(25), // base delay
