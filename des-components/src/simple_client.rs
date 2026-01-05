@@ -8,12 +8,28 @@
 use des_core::{Component, Key, Scheduler, SimTime, RequestAttempt, RequestAttemptId, RequestId, Response};
 use des_metrics::SimulationMetrics;
 use crate::retry_policy::{RetryPolicy, ExponentialBackoffPolicy};
+use crate::ServerEvent;
 use std::time::Duration;
 use std::collections::HashMap;
+
+/// Helper function to format simulation time as duration since start
+fn format_sim_time(sim_time: SimTime) -> String {
+    let duration = sim_time.as_duration();
+    let total_ms = duration.as_millis();
+    let seconds = total_ms / 1000;
+    let ms = total_ms % 1000;
+    
+    if seconds > 0 {
+        format!("{seconds}.{ms:03}s")
+    } else {
+        format!("{ms}ms")
+    }
+}
 
 /// Simple client component that generates periodic requests with retry support
 pub struct SimpleClient<P: RetryPolicy> {
     pub name: String,
+    pub server_key: Key<ServerEvent>,
     pub request_interval: Duration,
     pub requests_sent: u64,
     pub max_requests: Option<u64>,
@@ -45,9 +61,10 @@ pub enum ClientEvent {
 
 impl<P: RetryPolicy> SimpleClient<P> {
     /// Create a new simple client with a retry policy
-    pub fn new(name: String, request_interval: Duration, retry_policy: P) -> Self {
+    pub fn new(name: String, server_key: Key<ServerEvent>, request_interval: Duration, retry_policy: P) -> Self {
         Self {
             name,
+            server_key,
             request_interval,
             requests_sent: 0,
             max_requests: None,
@@ -93,16 +110,16 @@ impl<P: RetryPolicy> SimpleClient<P> {
             request_id,
             attempt_number,
             scheduler.time(),
-            vec![], // Empty payload for now
+            format!("Request {} from {}", request_id.0, self.name).into_bytes(),
         );
 
         println!(
-            "[{}] Sending request {} attempt {} (attempt ID {}) at {:?}",
+            "[{}] [{}] Sending request {} attempt {} (attempt ID {})",
+            format_sim_time(scheduler.time()),
             self.name,
             request_id.0,
             attempt_number,
-            attempt_id,
-            scheduler.time()
+            attempt_id
         );
 
         // Schedule timeout for this attempt
@@ -118,38 +135,13 @@ impl<P: RetryPolicy> SimpleClient<P> {
         // Record metrics
         self.metrics.increment_counter("attempts_sent", &[("component", &self.name)]);
 
-        // In a real implementation, we would send the attempt to a server
-        // For now, we'll simulate a response with some probability of failure
-        let success_probability = 0.7; // 70% success rate
-        let will_succeed = rand::random::<f64>() < success_probability;
-        
-        let response_delay = if will_succeed {
-            Duration::from_millis(50 + (rand::random::<u64>() % 100)) // 50-150ms
-        } else {
-            Duration::from_millis(200 + (rand::random::<u64>() % 300)) // 200-500ms before failure
-        };
-
-        let response = if will_succeed {
-            Response::success(
-                RequestAttemptId(attempt_id),
-                request_id,
-                scheduler.time() + SimTime::from_duration(response_delay),
-                vec![], // Empty response payload
-            )
-        } else {
-            Response::error(
-                RequestAttemptId(attempt_id),
-                request_id,
-                scheduler.time() + SimTime::from_duration(response_delay),
-                500,
-                "Simulated server error".to_string(),
-            )
-        };
-
-        scheduler.schedule(
-            SimTime::from_duration(response_delay),
-            self_id,
-            ClientEvent::ResponseReceived { response },
+        // Send the request to the server
+        scheduler.schedule_now(
+            self.server_key,
+            ServerEvent::ProcessRequest {
+                attempt: attempt.clone(),
+                client_id: self_id,
+            },
         );
 
         attempt
@@ -168,12 +160,12 @@ impl<P: RetryPolicy> SimpleClient<P> {
             let is_success = response.is_success();
             
             println!(
-                "[{}] Received response for request {} attempt {}: {} at {:?}",
+                "[{}] [{}] Received response for request {} attempt {}: {}",
+                format_sim_time(scheduler.time()),
                 self.name,
                 request_id.0,
                 attempt.attempt_number,
-                if is_success { "SUCCESS" } else { "FAILURE" },
-                scheduler.time()
+                if is_success { "SUCCESS" } else { "FAILURE" }
             );
 
             // Record response metrics
@@ -189,10 +181,11 @@ impl<P: RetryPolicy> SimpleClient<P> {
                 // Check if we should retry
                 if let Some(retry_delay) = retry_policy.should_retry(&attempt, Some(response)) {
                     println!(
-                        "[{}] Scheduling retry for request {} in {:?}",
+                        "[{}] [{}] Scheduling retry for request {} in {:.0}ms",
+                        format_sim_time(scheduler.time()),
                         self.name,
                         request_id.0,
-                        retry_delay
+                        retry_delay.as_millis()
                     );
                     
                     // Store the retry policy state for this request
@@ -208,7 +201,8 @@ impl<P: RetryPolicy> SimpleClient<P> {
                     self.metrics.increment_counter("retries_scheduled", &[("component", &self.name)]);
                 } else {
                     println!(
-                        "[{}] Request {} failed permanently (no more retries)",
+                        "[{}] [{}] Request {} failed permanently (no more retries)",
+                        format_sim_time(scheduler.time()),
                         self.name,
                         request_id.0
                     );
@@ -230,11 +224,11 @@ impl<P: RetryPolicy> SimpleClient<P> {
             // Only handle timeout if this is the current attempt
             if attempt.id == attempt_id {
                 println!(
-                    "[{}] Request {} attempt {} timed out at {:?}",
+                    "[{}] [{}] Request {} attempt {} timed out",
+                    format_sim_time(scheduler.time()),
                     self.name,
                     request_id.0,
-                    attempt.attempt_number,
-                    scheduler.time()
+                    attempt.attempt_number
                 );
 
                 self.metrics.increment_counter("requests_timeout", &[("component", &self.name)]);
@@ -242,10 +236,11 @@ impl<P: RetryPolicy> SimpleClient<P> {
                 // Check if we should retry on timeout
                 if let Some(retry_delay) = retry_policy.should_retry(attempt, None) {
                     println!(
-                        "[{}] Scheduling retry for timed out request {} in {:?}",
+                        "[{}] [{}] Scheduling retry for timed out request {} in {:.0}ms",
+                        format_sim_time(scheduler.time()),
                         self.name,
                         request_id.0,
-                        retry_delay
+                        retry_delay.as_millis()
                     );
                     
                     // Schedule the retry
@@ -258,7 +253,8 @@ impl<P: RetryPolicy> SimpleClient<P> {
                     self.metrics.increment_counter("retries_scheduled", &[("component", &self.name)]);
                 } else {
                     println!(
-                        "[{}] Request {} timed out permanently (no more retries)",
+                        "[{}] [{}] Request {} timed out permanently (no more retries)",
+                        format_sim_time(scheduler.time()),
                         self.name,
                         request_id.0
                     );
@@ -333,13 +329,14 @@ impl SimpleClient<ExponentialBackoffPolicy> {
     /// Create a convenience constructor with exponential backoff
     pub fn with_exponential_backoff(
         name: String, 
+        server_key: Key<ServerEvent>,
         request_interval: Duration,
         max_retries: usize,
         base_delay: Duration,
     ) -> Self {
         let retry_policy = ExponentialBackoffPolicy::new(max_retries, base_delay)
             .with_jitter(true);
-        SimpleClient::new(name, request_interval, retry_policy)
+        SimpleClient::new(name, server_key, request_interval, retry_policy)
     }
 }
 
@@ -349,14 +346,19 @@ mod tests {
     use des_core::{Execute, Executor, Simulation};
     use des_core::task::PeriodicTask;
     use crate::retry_policy::{ExponentialBackoffPolicy, TokenBucketRetryPolicy, SuccessBasedRetryPolicy};
+    use crate::Server;
 
     #[test]
     fn test_simple_client_with_retry() {
         let mut sim = Simulation::default();
         
+        // Create a server first
+        let server = Server::new("test-server".to_string(), 1, Duration::from_millis(100));
+        let server_id = sim.add_component(server);
+        
         // Create a client with exponential backoff retry policy
         let retry_policy = ExponentialBackoffPolicy::new(3, Duration::from_millis(100));
-        let client = SimpleClient::new("test-client".to_string(), Duration::from_millis(100), retry_policy)
+        let client = SimpleClient::new("test-client".to_string(), server_id, Duration::from_millis(100), retry_policy)
             .with_max_requests(3)
             .with_timeout(Duration::from_millis(500));
         
@@ -390,9 +392,14 @@ mod tests {
     fn test_simple_client_exponential_backoff_constructor() {
         let mut sim = Simulation::default();
         
+        // Create a server first
+        let server = Server::new("backoff-server".to_string(), 1, Duration::from_millis(50));
+        let server_id = sim.add_component(server);
+        
         // Create a client using the convenience constructor
         let client = SimpleClient::with_exponential_backoff(
             "backoff-client".to_string(),
+            server_id,
             Duration::from_millis(50),
             3, // max retries
             Duration::from_millis(100), // base delay
@@ -431,10 +438,15 @@ mod tests {
             .with_min_success_rate(0.6)
             .with_failure_multiplier(2.0);
         
+        // Create a simulation to get a proper server key
+        let mut sim = Simulation::default();
+        let server = Server::new("test-server".to_string(), 1, Duration::from_millis(100));
+        let server_key = sim.add_component(server);
+        
         // Create clients with different policies
-        let _client1 = SimpleClient::new("exp-client".to_string(), Duration::from_millis(100), exponential_policy);
-        let _client2 = SimpleClient::new("token-client".to_string(), Duration::from_millis(100), token_bucket_policy);
-        let _client3 = SimpleClient::new("success-client".to_string(), Duration::from_millis(100), success_based_policy);
+        let _client1 = SimpleClient::new("exp-client".to_string(), server_key, Duration::from_millis(100), exponential_policy);
+        let _client2 = SimpleClient::new("token-client".to_string(), server_key, Duration::from_millis(100), token_bucket_policy);
+        let _client3 = SimpleClient::new("success-client".to_string(), server_key, Duration::from_millis(100), success_based_policy);
         
         // Test passes if compilation succeeds
     }

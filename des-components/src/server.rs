@@ -10,6 +10,20 @@ use des_metrics::SimulationMetrics;
 use std::time::Duration;
 use uuid::Uuid;
 
+/// Helper function to format simulation time as duration since start
+fn format_sim_time(sim_time: SimTime) -> String {
+    let duration = sim_time.as_duration();
+    let total_ms = duration.as_millis();
+    let seconds = total_ms / 1000;
+    let ms = total_ms % 1000;
+    
+    if seconds > 0 {
+        format!("{seconds}.{ms:03}s")
+    } else {
+        format!("{ms}ms")
+    }
+}
+
 /// Events that the unified server can handle
 #[derive(Debug, Clone)]
 pub enum ServerEvent {
@@ -138,8 +152,11 @@ impl Server {
                 Ok(_) => {
                     self.requests_queued += 1;
                     println!(
-                        "[{}] Queued request attempt {} at {:?} (queue depth: {})",
-                        self.name, attempt.id, scheduler.time(), queue.len()
+                        "[{}] [{}] Queued request attempt {} (queue depth: {})",
+                        format_sim_time(scheduler.time()),
+                        self.name, 
+                        attempt.id, 
+                        queue.len()
                     );
                     
                     // Record metrics
@@ -166,11 +183,11 @@ impl Server {
         scheduler: &mut Scheduler,
     ) {
         println!(
-            "[{}] Processing request attempt {} (request {}) at {:?} (threads: {}/{})",
+            "[{}] [{}] Processing request attempt {} (request {}) (threads: {}/{})",
+            format_sim_time(scheduler.time()),
             self.name,
             attempt.id,
             attempt.request_id,
-            scheduler.time(),
             self.active_threads + 1,
             self.thread_capacity
         );
@@ -205,8 +222,11 @@ impl Server {
         scheduler: &mut Scheduler,
     ) {
         println!(
-            "[{}] Completed request attempt {} (request {}) at {:?}",
-            self.name, attempt_id, request_id, scheduler.time()
+            "[{}] [{}] Completed request attempt {} (request {})",
+            format_sim_time(scheduler.time()),
+            self.name, 
+            attempt_id, 
+            request_id
         );
 
         // Free the simulated thread
@@ -252,7 +272,8 @@ impl Server {
         scheduler: &mut Scheduler,
     ) {
         println!(
-            "[{}] Rejecting request attempt {} (request {}) - server overloaded (threads: {}/{}, queue: {})",
+            "[{}] [{}] Rejecting request attempt {} (request {}) - server overloaded (threads: {}/{}, queue: {})",
+            format_sim_time(scheduler.time()),
             self.name,
             attempt.id,
             attempt.request_id,
@@ -297,12 +318,12 @@ impl Server {
                 let queue_time = queued_item.queue_time(scheduler.time());
                 
                 println!(
-                    "[{}] Processing queued request attempt {} (request {}) at {:?} (was queued for {:?})",
+                    "[{}] [{}] Processing queued request attempt {} (request {}) (was queued for {:.0}ms)",
+                    format_sim_time(scheduler.time()),
                     self.name,
                     attempt.id,
                     attempt.request_id,
-                    scheduler.time(),
-                    queue_time
+                    queue_time.as_millis()
                 );
 
                 // Reconstruct the client_id from the stored UUID
@@ -313,8 +334,10 @@ impl Server {
                     // Fallback: complete the request without sending response
                     // This handles legacy queue items that don't have client_id stored
                     println!(
-                        "[{}] Warning: Processing queued request attempt {} without client_id",
-                        self.name, attempt.id
+                        "[{}] [{}] Warning: Processing queued request attempt {} without client_id",
+                        format_sim_time(scheduler.time()),
+                        self.name, 
+                        attempt.id
                     );
                     self.active_threads += 1;
                     scheduler.schedule(

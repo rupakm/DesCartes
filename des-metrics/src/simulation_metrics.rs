@@ -648,10 +648,10 @@ mod tests {
         
         // Test simple retrieval (no labels)
         metrics.increment_counter("simple_counter", &[]);
-        metrics.record_gauge("simple_gauge", 3.14, &[]);
+        metrics.record_gauge("simple_gauge", std::f64::consts::PI, &[]);
         
         assert_eq!(metrics.get_counter_simple("simple_counter"), Some(1));
-        assert_eq!(metrics.get_gauge_simple("simple_gauge"), Some(3.14));
+        assert_eq!(metrics.get_gauge_simple("simple_gauge"), Some(std::f64::consts::PI));
         
         // Test non-existent metrics
         assert_eq!(metrics.get_counter_simple("nonexistent"), None);
