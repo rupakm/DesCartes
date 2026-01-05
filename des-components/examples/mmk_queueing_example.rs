@@ -1035,7 +1035,7 @@ pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== M/M/k Queueing System Examples ===\n");
     
-    let duration = Duration::from_secs(5); // 5 seconds for demo
+    let duration = Duration::from_secs(2); // 5 seconds for demo
     
     // Test 1: Classic M/M/1 queue with bounded queue (capacity 20)
     let mm1_config = MmkConfig::mm1(5.0, 8.0, duration, Some(20)); 
@@ -1055,7 +1055,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     mm1c_results.print_summary();
     mm1d_results.print_summary();
 
-    //todo!();
+    todo!();
 
     // Test 2: Classic M/M/k queue (k=3) with larger queue (capacity 100)
     let mmk_config = MmkConfig::mmk(12.0, 5.0, 3, duration, Some(100)); // λ=12, μ=5, k=3, queue=100
