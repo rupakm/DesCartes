@@ -306,6 +306,170 @@ impl Component for ExponentialArrivalClient {
     }
 }
 
+/// Constant arrival client that generates requests with fixed inter-arrival times
+pub struct ConstantArrivalClient {
+    pub name: String,
+    pub server_key: Key<ServerEvent>,
+    pub inter_arrival_time: Duration, // Fixed time between requests
+    pub next_request_id: u64,
+    pub metrics: Arc<Mutex<SimulationMetrics>>,
+    pub request_start_times: HashMap<RequestId, SimTime>,
+    pub max_requests: Option<u64>,
+    pub requests_sent: u64,
+    pub time_series_metrics: Arc<Mutex<MmkTimeSeriesMetrics>>,
+}
+
+impl ConstantArrivalClient {
+    pub fn new(
+        name: String,
+        server_key: Key<ServerEvent>,
+        inter_arrival_time: Duration,
+        metrics: Arc<Mutex<SimulationMetrics>>,
+        time_series_metrics: Arc<Mutex<MmkTimeSeriesMetrics>>,
+    ) -> Self {
+        Self {
+            name,
+            server_key,
+            inter_arrival_time,
+            next_request_id: 1,
+            metrics,
+            request_start_times: HashMap::new(),
+            max_requests: None,
+            requests_sent: 0,
+            time_series_metrics,
+        }
+    }
+
+    /// Create from arrival rate (requests per second)
+    pub fn from_rate(
+        name: String,
+        server_key: Key<ServerEvent>,
+        rate: f64, // requests per second
+        metrics: Arc<Mutex<SimulationMetrics>>,
+        time_series_metrics: Arc<Mutex<MmkTimeSeriesMetrics>>,
+    ) -> Self {
+        let inter_arrival_time = Duration::from_secs_f64(1.0 / rate);
+        Self::new(name, server_key, inter_arrival_time, metrics, time_series_metrics)
+    }
+
+    pub fn with_max_requests(mut self, max_requests: u64) -> Self {
+        self.max_requests = Some(max_requests);
+        self
+    }
+
+    fn schedule_next_request(&mut self, scheduler: &mut Scheduler, self_key: Key<ClientEvent>) {
+        // Check if we've reached the maximum number of requests
+        if let Some(max) = self.max_requests {
+            if self.requests_sent >= max {
+                return;
+            }
+        }
+
+        // Schedule next request with fixed inter-arrival time
+        scheduler.schedule(
+            SimTime::from_duration(self.inter_arrival_time),
+            self_key,
+            ClientEvent::SendRequest,
+        );
+    }
+
+    fn send_request(&mut self, scheduler: &mut Scheduler, self_key: Key<ClientEvent>) {
+        let request_id = RequestId(self.next_request_id);
+        let attempt_id = RequestAttemptId(self.next_request_id);
+        
+        // Record request start time for latency calculation
+        self.request_start_times.insert(request_id, scheduler.time());
+        
+        // Create request attempt
+        let attempt = RequestAttempt::new(
+            attempt_id,
+            request_id,
+            1, // First attempt
+            scheduler.time(),
+            format!("Request {} from {}", self.next_request_id, self.name).into_bytes(),
+        );
+        
+        self.next_request_id += 1;
+        self.requests_sent += 1;
+        
+        // Record metrics
+        {
+            let mut metrics = self.metrics.lock().unwrap();
+            metrics.increment_counter("requests_sent", &[("component", &self.name)]);
+        }
+        
+        // Send to server
+        scheduler.schedule_now(
+            self.server_key,
+            ServerEvent::ProcessRequest {
+                attempt,
+                client_id: self_key,
+            },
+        );
+        
+        println!("[{}] [{}] Sent request {} at {} (constant interval: {:.0}ms)", 
+                 format_sim_time(scheduler.time()), self.name, request_id.0, 
+                 format_sim_time(scheduler.time()), self.inter_arrival_time.as_millis());
+        
+        // Schedule next request
+        self.schedule_next_request(scheduler, self_key);
+    }
+
+    fn handle_response(&mut self, response: &Response, scheduler: &mut Scheduler) {
+        // Calculate latency
+        if let Some(start_time) = self.request_start_times.remove(&response.request_id) {
+            let latency = scheduler.time().duration_since(start_time);
+            let latency_ms = latency.as_millis() as f64;
+            
+            // Record metrics
+            {
+                let mut metrics = self.metrics.lock().unwrap();
+                if response.is_success() {
+                    metrics.increment_counter("responses_success", &[("component", &self.name)]);
+                } else {
+                    metrics.increment_counter("responses_failure", &[("component", &self.name)]);
+                }
+                metrics.record_histogram("response_time_ms", latency_ms, &[("component", &self.name)]);
+            }
+            
+            // Record time-series data
+            {
+                let mut ts_metrics = self.time_series_metrics.lock().unwrap();
+                ts_metrics.record_latency(scheduler.time(), latency_ms);
+            }
+            
+            println!("[{}] [{}] Received response for request {} (latency: {:.2}ms, success: {})", 
+                     format_sim_time(scheduler.time()), self.name, response.request_id.0, latency_ms, response.is_success());
+        }
+    }
+}
+
+impl Component for ConstantArrivalClient {
+    type Event = ClientEvent;
+
+    fn process_event(
+        &mut self,
+        self_id: Key<Self::Event>,
+        event: &Self::Event,
+        scheduler: &mut Scheduler,
+    ) {
+        match event {
+            ClientEvent::SendRequest => {
+                self.send_request(scheduler, self_id);
+            }
+            ClientEvent::ResponseReceived { response } => {
+                self.handle_response(response, scheduler);
+            }
+            ClientEvent::RequestTimeout { .. } => {
+                println!("[{}] [{}] Request timeout occurred", format_sim_time(scheduler.time()), self.name);
+            }
+            ClientEvent::RetryRequest { .. } => {
+                println!("[{}] [{}] Retry request (should not occur with NoRetryPolicy)", format_sim_time(scheduler.time()), self.name);
+            }
+        }
+    }
+}
+
 /// Exponential service server that uses exponential service time distribution
 pub struct ExponentialServiceServer {
     pub inner_server: Server,
@@ -520,7 +684,7 @@ fn generate_time_series_charts(
     let timeout_rate_series = TimeSeries::new("Timeout Rate", timeout_rate_data, GREEN);
     
     // Generate the chart
-    let output_path = format!("target/mmk_charts/{}_time_series.png", scenario_name);
+    let output_path = format!("target/mmk_charts/{scenario_name}_time_series.png");
     create_mmk_time_series_chart(
         &latency_series,
         &queue_size_series,
@@ -528,7 +692,7 @@ fn generate_time_series_charts(
         &output_path,
     )?;
     
-    println!("📊 Generated time-series chart: {}", output_path);
+    println!("📊 Generated time-series chart: {output_path}");
     Ok(())
 }
 
@@ -597,7 +761,7 @@ pub fn run_classic_mm1_queue(config: MmkConfig) -> MmkResults {
 
     // Generate time-series visualizations
     generate_time_series_charts(&time_series_metrics, "mm1_classic").unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to generate time-series charts: {}", e);
+        eprintln!("Warning: Failed to generate time-series charts: {e}");
     });
 
     // Collect results
@@ -720,7 +884,7 @@ pub fn run_classic_mmk_queue(config: MmkConfig) -> MmkResults {
 
     // Generate time-series visualizations
     generate_time_series_charts(&time_series_metrics, &format!("mm{}_classic", config.k)).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to generate time-series charts: {}", e);
+        eprintln!("Warning: Failed to generate time-series charts: {e}");
     });
 
     // Collect results (same as MM1)
@@ -852,7 +1016,7 @@ pub fn run_mm1_with_retry(config: MmkConfig) -> MmkResults {
 
     // Generate time-series visualizations
     generate_time_series_charts(&time_series_metrics, "mm1_with_retry").unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to generate time-series charts: {}", e);
+        eprintln!("Warning: Failed to generate time-series charts: {e}");
     });
 
     // Collect results
@@ -980,7 +1144,7 @@ pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
 
     // Generate time-series visualizations
     generate_time_series_charts(&time_series_metrics, "mm1_with_exp_backoff").unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to generate time-series charts: {}", e);
+        eprintln!("Warning: Failed to generate time-series charts: {e}");
     });
 
     // Collect results
@@ -1032,6 +1196,155 @@ pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
     }
 }
 
+/// Run a simulation with constant arrival client (for debugging)
+pub fn run_constant_arrival_debug(
+    inter_arrival_time: Duration,
+    server_num_threads: usize,
+    server_capacity: usize,
+    mu: f64,
+    duration: Duration,
+    max_requests: Option<u64>,
+    queue_capacity: Option<usize>,
+) -> MmkResults {
+    println!("\n🔧 Running Constant Arrival Debug Simulation");
+    println!("Inter-arrival: {:.0}ms, Service rate: {:.0}rps, Servers: {}, Duration: {:?}", 
+             inter_arrival_time.as_millis(), mu, server_capacity, duration);
+    
+    let mut simulation = Simulation::default();
+    let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
+    
+    // Create time-series metrics with 100ms aggregation window and 0.1 EMA alpha
+    let time_series_metrics = Arc::new(Mutex::new(MmkTimeSeriesMetrics::new(
+        Duration::from_millis(100),
+        0.1,
+    )));
+
+    let server = ExponentialServiceServer::new(
+        format!("mm{server_num_threads}-server"),
+        server_num_threads, // k servers
+        mu,
+        metrics.clone(),
+        time_series_metrics.clone(),
+    );
+
+    let server = if let Some(capacity) = queue_capacity {
+        if capacity > 0 {
+            server.with_queue(Box::new(FifoQueue::bounded(capacity)))
+        } else {
+            server // No queue
+        }
+    } else {
+        server.with_queue(Box::new(FifoQueue::unbounded())) // Unlimited queue
+    };
+
+    let server_key = simulation.add_component(server);
+
+    // Create constant arrival client
+    let mut client = ConstantArrivalClient::new(
+        "debug-client".to_string(),
+        server_key,
+        inter_arrival_time,
+        metrics.clone(),
+        time_series_metrics.clone(),
+    );
+    
+    if let Some(max) = max_requests {
+        client = client.with_max_requests(max);
+    }
+
+    let client_key = simulation.add_component(client);
+
+    // Start the client
+    simulation.schedule(
+        SimTime::from_duration(Duration::from_millis(0)),
+        client_key,
+        ClientEvent::SendRequest,
+    );
+
+    // Run simulation
+    let executor = Executor::timed(SimTime::from_duration(duration));
+    executor.execute(&mut simulation);
+
+    // Flush time-series data
+    {
+        let mut ts_metrics = time_series_metrics.lock().unwrap();
+        ts_metrics.flush(SimTime::from_duration(duration));
+    }
+
+    // Generate time-series visualizations
+    generate_time_series_charts(&time_series_metrics, "constant_arrival_debug").unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to generate time-series charts: {e}");
+    });
+
+    // Collect results
+    let final_server = simulation.remove_component::<ServerEvent, ExponentialServiceServer>(server_key).unwrap();
+    let final_client = simulation.remove_component::<ClientEvent, ConstantArrivalClient>(client_key).unwrap();
+    let final_metrics = {
+        let metrics_guard = metrics.lock().unwrap();
+        metrics_guard.get_metrics_snapshot()
+    };
+
+    // Calculate results
+    let requests_sent = final_client.requests_sent;
+    let requests_completed = final_server.inner_server.requests_processed;
+    let requests_dropped = final_server.inner_server.requests_rejected;
+    
+    let success_rate = if requests_sent > 0 {
+        requests_completed as f64 / requests_sent as f64
+    } else {
+        0.0
+    };
+
+    let throughput_rps = requests_completed as f64 / duration.as_secs_f64();
+    
+    // Get response time metrics
+    let response_times_stats = final_metrics.histograms.iter()
+        .find(|(name, labels, _)| name == "response_time_ms" && 
+              labels.get("component").is_some_and(|c| c == "debug-client"))
+        .map(|(_, _, stats)| stats);
+    
+    let avg_response_time_ms = response_times_stats
+        .map(|stats| stats.mean)
+        .unwrap_or(0.0);
+
+    let p95_response_time_ms = response_times_stats
+        .map(|stats| stats.p95);
+
+    let p99_response_time_ms = response_times_stats
+        .map(|stats| stats.p99);
+
+    // Calculate theoretical values for comparison
+    let arrival_rate = 1.0 / inter_arrival_time.as_secs_f64();
+    let service_rate = mu;
+    let theoretical_utilization = arrival_rate / (server_capacity as f64 * service_rate);
+
+    let config = MmkConfig {
+        lambda: arrival_rate,
+        mu: service_rate,
+        k: server_capacity,
+        queue_capacity,
+        duration,
+        timeout: None,
+        max_retries: None,
+        base_retry_delay: None,
+    };
+
+    MmkResults {
+        config,
+        requests_sent,
+        requests_completed,
+        requests_dropped,
+        avg_response_time_ms,
+        p95_response_time_ms,
+        p99_response_time_ms,
+        throughput_rps,
+        server_utilization: final_server.utilization(),
+        avg_queue_depth: final_server.queue_depth() as f64,
+        success_rate,
+        theoretical_utilization,
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== M/M/k Queueing System Examples ===\n");
     
@@ -1055,7 +1368,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     mm1c_results.print_summary();
     mm1d_results.print_summary();
 
-    todo!();
+    // Test: Constant Arrival Debug - useful for debugging with predictable timing
+    println!("\n🔧 === Constant Arrival Debug Test ===");
+    let debug_results = run_constant_arrival_debug(
+        Duration::from_millis(200), // Send request every 200ms (5 req/s)
+        2, // Single server
+        20, // 100ms service time (10 req/s capacity)
+        3.0, 
+        Duration::from_secs(5),
+        Some(25), 
+        Some(5), 
+    );
+    debug_results.print_summary();
 
     // Test 2: Classic M/M/k queue (k=3) with larger queue (capacity 100)
     let mmk_config = MmkConfig::mmk(12.0, 5.0, 3, duration, Some(100)); // λ=12, μ=5, k=3, queue=100
@@ -1107,11 +1431,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
              format_queue_capacity(mm1_backoff_results.config.queue_capacity),
              mm1_backoff_results.throughput_rps, mm1_backoff_results.avg_response_time_ms,
              mm1_backoff_results.success_rate * 100.0, mm1_backoff_results.server_utilization * 100.0);
+    println!("| Constant Arrival     | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |", 
+             format_queue_capacity(debug_results.config.queue_capacity),
+             debug_results.throughput_rps, debug_results.avg_response_time_ms,
+             debug_results.success_rate * 100.0, debug_results.server_utilization * 100.0);
     
     println!("\n✅ All M/M/k queueing system examples completed!");
     println!("\n📊 Time-series charts generated in target/mmk_charts/:");
     println!("  - mm1_classic_time_series.png");
     println!("  - mm3_classic_time_series.png");
+    println!("  - constant_arrival_debug_time_series.png");
     println!("  - mm1_with_retry_time_series.png (if retry examples are updated)");
     println!("  - mm1_with_exp_backoff_time_series.png (if backoff examples are updated)");
     println!("\nCharts show:");
@@ -1119,6 +1448,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  • Average queue size over time");
     println!("  • Request timeout rate over time");
     println!("  • 100ms aggregation window with smoothing");
+    println!("\n🔧 Debug Features:");
+    println!("  • ConstantArrivalClient: Sends requests at fixed intervals for predictable debugging");
+    println!("  • run_constant_arrival_debug(): Helper function for debugging scenarios");
     
     Ok(())
 }
@@ -1217,5 +1549,53 @@ mod tests {
         
         assert!(results.requests_sent > 0);
         assert!(results.success_rate >= 0.0);
+    }
+
+    #[test]
+    fn test_constant_arrival_debug_simulation() {
+        let results = run_constant_arrival_debug(
+            Duration::from_millis(100), // 100ms intervals (10 req/s)
+            1, // Single server
+            Duration::from_millis(50), // 50ms service time (20 req/s capacity)
+            Duration::from_secs(1), // 1 second simulation
+            Some(5), // Send exactly 5 requests
+            Some(10), // Small queue
+        );
+        
+        assert!(results.requests_sent > 0);
+        assert!(results.success_rate >= 0.0);
+        assert!(results.theoretical_utilization < 1.0); // Should be stable (10/20 = 0.5)
+    }
+
+    #[test]
+    fn test_constant_arrival_client_from_rate() {
+        use std::sync::{Arc, Mutex};
+        use des_metrics::{SimulationMetrics, MmkTimeSeriesMetrics};
+        use des_core::{Simulation, Key};
+        use crate::ServerEvent;
+        
+        let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
+        let time_series_metrics = Arc::new(Mutex::new(MmkTimeSeriesMetrics::new(
+            Duration::from_millis(100),
+            0.1,
+        )));
+        
+        let simulation = Simulation::default();
+        let server_key = Key::<ServerEvent>::new();
+        
+        // Test creating from rate
+        let client = ConstantArrivalClient::from_rate(
+            "test-client".to_string(),
+            server_key,
+            5.0, // 5 requests per second
+            metrics,
+            time_series_metrics,
+        );
+        
+        // Should have 200ms inter-arrival time (1/5 = 0.2 seconds)
+        assert_eq!(client.inter_arrival_time, Duration::from_millis(200));
+        assert_eq!(client.name, "test-client");
+        assert_eq!(client.requests_sent, 0);
+        assert_eq!(client.next_request_id, 1);
     }
 }
