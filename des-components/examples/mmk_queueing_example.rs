@@ -1200,15 +1200,14 @@ pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
 pub fn run_constant_arrival_debug(
     inter_arrival_time: Duration,
     server_num_threads: usize,
-    server_capacity: usize,
     mu: f64,
     duration: Duration,
     max_requests: Option<u64>,
     queue_capacity: Option<usize>,
 ) -> MmkResults {
     println!("\n🔧 Running Constant Arrival Debug Simulation");
-    println!("Inter-arrival: {:.0}ms, Service rate: {:.0}rps, Servers: {}, Duration: {:?}", 
-             inter_arrival_time.as_millis(), mu, server_capacity, duration);
+    println!("Inter-arrival: {:.0}ms, Service rate: {:.0}rps, Servers: {} threads, {} qsize, Duration: {:?}", 
+             inter_arrival_time.as_millis(), mu, server_num_threads, queue_capacity.unwrap_or(0), duration);
     
     let mut simulation = Simulation::default();
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
@@ -1316,12 +1315,12 @@ pub fn run_constant_arrival_debug(
     // Calculate theoretical values for comparison
     let arrival_rate = 1.0 / inter_arrival_time.as_secs_f64();
     let service_rate = mu;
-    let theoretical_utilization = arrival_rate / (server_capacity as f64 * service_rate);
+    let theoretical_utilization = arrival_rate / (server_num_threads as f64 * service_rate);
 
     let config = MmkConfig {
         lambda: arrival_rate,
         mu: service_rate,
-        k: server_capacity,
+        k: server_num_threads,
         queue_capacity,
         duration,
         timeout: None,
@@ -1350,6 +1349,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let duration = Duration::from_secs(2); // 5 seconds for demo
     
+    // Test: Constant Arrival Debug - useful for debugging with predictable timing
+    println!("\n🔧 === Constant Arrival Debug Test ===");
+    let debug_results = run_constant_arrival_debug(
+        Duration::from_millis(100), 
+        2, 
+        2.0, 
+        Duration::from_secs(5),
+        Some(25), 
+        Some(5), 
+    );
+    debug_results.print_summary();
+
+
     // Test 1: Classic M/M/1 queue with bounded queue (capacity 20)
     let mm1_config = MmkConfig::mm1(5.0, 8.0, duration, Some(20)); 
     let mm1a_results = run_classic_mm1_queue(mm1_config);
@@ -1368,18 +1380,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     mm1c_results.print_summary();
     mm1d_results.print_summary();
 
-    // Test: Constant Arrival Debug - useful for debugging with predictable timing
-    println!("\n🔧 === Constant Arrival Debug Test ===");
-    let debug_results = run_constant_arrival_debug(
-        Duration::from_millis(200), // Send request every 200ms (5 req/s)
-        2, // Single server
-        20, // 100ms service time (10 req/s capacity)
-        3.0, 
-        Duration::from_secs(5),
-        Some(25), 
-        Some(5), 
-    );
-    debug_results.print_summary();
+    
 
     // Test 2: Classic M/M/k queue (k=3) with larger queue (capacity 100)
     let mmk_config = MmkConfig::mmk(12.0, 5.0, 3, duration, Some(100)); // λ=12, μ=5, k=3, queue=100

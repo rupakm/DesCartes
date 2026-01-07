@@ -209,14 +209,13 @@ fn build_html_content(
     for (filename, title) in &chart_files {
         let chart_path = charts_dir.join(filename);
         if chart_path.exists() {
-            let rel_path = format!("charts/{}", filename);
+            let rel_path = format!("charts/{filename}");
             html.push_str(&format!(
                 r#"    <div class="chart">
-        <h3>{}</h3>
-        <img src="{}" alt="{}">
+        <h3>{title}</h3>
+        <img src="{rel_path}" alt="{title}">
     </div>
-"#,
-                title, rel_path, title
+"#
             ));
         }
     }

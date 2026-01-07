@@ -96,7 +96,7 @@ pub fn create_percentile_chart_with_config(
         .x_desc(&config.x_label)
         .y_desc(&config.y_label)
         .x_labels(3)
-        .x_label_formatter(&|x| percentile_labels.get(*x as usize).unwrap_or(&"").to_string())
+        .x_label_formatter(&|x| percentile_labels.get(*x).unwrap_or(&"").to_string())
         .draw()
         .map_err(|e| VizError::RenderingError(format!("Failed to configure mesh: {e}")))?;
 
@@ -127,8 +127,8 @@ pub fn create_percentile_chart_with_config(
     // Draw legend
     chart
         .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
-        .border_style(&BLACK)
+        .background_style(WHITE.mix(0.8))
+        .border_style(BLACK)
         .draw()
         .map_err(|e| VizError::RenderingError(format!("Failed to draw legend: {e}")))?;
 

@@ -33,6 +33,6 @@ where
     T: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: plotters::drawing::DrawingAreaErrorKind<T>) -> Self {
-        VizError::PlottingError(format!("Drawing area error: {}", err))
+        VizError::PlottingError(format!("Drawing area error: {err}"))
     }
 }

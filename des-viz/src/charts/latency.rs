@@ -112,7 +112,7 @@ pub fn create_latency_chart_with_config(
     for (idx, (_name, mean, median, p95, p99)) in chart_data.iter().enumerate() {
         let values = [*mean, *median, *p95, *p99];
 
-        for (_offset, (value, color)) in values.iter().zip(colors.iter()).enumerate() {
+        for (value, color) in values.iter().zip(colors.iter()) {
             // Use a simple filled circle/bar representation
             chart
                 .draw_series(std::iter::once(Circle::new(
@@ -140,8 +140,8 @@ pub fn create_latency_chart_with_config(
 
     chart
         .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
-        .border_style(&BLACK)
+        .background_style(WHITE.mix(0.8))
+        .border_style(BLACK)
         .draw()
         .map_err(|e| VizError::RenderingError(format!("Failed to draw legend: {e}")))?;
 
