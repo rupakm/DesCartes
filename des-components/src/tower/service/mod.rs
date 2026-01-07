@@ -109,6 +109,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tower::Service;
+use tower_layer::Layer;
 
 use super::{ServiceError, SimBody, response_to_http, serialize_http_request};
 
@@ -329,23 +330,38 @@ impl Task for TowerResponseTask {
     }
 }
 
-/// Builder for creating DES-backed Tower services
-pub struct DesServiceBuilder {
+/// Builder for creating DES-backed Tower services with full Tower ServiceBuilder compatibility
+/// 
+/// This builder provides all the methods available in Tower's ServiceBuilder, adapted for
+/// discrete event simulation. It allows you to compose middleware layers and build services
+/// that run within the simulation environment.
+#[derive(Clone)]
+pub struct DesServiceBuilder<L> {
     server_name: String,
     thread_capacity: usize,
     service_time: Duration,
+    layer: L,
 }
 
-impl DesServiceBuilder {
+impl Default for DesServiceBuilder<tower_layer::Identity> {
+    fn default() -> Self {
+        Self::new("default-server".to_string())
+    }
+}
+
+impl DesServiceBuilder<tower_layer::Identity> {
     /// Create a new builder
-    pub fn new(server_name: String) -> Self {
+    pub const fn new(server_name: String) -> Self {
         Self {
             server_name,
             thread_capacity: 10,
             service_time: Duration::from_millis(100),
+            layer: tower_layer::Identity::new(),
         }
     }
+}
 
+impl<L> DesServiceBuilder<L> {
     /// Set the server thread capacity
     pub fn thread_capacity(mut self, capacity: usize) -> Self {
         self.thread_capacity = capacity;
@@ -358,11 +374,254 @@ impl DesServiceBuilder {
         self
     }
 
-    /// Build the service and integrate it with the simulation
+    /// Add a new layer `T` into the [`DesServiceBuilder`].
+    ///
+    /// This wraps the inner service with the service provided by a user-defined
+    /// [`Layer`]. The provided layer must implement the [`Layer`] trait.
+    pub fn layer<T>(self, layer: T) -> DesServiceBuilder<tower_layer::Stack<T, L>> {
+        DesServiceBuilder {
+            server_name: self.server_name,
+            thread_capacity: self.thread_capacity,
+            service_time: self.service_time,
+            layer: tower_layer::Stack::new(layer, self.layer),
+        }
+    }
+
+    /// Optionally add a new layer `T` into the [`DesServiceBuilder`].
+    pub fn option_layer<T>(
+        self,
+        layer: Option<T>,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::util::Either<T, tower_layer::Identity>, L>> {
+        match layer {
+            Some(layer) => self.layer(tower::util::Either::Left(layer)),
+            None => self.layer(tower::util::Either::Right(tower_layer::Identity::new())),
+        }
+    }
+
+    /// Add a [`Layer`] built from a function that accepts a service and returns another service.
+    pub fn layer_fn<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower_layer::LayerFn<F>, L>> {
+        self.layer(tower_layer::layer_fn(f))
+    }
+
+    /// Buffer requests when the next layer is not ready.
+    /// Note: This uses Tower's buffer layer which requires the "buffer" feature.
+    pub fn buffer<Request>(
+        self,
+        bound: usize,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::buffer::BufferLayer<Request>, L>> {
+        self.layer(tower::buffer::BufferLayer::new(bound))
+    }
+
+    /// Limit the max number of in-flight requests.
+    pub fn concurrency_limit(
+        self,
+        max: usize,
+    ) -> DesServiceBuilder<tower_layer::Stack<super::limit::concurrency::DesConcurrencyLimitLayer, L>> {
+        self.layer(super::limit::concurrency::DesConcurrencyLimitLayer::new(max))
+    }
+
+    /// Drop requests when the next layer is unable to respond to requests.
+    /// Note: This uses Tower's load shed layer which requires the "load-shed" feature.
+    pub fn load_shed(self) -> DesServiceBuilder<tower_layer::Stack<tower::load_shed::LoadShedLayer, L>> {
+        self.layer(tower::load_shed::LoadShedLayer::new())
+    }
+
+    /// Limit requests to at most `num` per the given duration.
+    pub fn rate_limit(
+        self,
+        num: u64,
+        per: std::time::Duration,
+        simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
+    ) -> DesServiceBuilder<tower_layer::Stack<super::limit::rate::DesRateLimitLayer, L>> {
+        let rate = num as f64 / per.as_secs_f64();
+        self.layer(super::limit::rate::DesRateLimitLayer::new(rate, num as usize, simulation))
+    }
+
+    /// Retry failed requests according to the given retry policy.
+    pub fn retry<P>(
+        self, 
+        policy: P,
+        simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
+    ) -> DesServiceBuilder<tower_layer::Stack<super::retry::DesRetryLayer<P>, L>> 
+    where
+        P: Clone,
+    {
+        self.layer(super::retry::DesRetryLayer::new(policy, simulation))
+    }
+
+    /// Fail requests that take longer than `timeout`.
+    pub fn timeout(
+        self,
+        timeout: std::time::Duration,
+        simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
+    ) -> DesServiceBuilder<tower_layer::Stack<super::timeout::DesTimeoutLayer, L>> {
+        self.layer(super::timeout::DesTimeoutLayer::new(timeout, simulation))
+    }
+
+    /// Conditionally reject requests based on `predicate`.
+    /// Note: This uses Tower's filter layer which requires the "filter" feature.
+    pub fn filter<P>(
+        self,
+        predicate: P,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::filter::FilterLayer<P>, L>> {
+        self.layer(tower::filter::FilterLayer::new(predicate))
+    }
+
+    /// Conditionally reject requests based on an asynchronous `predicate`.
+    /// Note: This uses Tower's async filter layer which requires the "filter" feature.
+    pub fn filter_async<P>(
+        self,
+        predicate: P,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::filter::AsyncFilterLayer<P>, L>> {
+        self.layer(tower::filter::AsyncFilterLayer::new(predicate))
+    }
+
+    /// Map one request type to another.
+    /// Note: This uses Tower's util layer which requires the "util" feature.
+    pub fn map_request<F, R1, R2>(
+        self,
+        f: F,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapRequestLayer<F>, L>>
+    where
+        F: FnMut(R1) -> R2 + Clone,
+    {
+        self.layer(tower::util::MapRequestLayer::new(f))
+    }
+
+    /// Map one response type to another.
+    /// Note: This uses Tower's util layer which requires the "util" feature.
+    pub fn map_response<F>(
+        self,
+        f: F,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapResponseLayer<F>, L>> {
+        self.layer(tower::util::MapResponseLayer::new(f))
+    }
+
+    /// Map one error type to another.
+    /// Note: This uses Tower's util layer which requires the "util" feature.
+    pub fn map_err<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapErrLayer<F>, L>> {
+        self.layer(tower::util::MapErrLayer::new(f))
+    }
+
+    /// Composes a function that transforms futures produced by the service.
+    /// Note: This uses Tower's util layer which requires the "util" feature.
+    pub fn map_future<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapFutureLayer<F>, L>> {
+        self.layer(tower::util::MapFutureLayer::new(f))
+    }
+
+    /// Apply an asynchronous function after the service, regardless of whether the future
+    /// succeeds or fails.
+    /// Note: This uses Tower's util layer which requires the "util" feature.
+    pub fn then<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::ThenLayer<F>, L>> {
+        self.layer(tower::util::ThenLayer::new(f))
+    }
+
+    /// Executes a new future after this service's future resolves.
+    /// Note: This uses Tower's util layer which requires the "util" feature.
+    pub fn and_then<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::AndThenLayer<F>, L>> {
+        self.layer(tower::util::AndThenLayer::new(f))
+    }
+
+    /// Maps this service's result type to a different value.
+    /// Note: This uses Tower's util layer which requires the "util" feature.
+    pub fn map_result<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapResultLayer<F>, L>> {
+        self.layer(tower::util::MapResultLayer::new(f))
+    }
+
+    /// Add a circuit breaker that opens after a threshold of failures.
+    pub fn circuit_breaker(
+        self,
+        failure_threshold: usize,
+        recovery_timeout: std::time::Duration,
+        simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
+    ) -> DesServiceBuilder<tower_layer::Stack<super::circuit_breaker::DesCircuitBreakerLayer, L>> {
+        self.layer(super::circuit_breaker::DesCircuitBreakerLayer::new(
+            failure_threshold,
+            recovery_timeout,
+            simulation,
+        ))
+    }
+
+    /// Add global concurrency limiting across multiple services.
+    pub fn global_concurrency_limit(
+        self,
+        state: std::sync::Arc<super::limit::global_concurrency::GlobalConcurrencyLimitState>,
+    ) -> DesServiceBuilder<tower_layer::Stack<super::limit::global_concurrency::DesGlobalConcurrencyLimitLayer, L>> {
+        self.layer(super::limit::global_concurrency::DesGlobalConcurrencyLimitLayer::new(state))
+    }
+
+    /// Add hedging for request duplication.
+    pub fn hedge(
+        self,
+        delay: std::time::Duration,
+        simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
+    ) -> DesServiceBuilder<tower_layer::Stack<super::hedge::DesHedgeLayer, L>> {
+        self.layer(super::hedge::DesHedgeLayer::new(delay, 2, simulation)) // Default to 2 hedged requests
+    }
+
+    /// Returns the underlying `Layer` implementation.
+    pub fn into_inner(self) -> L {
+        self.layer
+    }
+
+    /// Wrap the service `S` with the middleware provided by this
+    /// [`DesServiceBuilder`]'s [`Layer`]'s, returning a new [`Service`].
+    pub fn service<S>(&self, service: S) -> L::Service
+    where
+        L: tower_layer::Layer<S>,
+    {
+        self.layer.layer(service)
+    }
+
+    /// Wrap the async function `F` with the middleware provided by this [`DesServiceBuilder`]'s
+    /// [`Layer`]s, returning a new [`Service`].
+    /// Note: This uses Tower's util layer which requires the "util" feature.
+    pub fn service_fn<F>(self, f: F) -> L::Service
+    where
+        L: tower_layer::Layer<tower::util::ServiceFn<F>>,
+    {
+        self.service(tower::util::service_fn(f))
+    }
+
+    /// Check that the builder implements `Clone`.
+    #[inline]
+    pub fn check_clone(self) -> Self
+    where
+        Self: Clone,
+    {
+        self
+    }
+
+    /// Check that the builder when given a service of type `S` produces a service that implements
+    /// `Clone`.
+    #[inline]
+    pub fn check_service_clone<S>(self) -> Self
+    where
+        L: tower_layer::Layer<S>,
+        L::Service: Clone,
+    {
+        self
+    }
+
+    /// Check that the builder when given a service of type `S` produces a service with the given
+    /// request, response, and error types.
+    #[inline]
+    pub fn check_service<S, T, U, E>(self) -> Self
+    where
+        L: tower_layer::Layer<S>,
+        L::Service: tower::Service<T, Response = U, Error = E>,
+    {
+        self
+    }
+
+    /// Build the base DES service and integrate it with the simulation
     pub fn build(
         self,
         simulation: Arc<Mutex<Simulation>>,
-    ) -> Result<DesService, ServiceError> {
+    ) -> Result<L::Service, ServiceError> 
+    where
+        L: tower_layer::Layer<DesService>,
+    {
         let mut sim = simulation.lock().unwrap();
 
         // Create the DES server
@@ -378,7 +637,30 @@ impl DesServiceBuilder {
 
         drop(sim); // Release the lock
 
-        Ok(DesService::new(handle))
+        let base_service = DesService::new(handle);
+        Ok(self.layer.layer(base_service))
+    }
+}
+
+impl<L: std::fmt::Debug> std::fmt::Debug for DesServiceBuilder<L> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DesServiceBuilder")
+            .field("server_name", &self.server_name)
+            .field("thread_capacity", &self.thread_capacity)
+            .field("service_time", &self.service_time)
+            .field("layer", &self.layer)
+            .finish()
+    }
+}
+
+impl<S, L> Layer<S> for DesServiceBuilder<L>
+where
+    L: Layer<S>,
+{
+    type Service = L::Service;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        self.layer.layer(inner)
     }
 }
 
