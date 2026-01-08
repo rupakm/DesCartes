@@ -196,6 +196,7 @@ pub mod circuit_breaker;
 pub mod limit;
 pub mod hedge;
 pub mod retry;
+pub mod future_poller;
 
 pub use service::{DesService, DesServiceBuilder, SchedulerHandle};
 pub use timeout::{DesTimeout, DesTimeoutLayer};
@@ -204,6 +205,7 @@ pub use circuit_breaker::{DesCircuitBreaker, DesCircuitBreakerLayer};
 pub use limit::{DesRateLimit, DesRateLimitLayer, DesConcurrencyLimit, DesConcurrencyLimitLayer, DesGlobalConcurrencyLimit, DesGlobalConcurrencyLimitLayer};
 pub use hedge::{DesHedge, DesHedgeLayer};
 pub use retry::{DesRetry, DesRetryLayer, DesRetryPolicy, exponential_backoff_layer, ExponentialBackoff};
+pub use future_poller::{FuturePoller, FuturePollerHandle, FuturePollerEvent, FutureId};
 
 /// Errors that can occur in the DES Tower integration
 #[derive(Debug, Error, Clone)]
@@ -249,6 +251,10 @@ impl SimBody {
         Self {
             data: Bytes::from_static(data.as_bytes()),
         }
+    }
+
+    pub fn data(&self) -> &Bytes {
+        &self.data
     }
 }
 
@@ -313,7 +319,11 @@ pub(crate) fn serialize_http_request(req: &http::Request<SimBody>) -> Vec<u8> {
         .collect::<Vec<_>>()
         .join("\r\n");
 
-    format!("{method} {uri} HTTP/1.1\r\n{headers}\r\n\r\n").into_bytes()
+    // Include the body content
+    let body_data = req.body().data();
+    let mut result = format!("{method} {uri} HTTP/1.1\r\n{headers}\r\n\r\n").into_bytes();
+    result.extend_from_slice(body_data);
+    result
 }
 
 #[cfg(test)]

@@ -29,7 +29,7 @@ pub use types::EventId;
 pub use execute::{Executor, Execute};
 pub use logging::{init_simulation_logging, init_simulation_logging_with_level, init_detailed_simulation_logging, simulation_span, component_span, event_span, task_span};
 pub use request::{Request, RequestAttempt, RequestStatus, AttemptStatus, Response, ResponseStatus, RequestId, RequestAttemptId};
-pub use scheduler::{EventEntry, Scheduler};
+pub use scheduler::{EventEntry, Scheduler, defer_wake, in_scheduler_context, current_time};
 pub use task::{Task, TaskId, TaskHandle, ClosureTask, TimeoutTask, RetryTask, PeriodicTask};
 
 
@@ -187,8 +187,19 @@ impl Simulation {
                 "Processing simulation step"
             );
             
+            // Set scheduler context for deferred wakes
+            scheduler::set_scheduler_context(&mut self.scheduler);
+            
+            // Process the event
             self.components
                 .process_event_entry(event, &mut self.scheduler);
+            
+            // Clear scheduler context
+            scheduler::clear_scheduler_context();
+            
+            // Process any deferred wakes that were registered during event processing
+            self.scheduler.process_deferred_wakes();
+            
             true
         })
     }

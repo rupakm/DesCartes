@@ -36,7 +36,8 @@ pub enum ServerEvent {
     RequestCompleted { 
         attempt_id: RequestAttemptId,
         request_id: RequestId,
-        client_id: Key<ClientEvent> 
+        client_id: Key<ClientEvent>,
+        request_payload: Vec<u8>,
     },
     /// Check for queued requests to process
     ProcessQueuedRequests,
@@ -207,7 +208,8 @@ impl Server {
             ServerEvent::RequestCompleted { 
                 attempt_id: attempt.id,
                 request_id: attempt.request_id,
-                client_id 
+                client_id,
+                request_payload: attempt.payload.clone(),
             },
         );
     }
@@ -218,6 +220,7 @@ impl Server {
         attempt_id: RequestAttemptId,
         request_id: RequestId,
         client_id: Key<ClientEvent>,
+        request_payload: Vec<u8>,
         self_id: Key<ServerEvent>,
         scheduler: &mut Scheduler,
     ) {
@@ -240,12 +243,12 @@ impl Server {
         self.metrics.record_gauge("utilization", self.utilization() * 100.0, &[("component", &self.name)]);
         self.metrics.record_duration("service_time", self.service_time, &[("component", &self.name)]);
 
-        // Create and send success response to client
+        // Create and send success response to client - echo the request payload
         let response = Response::success(
             attempt_id,
             request_id,
             scheduler.time(),
-            vec![], // Empty response payload for now
+            request_payload, // Echo the request payload
         );
 
         scheduler.schedule(
@@ -346,7 +349,8 @@ impl Server {
                         ServerEvent::RequestCompleted { 
                             attempt_id: attempt.id,
                             request_id: attempt.request_id,
-                            client_id: Key::<ClientEvent>::new_with_id(Uuid::nil()) 
+                            client_id: Key::<ClientEvent>::new_with_id(Uuid::nil()),
+                            request_payload: attempt.payload.clone(),
                         },
                     );
                 }
@@ -375,8 +379,8 @@ impl Component for Server {
             ServerEvent::ProcessRequest { attempt, client_id } => {
                 self.handle_request(attempt.clone(), *client_id, self_id, scheduler);
             }
-            ServerEvent::RequestCompleted { attempt_id, request_id, client_id } => {
-                self.complete_request(*attempt_id, *request_id, *client_id, self_id, scheduler);
+            ServerEvent::RequestCompleted { attempt_id, request_id, client_id, request_payload } => {
+                self.complete_request(*attempt_id, *request_id, *client_id, request_payload.clone(), self_id, scheduler);
             }
             ServerEvent::ProcessQueuedRequests => {
                 self.process_queued_requests(self_id, scheduler);

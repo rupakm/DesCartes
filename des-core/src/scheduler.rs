@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
@@ -10,6 +10,100 @@ use tracing::{debug, trace};
 use crate::{Key, SimTime};
 use crate::types::EventId;
 use crate::task::{Task, TaskId, TaskHandle, TaskExecution, TaskWrapper, ClosureTask, TimeoutTask};
+
+// ============================================================================
+// Thread-local scheduler access for wakers
+// ============================================================================
+
+thread_local! {
+    /// Thread-local pointer to the current scheduler during event processing.
+    /// This allows wakers to defer event scheduling without needing mutex locks.
+    static CURRENT_SCHEDULER: RefCell<Option<*mut Scheduler>> = const { RefCell::new(None) };
+}
+
+/// Defer an event to be scheduled at the current simulation time.
+/// 
+/// This function is designed to be called from wakers during event processing.
+/// It uses thread-local storage to access the scheduler without locks.
+/// 
+/// # Safety
+/// 
+/// This function is safe to call during event processing (when `CURRENT_SCHEDULER` is set).
+/// If called outside of event processing, the event will be silently dropped.
+/// 
+/// # Example
+/// 
+/// ```rust,ignore
+/// // In a waker implementation:
+/// des_core::scheduler::defer_wake(component_key, MyEvent::Poll { id });
+/// ```
+pub fn defer_wake<E: fmt::Debug + 'static>(component: Key<E>, event: E) {
+    CURRENT_SCHEDULER.with(|sched| {
+        if let Some(ptr) = *sched.borrow() {
+            // Safety: The pointer is valid during event processing
+            let scheduler = unsafe { &mut *ptr };
+            scheduler.add_deferred_wake(component, event);
+        }
+    });
+}
+
+/// Check if we're currently inside event processing (scheduler context is available)
+pub fn in_scheduler_context() -> bool {
+    CURRENT_SCHEDULER.with(|sched| sched.borrow().is_some())
+}
+
+/// Get the current simulation time from the scheduler context.
+/// Returns None if not in scheduler context.
+pub fn current_time() -> Option<SimTime> {
+    CURRENT_SCHEDULER.with(|sched| {
+        sched.borrow().map(|ptr| {
+            let scheduler = unsafe { &*ptr };
+            scheduler.time()
+        })
+    })
+}
+
+/// Execute a closure with access to the scheduler via thread-local storage.
+/// This is used internally by the simulation step to enable deferred wakes.
+/// 
+/// Note: The closure receives a mutable reference to the scheduler, and the
+/// thread-local pointer is set to point to the same scheduler. This allows
+/// wakers to defer events while the closure has mutable access.
+pub(crate) fn set_scheduler_context(scheduler: &mut Scheduler) {
+    CURRENT_SCHEDULER.with(|sched| {
+        *sched.borrow_mut() = Some(scheduler as *mut Scheduler);
+    });
+}
+
+pub(crate) fn clear_scheduler_context() {
+    CURRENT_SCHEDULER.with(|sched| {
+        *sched.borrow_mut() = None;
+    });
+}
+
+// ============================================================================
+// Deferred Wake Storage
+// ============================================================================
+
+/// A type-erased deferred wake event
+struct DeferredWake {
+    /// Closure that schedules the event when called with the scheduler
+    schedule_fn: Box<dyn FnOnce(&mut Scheduler)>,
+}
+
+impl DeferredWake {
+    fn new<E: fmt::Debug + 'static>(component: Key<E>, event: E) -> Self {
+        Self {
+            schedule_fn: Box::new(move |scheduler: &mut Scheduler| {
+                scheduler.schedule_now(component, event);
+            }),
+        }
+    }
+    
+    fn execute(self, scheduler: &mut Scheduler) {
+        (self.schedule_fn)(scheduler);
+    }
+}
 
 /// Entry type stored in the scheduler, including the event value, component key, and the time when
 /// it is supposed to occur.
@@ -187,6 +281,8 @@ pub struct Scheduler {
     // Task management
     pending_tasks: HashMap<TaskId, Box<dyn TaskExecution>>,
     completed_task_results: HashMap<TaskId, Box<dyn Any>>,
+    // Deferred wakes from wakers during event processing
+    deferred_wakes: Vec<DeferredWake>,
 }
 
 impl Default for Scheduler {
@@ -197,6 +293,7 @@ impl Default for Scheduler {
             clock: Rc::new(Cell::new(SimTime::default())),
             pending_tasks: HashMap::new(),
             completed_task_results: HashMap::new(),
+            deferred_wakes: Vec::new(),
         }
     }
 }
@@ -352,6 +449,43 @@ impl Scheduler {
             .remove(&handle.id())
             .and_then(|boxed| boxed.downcast::<T>().ok())
             .map(|boxed| *boxed)
+    }
+
+    // Deferred wake methods
+
+    /// Add a deferred wake event to be scheduled after the current event completes.
+    /// This is called by `defer_wake()` via thread-local storage.
+    pub(crate) fn add_deferred_wake<E: fmt::Debug + 'static>(&mut self, component: Key<E>, event: E) {
+        trace!(
+            component_id = ?component.id(),
+            event_type = std::any::type_name::<E>(),
+            "Deferred wake added"
+        );
+        self.deferred_wakes.push(DeferredWake::new(component, event));
+    }
+
+    /// Process all deferred wakes, scheduling them at the current time.
+    /// This is called automatically at the end of each simulation step.
+    pub(crate) fn process_deferred_wakes(&mut self) {
+        if self.deferred_wakes.is_empty() {
+            return;
+        }
+        
+        let wakes: Vec<_> = self.deferred_wakes.drain(..).collect();
+        trace!(
+            count = wakes.len(),
+            current_time = ?self.time(),
+            "Processing deferred wakes"
+        );
+        
+        for wake in wakes {
+            wake.execute(self);
+        }
+    }
+
+    /// Check if there are any pending deferred wakes
+    pub fn has_deferred_wakes(&self) -> bool {
+        !self.deferred_wakes.is_empty()
     }
 }
 

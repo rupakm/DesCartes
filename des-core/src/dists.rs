@@ -4,6 +4,7 @@
 //! used in discrete event simulation, including arrival patterns for clients and
 //! service time distributions for servers.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 /// Trait for generating arrival patterns
