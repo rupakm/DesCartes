@@ -10,7 +10,7 @@
 //! - [`Simulation`]: The main entry point that owns the scheduler and components.
 //!   Use this to run simulations, add components, and access simulation state.
 //!
-//! - [`SchedulerHandle`]: A thread-safe, cloneable handle for scheduling events.
+//! - [`SchedulerHandle`]: A cloneable handle for scheduling events during simulation.
 //!   Pass this to Tower service layers and other components that need to schedule
 //!   events without direct access to the simulation.
 //!
@@ -92,6 +92,23 @@ pub use waker::create_des_waker;
 pub use formal::{CertificateError, LyapunovError, VerificationError};
 
 use uuid::Uuid;
+
+/// Global configuration for a simulation.
+///
+/// This currently only exposes a seed used to derive
+/// deterministic randomness across components, but can
+/// be extended in the future with additional options.
+#[derive(Debug, Clone)]
+pub struct SimulationConfig {
+    /// Global seed for deterministic randomness.
+    pub seed: u64,
+}
+
+impl Default for SimulationConfig {
+    fn default() -> Self {
+        Self { seed: 1 }
+    }
+}
 
 #[derive(Debug)]
 pub struct Key<T> {
@@ -220,23 +237,41 @@ impl Components {
 ///
 /// See the [crate-level documentation](index.html) for more information.
 pub struct Simulation {
-    /// Event scheduler (wrapped in Arc<Mutex<>> for thread-safe access).
+    /// Event scheduler (wrapped in Arc<Mutex<>> for interior mutability).
     scheduler: Arc<Mutex<Scheduler>>,
     /// Component container.
     pub components: Components,
+    /// Global configuration for this simulation instance.
+    config: SimulationConfig,
 }
 
 impl Default for Simulation {
     fn default() -> Self {
-        Self {
-            scheduler: Arc::new(Mutex::new(Scheduler::default())),
-            components: Components::default(),
-        }
+        // Use a well-known default seed for simulations created
+        // via `Simulation::default()` so that behavior is
+        // reproducible across runs unless overridden.
+        Self::new(SimulationConfig { seed: 42 })
     }
 }
 
 impl Simulation {
-    /// Returns a thread-safe handle for scheduling events.
+    /// Create a new simulation with the given configuration.
+    #[must_use]
+    pub fn new(config: SimulationConfig) -> Self {
+        Self {
+            scheduler: Arc::new(Mutex::new(Scheduler::default())),
+            components: Components::default(),
+            config,
+        }
+    }
+
+    /// Access the simulation configuration.
+    #[must_use]
+    pub fn config(&self) -> &SimulationConfig {
+        &self.config
+    }
+
+    /// Returns a handle for scheduling events during simulation stepping.
     ///
     /// The `SchedulerHandle` can be cloned and passed to Tower service layers
     /// or other components that need to schedule events without locking the
@@ -250,7 +285,7 @@ impl Simulation {
     ///
     /// // Pass to Tower layers
     /// let service = DesServiceBuilder::new("server".to_string())
-    ///     .timeout(Duration::from_secs(5), scheduler.clone())
+    ///     .timeout(Duration::from_secs(5), scheduler)
     ///     .build(&mut simulation)?;
     /// ```
     #[must_use]

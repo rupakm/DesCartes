@@ -82,11 +82,12 @@ pub(crate) trait TaskExecution {
 /// Wrapper that implements TaskExecution for any Task
 pub(crate) struct TaskWrapper<T: Task> {
     task: T,
+    task_id: TaskId,
 }
 
 impl<T: Task> TaskWrapper<T> {
-    pub fn new(task: T, _id: TaskId) -> Self {
-        Self { task }
+    pub fn new(task: T, task_id: TaskId) -> Self {
+        Self { task, task_id }
     }
 }
 
@@ -96,8 +97,9 @@ impl<T: Task> TaskExecution for TaskWrapper<T> {
         Box::new(result)
     }
 
+    #[must_use]
     fn task_id(&self) -> TaskId {
-        TaskId::new()
+        self.task_id
     }
 }
 
@@ -346,6 +348,27 @@ mod tests {
         let id = TaskId::new();
         let handle: TaskHandle<i32> = TaskHandle::new(id);
         assert_eq!(handle.id(), id);
+    }
+
+    #[test]
+    fn test_stable_task_ids() {
+        // Test that TaskWrapper returns stable task IDs
+        let task_id = TaskId::new();
+        let task = ClosureTask::new(|_| 42);
+        let wrapper = TaskWrapper::new(task, task_id);
+
+        // task_id() should return the same ID every time
+        assert_eq!(wrapper.task_id(), task_id);
+        assert_eq!(wrapper.task_id(), task_id);
+        assert_eq!(wrapper.task_id(), task_id);
+
+        // Multiple calls should all return the same ID
+        let id1 = wrapper.task_id();
+        let id2 = wrapper.task_id();
+        let id3 = wrapper.task_id();
+        assert_eq!(id1, id2);
+        assert_eq!(id2, id3);
+        assert_eq!(id1, task_id);
     }
 
     #[test]

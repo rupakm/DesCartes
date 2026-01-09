@@ -4,8 +4,9 @@
 //! request failures with various backoff strategies including exponential backoff,
 //! token bucket-based retries, and success-based adaptive retries.
 
-use des_core::{RequestAttempt, Response, SimTime};
+use des_core::{RequestAttempt, Response, SimTime, SimulationConfig};
 use rand::Rng;
+use rand::SeedableRng;
 use std::time::Duration;
 
 /// Trait for retry policies that determine when and how to retry failed requests
@@ -42,10 +43,14 @@ pub struct ExponentialBackoffPolicy {
     max_delay: Duration,
     /// Whether to add jitter to prevent thundering herd
     jitter: bool,
+    /// Deterministic RNG for jitter
+    rng: rand::rngs::StdRng,
 }
 
 impl ExponentialBackoffPolicy {
-    /// Create a new exponential backoff policy
+    /// Create a new exponential backoff policy with non-deterministic jitter RNG.
+    ///
+    /// For deterministic behavior, use `with_seed`.
     pub fn new(max_attempts: usize, base_delay: Duration) -> Self {
         Self {
             max_attempts,
@@ -54,7 +59,35 @@ impl ExponentialBackoffPolicy {
             multiplier: 2.0,
             max_delay: Duration::from_secs(60),
             jitter: false,
+            rng: rand::rngs::StdRng::from_entropy(),
         }
+    }
+
+    /// Create a new exponential backoff policy with a specific RNG seed.
+    pub fn with_seed(max_attempts: usize, base_delay: Duration, seed: u64) -> Self {
+        Self {
+            max_attempts,
+            current_attempt: 0,
+            base_delay,
+            multiplier: 2.0,
+            max_delay: Duration::from_secs(60),
+            jitter: false,
+            rng: rand::rngs::StdRng::seed_from_u64(seed),
+        }
+    }
+
+    /// Create a new exponential backoff policy using a
+    /// `SimulationConfig`-derived RNG seed for deterministic
+    /// behavior across runs.
+    pub fn from_config(
+        config: &SimulationConfig,
+        max_attempts: usize,
+        base_delay: Duration,
+    ) -> Self {
+        let mut seed = config.seed ^ 0xE4E4_4E4E_0606_070Bu64;
+        seed ^= base_delay.as_millis() as u64;
+
+        Self::with_seed(max_attempts, base_delay, seed)
     }
 
     /// Set the backoff multiplier (default: 2.0)
@@ -76,16 +109,15 @@ impl ExponentialBackoffPolicy {
     }
 
     /// Calculate the delay for the current attempt
-    fn calculate_delay(&self) -> Duration {
+    fn calculate_delay(&mut self) -> Duration {
         let delay_ms = self.base_delay.as_millis() as f64
             * self.multiplier.powi((self.current_attempt - 1) as i32);
 
         let delay = Duration::from_millis(delay_ms as u64).min(self.max_delay);
 
         if self.jitter {
-            // Add ±25% jitter
-            let mut rng = rand::thread_rng();
-            let jitter_factor = rng.gen_range(0.75..=1.25);
+            // Add ±25% jitter using deterministic RNG
+            let jitter_factor = self.rng.gen_range(0.75..=1.25);
             Duration::from_millis((delay.as_millis() as f64 * jitter_factor) as u64)
         } else {
             delay

@@ -7,6 +7,9 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::SimulationConfig;
+use rand::SeedableRng;
+
 /// Trait for generating arrival patterns
 ///
 /// This trait abstracts over different arrival patterns for request generation
@@ -114,13 +117,9 @@ pub struct PoissonArrivals {
 impl PoissonArrivals {
     /// Create a new Poisson arrival pattern
     ///
-    /// # Arguments
-    ///
-    /// * `rate` - Average number of arrivals per second (lambda parameter)
-    ///
-    /// # Panics
-    ///
-    /// Panics if rate is not positive.
+    /// Uses an internal RNG seeded from entropy. For
+    /// deterministic behavior tied to a specific simulation,
+    /// prefer [`PoissonArrivals::from_config`].
     pub fn new(rate: f64) -> Self {
         assert!(rate > 0.0, "Rate must be positive");
 
@@ -133,6 +132,24 @@ impl PoissonArrivals {
         }
     }
 
+    /// Create a new Poisson arrival pattern using a
+    /// `SimulationConfig`-derived RNG seed for deterministic
+    /// behavior across runs.
+    pub fn from_config(config: &SimulationConfig, rate: f64) -> Self {
+        assert!(rate > 0.0, "Rate must be positive");
+
+        let exp_dist = rand_distr::Exp::new(rate).expect("Rate must be positive");
+
+        let mut seed = config.seed ^ 0xA5A5_5A5A_0101_0203u64;
+        seed ^= rate.to_bits();
+
+        Self {
+            rate,
+            rng: rand::rngs::StdRng::seed_from_u64(seed),
+            exp_dist,
+        }
+    }
+    ///
     /// Get the rate parameter
     pub fn rate(&self) -> f64 {
         self.rate
@@ -185,16 +202,9 @@ pub enum BurstPhase {
 impl BurstyArrivals {
     /// Create a new bursty arrival pattern
     ///
-    /// # Arguments
-    ///
-    /// * `burst_duration` - How long each burst lasts
-    /// * `quiet_duration` - How long between bursts
-    /// * `burst_rate` - Request rate during bursts (requests per second)
-    /// * `quiet_rate` - Request rate during quiet periods (requests per second, can be 0)
-    ///
-    /// # Panics
-    ///
-    /// Panics if burst_rate is not positive or if quiet_rate is negative.
+    /// Uses an internal RNG seeded from entropy. For
+    /// deterministic behavior tied to a specific simulation,
+    /// prefer [`BurstyArrivals::from_config`].
     pub fn new(
         burst_duration: Duration,
         quiet_duration: Duration,
@@ -223,6 +233,44 @@ impl BurstyArrivals {
         }
     }
 
+    /// Create a new bursty arrival pattern using a
+    /// `SimulationConfig`-derived RNG seed for deterministic
+    /// behavior across runs.
+    pub fn from_config(
+        config: &SimulationConfig,
+        burst_duration: Duration,
+        quiet_duration: Duration,
+        burst_rate: f64,
+        quiet_rate: f64,
+    ) -> Self {
+        assert!(burst_rate > 0.0, "Burst rate must be positive");
+        assert!(quiet_rate >= 0.0, "Quiet rate must be non-negative");
+
+        let burst_dist =
+            Some(rand_distr::Exp::new(burst_rate).expect("Burst rate must be positive"));
+        let quiet_dist = if quiet_rate > 0.0 {
+            Some(rand_distr::Exp::new(quiet_rate).expect("Quiet rate must be positive"))
+        } else {
+            None
+        };
+
+        let mut seed = config.seed ^ 0xB4B4_4B4B_0202_0305u64;
+        seed ^= burst_duration.as_nanos() as u64;
+        seed ^= (quiet_duration.as_nanos() as u64).rotate_left(11);
+        seed ^= burst_rate.to_bits();
+        seed ^= quiet_rate.to_bits().rotate_left(7);
+
+        Self {
+            burst_duration,
+            quiet_duration,
+            current_phase: BurstPhase::Burst,
+            phase_remaining: burst_duration,
+            rng: rand::rngs::StdRng::seed_from_u64(seed),
+            burst_dist,
+            quiet_dist,
+        }
+    }
+    ///
     /// Get the current phase
     pub fn current_phase(&self) -> BurstPhase {
         self.current_phase
@@ -345,13 +393,9 @@ pub struct ExponentialDistribution {
 impl ExponentialDistribution {
     /// Create a new exponential service time distribution
     ///
-    /// # Arguments
-    ///
-    /// * `rate` - Average number of services per second (lambda parameter)
-    ///
-    /// # Panics
-    ///
-    /// Panics if rate is not positive.
+    /// Uses an internal RNG seeded from entropy. For
+    /// deterministic behavior tied to a specific simulation,
+    /// prefer [`ExponentialDistribution::from_config`].
     pub fn new(rate: f64) -> Self {
         assert!(rate > 0.0, "Rate must be positive");
 
@@ -364,6 +408,24 @@ impl ExponentialDistribution {
         }
     }
 
+    /// Create a new exponential service time distribution using a
+    /// `SimulationConfig`-derived RNG seed for deterministic
+    /// behavior across runs.
+    pub fn from_config(config: &SimulationConfig, rate: f64) -> Self {
+        assert!(rate > 0.0, "Rate must be positive");
+
+        let exp_dist = rand_distr::Exp::new(rate).expect("Rate must be positive");
+
+        let mut seed = config.seed ^ 0xC3C3_3C3C_0303_0407u64;
+        seed ^= rate.to_bits();
+
+        Self {
+            rate,
+            rng: rand::rngs::StdRng::seed_from_u64(seed),
+            exp_dist,
+        }
+    }
+    ///
     /// Get the rate parameter
     pub fn rate(&self) -> f64 {
         self.rate
@@ -416,14 +478,9 @@ pub struct UniformDistribution {
 impl UniformDistribution {
     /// Create a new uniform service time distribution
     ///
-    /// # Arguments
-    ///
-    /// * `min_duration` - Minimum service time
-    /// * `max_duration` - Maximum service time
-    ///
-    /// # Panics
-    ///
-    /// Panics if min_duration >= max_duration.
+    /// Uses an internal RNG seeded from entropy. For
+    /// deterministic behavior tied to a specific simulation,
+    /// prefer [`UniformDistribution::from_config`].
     pub fn new(min_duration: Duration, max_duration: Duration) -> Self {
         assert!(
             min_duration < max_duration,
@@ -442,6 +499,35 @@ impl UniformDistribution {
         }
     }
 
+    /// Create a new uniform service time distribution using a
+    /// `SimulationConfig`-derived RNG seed for deterministic
+    /// behavior across runs.
+    pub fn from_config(
+        config: &SimulationConfig,
+        min_duration: Duration,
+        max_duration: Duration,
+    ) -> Self {
+        assert!(
+            min_duration < max_duration,
+            "Minimum duration must be less than maximum duration"
+        );
+
+        let min_secs = min_duration.as_secs_f64();
+        let max_secs = max_duration.as_secs_f64();
+        let uniform_dist = rand_distr::Uniform::new(min_secs, max_secs);
+
+        let mut seed = config.seed ^ 0xD2D2_2D2D_0404_0509u64;
+        seed ^= min_duration.as_nanos() as u64;
+        seed ^= (max_duration.as_nanos() as u64).rotate_left(13);
+
+        Self {
+            min_duration,
+            max_duration,
+            rng: rand::rngs::StdRng::seed_from_u64(seed),
+            uniform_dist,
+        }
+    }
+    ///
     /// Get the minimum service time
     pub fn min_duration(&self) -> Duration {
         self.min_duration

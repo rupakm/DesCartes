@@ -3,7 +3,7 @@
 //! This module provides the core scheduling infrastructure:
 //!
 //! - [`Scheduler`]: The internal event queue and time management (owned by [`Simulation`]).
-//! - [`SchedulerHandle`]: A thread-safe handle for scheduling events from anywhere.
+//! - [`SchedulerHandle`]: A cloneable handle for scheduling events during simulation.
 //! - [`ClockRef`]: A lightweight, lock-free reference for reading simulation time.
 //!
 //! # Scheduling Events
@@ -44,7 +44,7 @@
 use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fmt;
 use std::sync::{
     atomic::{AtomicU64, Ordering as AtomicOrdering},
@@ -60,20 +60,56 @@ use crate::{Key, SimTime};
 thread_local! {
     /// Thread-local pointer to the current scheduler during event processing.
     static CURRENT_SCHEDULER: RefCell<Option<*mut Scheduler>> = const { RefCell::new(None) };
+
+    /// Buffer for wakes that occur outside of scheduler context.
+    /// These get drained when scheduler context becomes available.
+    static PENDING_WAKES: RefCell<Vec<DeferredWake>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Defer an event to be scheduled at the current simulation time.
 ///
-/// This function is designed to be called from wakers during event processing.
-/// It uses thread-local storage to access the scheduler without locks.
+/// This function is designed to be called from wakers during single-threaded
+/// event processing. It uses thread-local storage to access the scheduler.
 ///
-/// If called outside of event processing, the event will be silently dropped.
+/// # Panics
+///
+/// Panics in debug mode if called outside of event processing (scheduler context).
+/// In release mode, buffers the wake to be processed when scheduler context becomes available.
 pub fn defer_wake<E: fmt::Debug + 'static>(component: Key<E>, event: E) {
     CURRENT_SCHEDULER.with(|sched| {
         if let Some(ptr) = *sched.borrow() {
-            // Safety: The pointer is valid during event processing
+            // Safety: The pointer is valid during single-threaded event processing
             let scheduler = unsafe { &mut *ptr };
             scheduler.add_deferred_wake(component, event);
+        } else {
+            // Out of scheduler context - this can happen in edge cases (future_poller)
+
+            eprintln!(
+                "Warning: defer_wake called outside of scheduler context. \
+                 Wakers should only be used during event processing in single-threaded simulation. \
+                 Event: {:?}",
+                event
+            );
+
+            {
+                // Buffer the wake for later processing
+                PENDING_WAKES.with(|pending| {
+                    pending
+                        .borrow_mut()
+                        .push(DeferredWake::new(component, event));
+                });
+            }
+        }
+    });
+}
+
+/// Drain any pending wakes that were buffered while out of scheduler context.
+/// This is called when scheduler context becomes available.
+fn drain_pending_wakes(scheduler: &mut Scheduler) {
+    PENDING_WAKES.with(|pending| {
+        let mut wakes = pending.borrow_mut();
+        for wake in wakes.drain(..) {
+            wake.execute(scheduler);
         }
     });
 }
@@ -100,6 +136,9 @@ pub(crate) fn set_scheduler_context(scheduler: &mut Scheduler) {
     CURRENT_SCHEDULER.with(|sched| {
         *sched.borrow_mut() = Some(scheduler as *mut Scheduler);
     });
+
+    // Drain any wakes that were buffered while out of context
+    drain_pending_wakes(scheduler);
 }
 
 pub(crate) fn clear_scheduler_context() {
@@ -166,6 +205,13 @@ impl EventEntry {
         }
     }
 
+    pub(crate) fn seq(&self) -> u64 {
+        match self {
+            EventEntry::Component(entry) => entry.event_id.0,
+            EventEntry::Task(entry) => entry.event_id.0,
+        }
+    }
+
     /// Tries to downcast the event entry to one holding an event of type `E`.
     /// If fails, returns `None`.
     #[must_use]
@@ -217,22 +263,24 @@ impl ComponentEventEntry {
 
 #[derive(Debug)]
 pub struct TaskEventEntry {
+    event_id: EventId,
     time: SimTime,
     pub(crate) task_id: TaskId,
 }
 
 impl TaskEventEntry {
-    pub(crate) fn new(id: EventId, time: SimTime, task_id: TaskId) -> Self {
-        // Note: id parameter kept for API compatibility but not stored
-        // as it's not currently used
-        let _ = id;
-        TaskEventEntry { time, task_id }
+    pub(crate) fn new(event_id: EventId, time: SimTime, task_id: TaskId) -> Self {
+        TaskEventEntry {
+            event_id,
+            time,
+            task_id,
+        }
     }
 }
 
 impl PartialEq for EventEntry {
     fn eq(&self, other: &Self) -> bool {
-        self.time() == other.time()
+        self.time() == other.time() && self.seq() == other.seq()
     }
 }
 
@@ -247,7 +295,10 @@ impl PartialOrd for EventEntry {
 impl Ord for EventEntry {
     fn cmp(&self, other: &Self) -> Ordering {
         // Reverse the ordering for min-heap behavior in BinaryHeap
-        other.time().cmp(&self.time())
+        other
+            .time()
+            .cmp(&self.time())
+            .then_with(|| other.seq().cmp(&self.seq()))
     }
 }
 
@@ -308,20 +359,18 @@ impl ClockRef {
 // SchedulerHandle - Thread-safe handle for scheduling events
 // ============================================================================
 
-/// A thread-safe, cloneable handle for scheduling events.
+/// A cloneable handle for scheduling events during simulation.
 ///
 /// `SchedulerHandle` provides a way to schedule events without direct access to
 /// the [`Simulation`](crate::Simulation). This is the primary interface for Tower
-/// service layers and other components that need to schedule events.
+/// service layers and other components that need to schedule events during
+/// single-threaded simulation stepping.
 ///
 /// # Example
 ///
 /// ```rust,ignore
 /// let mut simulation = Simulation::default();
 /// let scheduler = simulation.scheduler_handle();
-///
-/// // Can be cloned and passed to Tower layers
-/// let scheduler_clone = scheduler.clone();
 ///
 /// // Schedule events
 /// scheduler.schedule(SimTime::from_millis(100), component_key, MyEvent::Tick);
@@ -399,6 +448,7 @@ pub struct Scheduler {
     // Task management
     pending_tasks: HashMap<TaskId, Box<dyn TaskExecution>>,
     completed_task_results: HashMap<TaskId, Box<dyn Any>>,
+    cancelled_tasks: HashSet<TaskId>, // Track cancelled task IDs to prevent time advancement
     // Deferred wakes from wakers during event processing
     deferred_wakes: Vec<DeferredWake>,
 }
@@ -411,6 +461,7 @@ impl Default for Scheduler {
             clock: Arc::new(AtomicU64::new(0)),
             pending_tasks: HashMap::new(),
             completed_task_results: HashMap::new(),
+            cancelled_tasks: HashSet::new(),
             deferred_wakes: Vec::new(),
         }
     }
@@ -477,11 +528,25 @@ impl Scheduler {
     }
 
     /// Removes and returns the next scheduled event or `None` if none are left.
+    /// Skips cancelled task events to prevent time advancement for cancelled tasks.
     pub fn pop(&mut self) -> Option<EventEntry> {
-        self.events.pop().inspect(|event| {
+        while let Some(event) = self.events.pop() {
+            // Check if this is a cancelled task event
+            if let EventEntry::Task(ref task_entry) = event {
+                if self.cancelled_tasks.contains(&task_entry.task_id) {
+                    // Remove from cancelled set and skip this event (don't advance time)
+                    self.cancelled_tasks.remove(&task_entry.task_id);
+                    continue;
+                }
+            }
+
+            // Not cancelled - advance time and return this event
             self.clock
                 .store(simtime_to_nanos(event.time()), AtomicOrdering::Relaxed);
-        })
+            return Some(event);
+        }
+
+        None
     }
 
     // Task scheduling methods
@@ -532,14 +597,34 @@ impl Scheduler {
 
     /// Cancel a scheduled task
     pub fn cancel_task<T>(&mut self, handle: TaskHandle<T>) -> bool {
-        self.pending_tasks.remove(&handle.id()).is_some()
+        let task_id = handle.id();
+        let was_pending = self.pending_tasks.remove(&task_id).is_some();
+
+        // Mark as cancelled so the event gets skipped (preventing time advancement)
+        if was_pending {
+            self.cancelled_tasks.insert(task_id);
+        }
+
+        was_pending
     }
 
     /// Execute a task if it's ready
     pub(crate) fn execute_task(&mut self, task_id: TaskId) -> bool {
+        // Safety check: should not be called for cancelled tasks since pop() skips them
+        if self.cancelled_tasks.contains(&task_id) {
+            self.cancelled_tasks.remove(&task_id);
+            return false;
+        }
+
         if let Some(task) = self.pending_tasks.remove(&task_id) {
             let result = task.execute(self);
-            self.completed_task_results.insert(task_id, result);
+
+            // Don't store results for () tasks since they're typically fire-and-forget
+            // (timeouts, periodic callbacks, retry delays, etc.) and never retrieved
+            if result.downcast_ref::<()>().is_none() {
+                self.completed_task_results.insert(task_id, result);
+            }
+
             true
         } else {
             false
@@ -632,40 +717,51 @@ mod test {
             inner: Box::new(String::from("inner")),
         };
 
+        // Same time and seq should be equal
         let entry1 = EventEntry::Component(ComponentEventEntry {
-            event_id: EventId(0),
+            event_id: EventId(1),
             time: SimTime::from_duration(Duration::from_secs(1)),
             ..make_component_entry()
         });
         let entry2 = EventEntry::Component(ComponentEventEntry {
+            event_id: EventId(1),
             time: SimTime::from_duration(Duration::from_secs(1)),
             ..make_component_entry()
         });
         assert_eq!(entry1, entry2);
 
+        // Same time, different seq: seq decides ordering
         let entry3 = EventEntry::Component(ComponentEventEntry {
+            event_id: EventId(2),
+            time: SimTime::from_duration(Duration::from_secs(1)),
+            ..make_component_entry()
+        });
+        assert_eq!(entry1.cmp(&entry3), Ordering::Greater); // seq 1 < seq 2, so entry1 (seq 1) comes first
+
+        // Different times: time decides
+        let entry4 = EventEntry::Component(ComponentEventEntry {
             event_id: EventId(0),
             time: SimTime::from_duration(Duration::from_secs(0)),
             ..make_component_entry()
         });
-        let entry4 = EventEntry::Component(ComponentEventEntry {
+        let entry5 = EventEntry::Component(ComponentEventEntry {
             event_id: EventId(1),
             time: SimTime::from_duration(Duration::from_secs(1)),
             ..make_component_entry()
         });
-        assert_eq!(entry3.cmp(&entry4), Ordering::Greater);
+        assert_eq!(entry4.cmp(&entry5), Ordering::Greater); // time 0 < time 1, so entry4 comes first
 
-        let entry5 = EventEntry::Component(ComponentEventEntry {
+        let entry6 = EventEntry::Component(ComponentEventEntry {
             event_id: EventId(1),
             time: SimTime::from_duration(Duration::from_secs(2)),
             ..make_component_entry()
         });
-        let entry6 = EventEntry::Component(ComponentEventEntry {
+        let entry7 = EventEntry::Component(ComponentEventEntry {
             event_id: EventId(3),
             time: SimTime::from_duration(Duration::from_secs(1)),
             ..make_component_entry()
         });
-        assert_eq!(entry5.cmp(&entry6), Ordering::Less);
+        assert_eq!(entry6.cmp(&entry7), Ordering::Less); // time 2 > time 1, so entry7 comes first
     }
 
     #[derive(Debug, Clone, Eq, PartialEq)]
@@ -747,5 +843,143 @@ mod test {
         );
 
         assert!(scheduler.pop().is_none());
+    }
+
+    #[test]
+    fn test_unit_task_results_not_stored() {
+        let mut scheduler = Scheduler::default();
+
+        // Schedule a task that returns ()
+        let task_id1 = TaskId::new();
+        let unit_task = crate::task::TimeoutTask::new(|_| {});
+        scheduler.schedule_task_at(
+            SimTime::from_secs(1),
+            task_id1,
+            Box::new(crate::task::TaskWrapper::new(unit_task, task_id1)),
+        );
+
+        // Schedule a task that returns a value
+        let task_id2 = TaskId::new();
+        let value_task = crate::task::ClosureTask::new(|_| 42);
+        scheduler.schedule_task_at(
+            SimTime::from_secs(2),
+            task_id2,
+            Box::new(crate::task::TaskWrapper::new(value_task, task_id2)),
+        );
+
+        // Execute both tasks
+        assert!(scheduler.execute_task(task_id1)); // () result - should not be stored
+        assert!(scheduler.execute_task(task_id2)); // i32 result - should be stored
+
+        // Check that only the value task result is stored
+        assert!(scheduler.completed_task_results.contains_key(&task_id2));
+        assert!(!scheduler.completed_task_results.contains_key(&task_id1));
+
+        // Verify we can retrieve the value result
+        let handle = crate::task::TaskHandle::<i32>::new(task_id2);
+        let result = scheduler.get_task_result(handle);
+        assert_eq!(result, Some(42));
+    }
+
+    #[test]
+    fn test_cancelled_task_does_not_advance_time() {
+        let mut scheduler = Scheduler::default();
+
+        // Schedule a task at t=10
+        let task_id = TaskId::new();
+        let task = crate::task::ClosureTask::new(|_| 42);
+        scheduler.schedule_task_at(
+            SimTime::from_secs(10),
+            task_id,
+            Box::new(crate::task::TaskWrapper::new(task, task_id)),
+        );
+
+        // Cancel the task before it executes
+        let handle = crate::task::TaskHandle::<i32>::new(task_id);
+        let cancelled = scheduler.cancel_task(handle);
+        assert!(cancelled);
+
+        // Verify time is still 0
+        assert_eq!(scheduler.time(), SimTime::zero());
+
+        // Pop should skip the cancelled task and return None (no more events)
+        let popped = scheduler.pop();
+        assert!(popped.is_none());
+
+        // Time should still be 0 (not advanced to 10)
+        assert_eq!(scheduler.time(), SimTime::zero());
+    }
+
+    #[test]
+    fn test_stable_same_time_event_ordering() {
+        // Test that same-time events are processed in a stable, deterministic order
+        // across multiple runs. This covers component events and task events.
+        use crate::{Component, Execute, Executor, Key, SimTime, Simulation};
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Debug, Clone)]
+        enum TestEvent {
+            ComponentEvent(usize),
+        }
+
+        #[derive(Debug)]
+        struct OrderingTestComponent {
+            log: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl Component for OrderingTestComponent {
+            type Event = TestEvent;
+
+            fn process_event(
+                &mut self,
+                _self_id: Key<Self::Event>,
+                event: &Self::Event,
+                scheduler: &mut crate::Scheduler,
+            ) {
+                match *event {
+                    TestEvent::ComponentEvent(id) => {
+                        self.log.lock().unwrap().push(format!("component-{}", id));
+
+                        // Schedule a task at the same time
+                        let log = self.log.clone();
+                        scheduler.schedule_closure(SimTime::zero(), move |_scheduler| {
+                            log.lock().unwrap().push("task".to_string());
+                        });
+                    }
+                }
+            }
+        }
+
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let component = OrderingTestComponent { log: log.clone() };
+        let mut sim = Simulation::default();
+        let key = sim.add_component(component);
+
+        // Schedule 3 component events at the same time (t=0)
+        for i in 0..3 {
+            sim.schedule(SimTime::zero(), key, TestEvent::ComponentEvent(i));
+        }
+
+        // Run for a short time
+        Executor::timed(SimTime::from_millis(1)).execute(&mut sim);
+
+        let result = log.lock().unwrap().clone();
+        assert_eq!(result.len(), 6); // 3 components + 3 tasks
+
+        // Run the same scenario multiple times and verify identical ordering
+        for _ in 0..10 {
+            let log2 = Arc::new(Mutex::new(Vec::new()));
+            let component2 = OrderingTestComponent { log: log2.clone() };
+            let mut sim2 = Simulation::default();
+            let key2 = sim2.add_component(component2);
+
+            for i in 0..3 {
+                sim2.schedule(SimTime::zero(), key2, TestEvent::ComponentEvent(i));
+            }
+
+            Executor::timed(SimTime::from_millis(1)).execute(&mut sim2);
+            let result2 = log2.lock().unwrap().clone();
+            assert_eq!(result, result2);
+        }
     }
 }

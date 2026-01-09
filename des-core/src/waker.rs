@@ -71,7 +71,7 @@ unsafe fn des_waker_drop(data: *const ()) {
 ///
 /// When the waker is triggered (by calling `wake()` or `wake_by_ref()`),
 /// it uses `defer_wake` to schedule the provided event to the component.
-/// This works correctly both inside and outside of scheduler context.
+/// This only works inside scheduler context during single-threaded event processing.
 ///
 /// # Arguments
 ///
