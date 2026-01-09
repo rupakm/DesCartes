@@ -25,7 +25,7 @@ fn test_periodic_task_behavior() {
     let mut sim = Simulation::default();
     
     // Create a server first
-    let server = Server::new("periodic-server".to_string(), 1, Duration::from_millis(100));
+    let server = Server::with_constant_service_time("periodic-server".to_string(), 1, Duration::from_millis(100));
     let server_id = sim.add_component(server);
     
     // Create client with specific request count

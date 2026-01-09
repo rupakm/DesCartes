@@ -4,7 +4,6 @@
 //! including servers, clients, queues, throttles, and retry policies.
 
 pub mod builder;
-pub mod dists;
 // Note: client.rs was removed due to incompatibility with current Component API
 // Use simple_client.rs for basic client functionality
 pub mod error;
@@ -14,8 +13,14 @@ pub mod simple_client;
 pub mod server;
 pub mod tower;
 
-// Export distribution patterns
-pub use dists::{ArrivalPattern, ServiceTimeDistribution, ConstantArrivalPattern, ConstantServiceTime};
+// Export distribution patterns from des-core
+pub use des_core::dists::{
+    ArrivalPattern, ServiceTimeDistribution, RequestContext, ClientInfo,
+    ConstantArrivalPattern, ConstantServiceTime, ExponentialDistribution, UniformDistribution,
+    RequestSizeBasedServiceTime, EndpointBasedServiceTime, CompositeServiceTime,
+    RequestPredicate, MethodPredicate, UriPrefixPredicate, UriExactPredicate,
+    BodySizePredicate, HeaderPredicate, AndPredicate, OrPredicate,
+};
 
 pub use simple_client::{SimpleClient, ClientEvent};
 pub use retry_policy::{RetryPolicy, ExponentialBackoffPolicy, TokenBucketRetryPolicy, SuccessBasedRetryPolicy, NoRetryPolicy, FixedRetryPolicy};

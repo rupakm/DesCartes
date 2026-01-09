@@ -22,15 +22,51 @@ pub trait ArrivalPattern: Send {
     fn next_arrival_time(&mut self) -> Duration;
 }
 
+/// Request context containing all information needed for service time calculation
+#[derive(Debug, Clone, Default)]
+pub struct RequestContext {
+    pub method: String,
+    pub uri: String,
+    pub headers: HashMap<String, String>,
+    pub body_size: usize,
+    pub payload: Vec<u8>,
+    pub client_info: Option<ClientInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClientInfo {
+    pub client_id: String,
+    pub priority: u8,
+    pub region: String,
+}
+
 /// Trait for sampling service times from a distribution
 ///
 /// This trait abstracts over different probability distributions for
 /// service time generation (exponential, constant, uniform, etc.).
+/// It supports both simple distributions and request-dependent distributions.
 pub trait ServiceTimeDistribution: Send {
     /// Sample a service time from the distribution
     ///
     /// Returns the duration for processing a single request.
-    fn sample(&mut self) -> Duration;
+    /// This is the legacy method for backward compatibility.
+    fn sample(&mut self) -> Duration {
+        self.sample_service_time(&RequestContext::default())
+    }
+
+    /// Sample service time based on request context
+    ///
+    /// This method allows distributions to vary service time based on
+    /// request characteristics like method, URI, body size, etc.
+    fn sample_service_time(&mut self, request: &RequestContext) -> Duration;
+
+    /// Get expected service time for capacity planning
+    ///
+    /// Implementations should provide this for performance analysis.
+    /// This method is required and must be implemented by each distribution.
+    fn expected_service_time(&self, _request: &RequestContext) -> Duration {
+        unimplemented!("expected_service_time must be implemented by each distribution")
+    }
 }
 
 // =============================================================================
@@ -278,6 +314,14 @@ impl ServiceTimeDistribution for ConstantServiceTime {
     fn sample(&mut self) -> Duration {
         self.duration
     }
+
+    fn sample_service_time(&mut self, _request: &RequestContext) -> Duration {
+        self.duration
+    }
+
+    fn expected_service_time(&self, _request: &RequestContext) -> Duration {
+        self.duration
+    }
 }
 
 /// Exponential service time distribution
@@ -339,6 +383,14 @@ impl ServiceTimeDistribution for ExponentialDistribution {
         
         // Convert to Duration
         Duration::from_secs_f64(service_time_seconds)
+    }
+
+    fn sample_service_time(&mut self, _request: &RequestContext) -> Duration {
+        self.sample()
+    }
+
+    fn expected_service_time(&self, _request: &RequestContext) -> Duration {
+        self.mean_service_time()
     }
 }
 
@@ -415,6 +467,14 @@ impl ServiceTimeDistribution for UniformDistribution {
         
         // Convert to Duration
         Duration::from_secs_f64(service_time_seconds)
+    }
+
+    fn sample_service_time(&mut self, _request: &RequestContext) -> Duration {
+        self.sample()
+    }
+
+    fn expected_service_time(&self, _request: &RequestContext) -> Duration {
+        self.mean_service_time()
     }
 }
 
@@ -624,5 +684,258 @@ mod tests {
         
         assert!(min_sample.as_millis() <= min.as_millis() + tolerance);
         assert!(max_sample.as_millis() >= max.as_millis() - tolerance);
+    }
+}
+
+// =============================================================================
+// Request-Dependent Service Time Distribution Implementations
+// =============================================================================
+
+/// Request size-based service time distribution
+///
+/// Service time is calculated as base_time + (body_size * time_per_byte),
+/// capped at max_time to prevent unrealistic service times.
+pub struct RequestSizeBasedServiceTime {
+    base_time: Duration,
+    time_per_byte: Duration,
+    max_time: Duration,
+}
+
+impl RequestSizeBasedServiceTime {
+    /// Create a new request size-based service time distribution
+    ///
+    /// # Arguments
+    ///
+    /// * `base_time` - Minimum service time regardless of request size
+    /// * `time_per_byte` - Additional time per byte of request body
+    /// * `max_time` - Maximum service time cap
+    pub fn new(base_time: Duration, time_per_byte: Duration, max_time: Duration) -> Self {
+        Self {
+            base_time,
+            time_per_byte,
+            max_time,
+        }
+    }
+
+    /// Get the base service time
+    pub fn base_time(&self) -> Duration {
+        self.base_time
+    }
+
+    /// Get the time per byte
+    pub fn time_per_byte(&self) -> Duration {
+        self.time_per_byte
+    }
+
+    /// Get the maximum service time
+    pub fn max_time(&self) -> Duration {
+        self.max_time
+    }
+}
+
+impl ServiceTimeDistribution for RequestSizeBasedServiceTime {
+    fn sample_service_time(&mut self, request: &RequestContext) -> Duration {
+        let size_time = self.time_per_byte * request.body_size as u32;
+        let total_time = self.base_time + size_time;
+        std::cmp::min(total_time, self.max_time)
+    }
+
+    fn expected_service_time(&self, request: &RequestContext) -> Duration {
+        let size_time = self.time_per_byte * request.body_size as u32;
+        let total_time = self.base_time + size_time;
+        std::cmp::min(total_time, self.max_time)
+    }
+}
+
+/// Endpoint-based service time distribution
+///
+/// Different endpoints can have different service time distributions.
+/// Falls back to a default distribution for unmatched endpoints.
+pub struct EndpointBasedServiceTime {
+    endpoint_distributions: HashMap<String, Box<dyn ServiceTimeDistribution>>,
+    default_distribution: Box<dyn ServiceTimeDistribution>,
+}
+
+impl EndpointBasedServiceTime {
+    /// Create a new endpoint-based service time distribution
+    ///
+    /// # Arguments
+    ///
+    /// * `default_distribution` - Distribution to use for unmatched endpoints
+    pub fn new(default_distribution: Box<dyn ServiceTimeDistribution>) -> Self {
+        Self {
+            endpoint_distributions: HashMap::new(),
+            default_distribution,
+        }
+    }
+
+    /// Add a distribution for a specific endpoint
+    ///
+    /// # Arguments
+    ///
+    /// * `endpoint` - URI path to match (e.g., "/api/users")
+    /// * `distribution` - Service time distribution for this endpoint
+    pub fn add_endpoint(&mut self, endpoint: String, distribution: Box<dyn ServiceTimeDistribution>) {
+        self.endpoint_distributions.insert(endpoint, distribution);
+    }
+}
+
+impl ServiceTimeDistribution for EndpointBasedServiceTime {
+    fn sample_service_time(&mut self, request: &RequestContext) -> Duration {
+        if let Some(dist) = self.endpoint_distributions.get_mut(&request.uri) {
+            dist.sample_service_time(request)
+        } else {
+            self.default_distribution.sample_service_time(request)
+        }
+    }
+
+    fn expected_service_time(&self, request: &RequestContext) -> Duration {
+        if let Some(dist) = self.endpoint_distributions.get(&request.uri) {
+            dist.expected_service_time(request)
+        } else {
+            self.default_distribution.expected_service_time(request)
+        }
+    }
+}
+
+/// Trait for request predicates used in composite distributions
+pub trait RequestPredicate: Send {
+    /// Check if the predicate matches the given request
+    fn matches(&self, request: &RequestContext) -> bool;
+}
+
+/// Service time rule for composite distributions
+pub struct ServiceTimeRule {
+    pub condition: Box<dyn RequestPredicate>,
+    pub distribution: Box<dyn ServiceTimeDistribution>,
+}
+
+/// Composite service time distribution with conditional rules
+///
+/// Evaluates rules in order and uses the first matching distribution.
+/// Falls back to default distribution if no rules match.
+pub struct CompositeServiceTime {
+    rules: Vec<ServiceTimeRule>,
+    default_distribution: Box<dyn ServiceTimeDistribution>,
+}
+
+impl CompositeServiceTime {
+    /// Create a new composite service time distribution
+    ///
+    /// # Arguments
+    ///
+    /// * `default_distribution` - Distribution to use when no rules match
+    pub fn new(default_distribution: Box<dyn ServiceTimeDistribution>) -> Self {
+        Self {
+            rules: Vec::new(),
+            default_distribution,
+        }
+    }
+
+    /// Add a rule to the composite distribution
+    ///
+    /// Rules are evaluated in the order they are added.
+    ///
+    /// # Arguments
+    ///
+    /// * `condition` - Predicate to match requests
+    /// * `distribution` - Distribution to use for matching requests
+    pub fn add_rule(&mut self, condition: Box<dyn RequestPredicate>, distribution: Box<dyn ServiceTimeDistribution>) {
+        self.rules.push(ServiceTimeRule {
+            condition,
+            distribution,
+        });
+    }
+}
+
+impl ServiceTimeDistribution for CompositeServiceTime {
+    fn sample_service_time(&mut self, request: &RequestContext) -> Duration {
+        for rule in &mut self.rules {
+            if rule.condition.matches(request) {
+                return rule.distribution.sample_service_time(request);
+            }
+        }
+        self.default_distribution.sample_service_time(request)
+    }
+
+    fn expected_service_time(&self, request: &RequestContext) -> Duration {
+        for rule in &self.rules {
+            if rule.condition.matches(request) {
+                return rule.distribution.expected_service_time(request);
+            }
+        }
+        self.default_distribution.expected_service_time(request)
+    }
+}
+
+// =============================================================================
+// Request Predicate Implementations
+// =============================================================================
+
+/// Predicate that matches requests by HTTP method
+pub struct MethodPredicate(pub String);
+
+impl RequestPredicate for MethodPredicate {
+    fn matches(&self, request: &RequestContext) -> bool {
+        request.method == self.0
+    }
+}
+
+/// Predicate that matches requests by URI prefix
+pub struct UriPrefixPredicate(pub String);
+
+impl RequestPredicate for UriPrefixPredicate {
+    fn matches(&self, request: &RequestContext) -> bool {
+        request.uri.starts_with(&self.0)
+    }
+}
+
+/// Predicate that matches requests by exact URI
+pub struct UriExactPredicate(pub String);
+
+impl RequestPredicate for UriExactPredicate {
+    fn matches(&self, request: &RequestContext) -> bool {
+        request.uri == self.0
+    }
+}
+
+/// Predicate that matches requests by body size range
+pub struct BodySizePredicate(pub std::ops::Range<usize>);
+
+impl RequestPredicate for BodySizePredicate {
+    fn matches(&self, request: &RequestContext) -> bool {
+        self.0.contains(&request.body_size)
+    }
+}
+
+/// Predicate that matches requests by header presence and value
+pub struct HeaderPredicate {
+    pub header_name: String,
+    pub header_value: String,
+}
+
+impl RequestPredicate for HeaderPredicate {
+    fn matches(&self, request: &RequestContext) -> bool {
+        request.headers.get(&self.header_name)
+            .map(|value| value == &self.header_value)
+            .unwrap_or(false)
+    }
+}
+
+/// Predicate that combines multiple predicates with AND logic
+pub struct AndPredicate(pub Vec<Box<dyn RequestPredicate>>);
+
+impl RequestPredicate for AndPredicate {
+    fn matches(&self, request: &RequestContext) -> bool {
+        self.0.iter().all(|predicate| predicate.matches(request))
+    }
+}
+
+/// Predicate that combines multiple predicates with OR logic
+pub struct OrPredicate(pub Vec<Box<dyn RequestPredicate>>);
+
+impl RequestPredicate for OrPredicate {
+    fn matches(&self, request: &RequestContext) -> bool {
+        self.0.iter().any(|predicate| predicate.matches(request))
     }
 }

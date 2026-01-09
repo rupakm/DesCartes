@@ -89,7 +89,7 @@ fn client_metrics_example() {
     let mut sim = Simulation::default();
     
     // Create a server first
-    let server = des_components::Server::new("metrics-server".to_string(), 1, Duration::from_millis(50));
+    let server = des_components::Server::with_constant_service_time("metrics-server".to_string(), 1, Duration::from_millis(50));
     let server_id = sim.add_component(server);
     
     // Create client with retry policy

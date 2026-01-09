@@ -17,87 +17,29 @@
 //! - [`DesServiceBuilder`]: Builder pattern for constructing services with validation
 //! - [`SchedulerHandle`]: Interface for interacting with the DES scheduler
 //! - [`DesServiceFuture`]: Future returned by service calls
+//! - [`ResponseRouter`]: Pre-registered component that routes server responses to Tower futures
 //!
-//! # Usage Example
+//! # Architecture
 //!
-//! ```rust
-//! use des_components::tower::{DesServiceBuilder, ServiceError, SimBody};
-//! use des_core::Simulation;
-//! use http::{Request, Method};
-//! use std::sync::{Arc, Mutex};
-//! use std::time::Duration;
-//! use tower::Service;
+//! The service uses a **pre-registered response router** pattern to avoid deadlocks when
+//! Tower services are called from within DES event handlers:
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Create simulation
-//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//! 1. When `DesServiceBuilder::build()` is called, a single `ResponseRouter` component is
+//!    registered with the simulation
+//! 2. When `service.call()` is invoked, the request is scheduled to the server with the
+//!    `ResponseRouter` as the client
+//! 3. The server processes the request and sends the response to the `ResponseRouter`
+//! 4. The `ResponseRouter` looks up the oneshot channel for that request and sends the response
+//! 5. The Tower future completes with the actual server response
 //!
-//! // Build the service
-//! let mut service = DesServiceBuilder::new("web-server".to_string())
-//!     .thread_capacity(10)
-//!     .service_time(Duration::from_millis(50))
-//!     .build(simulation.clone())?;
-//!
-//! // Create an HTTP request
-//! let request = Request::builder()
-//!     .method(Method::GET)
-//!     .uri("/api/users")
-//!     .body(SimBody::from_static("request body"))?;
-//!
-//! // Process the request (returns a Future)
-//! let response_future = service.call(request);
-//!
-//! // In a real application, you would await the future and run the simulation
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! # Integration with Tower Middleware
-//!
-//! The service can be composed with Tower layers for advanced functionality:
-//!
-//! ```rust
-//! use des_components::tower::{DesServiceBuilder, DesRateLimitLayer, DesConcurrencyLimitLayer};
-//! use tower::ServiceBuilder;
-//! use std::time::Duration;
-//!
-//! # async fn middleware_example() {
-//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
-//! // Create base service
-//! let base_service = DesServiceBuilder::new("api-server".to_string())
-//!     .thread_capacity(5)
-//!     .service_time(Duration::from_millis(100))
-//!     .build(simulation.clone())
-//!     .unwrap();
-//!
-//! // Compose with middleware layers
-//! let service = ServiceBuilder::new()
-//!     .layer(DesRateLimitLayer::new(10.0, 20, std::sync::Arc::downgrade(&simulation)))
-//!     .layer(DesConcurrencyLimitLayer::new(3))
-//!     .service(base_service);
-//! # }
-//! ```
-//!
-//! # Simulation Integration
-//!
-//! The service integrates with the DES framework by:
-//!
-//! 1. **Timing Control**: All operations use simulation time instead of wall-clock time
-//! 2. **Event Scheduling**: Service processing is scheduled as discrete events
-//! 3. **Resource Management**: Thread capacity and queuing are simulated accurately
-//! 4. **Deterministic Behavior**: Results are reproducible across simulation runs
-//!
-//! # Performance Characteristics
-//!
-//! - **Service Time**: Configurable processing time per request
-//! - **Capacity**: Maximum number of concurrent requests
-//! - **Queuing**: Automatic backpressure when capacity is exceeded
-//! - **Metrics**: Built-in tracking of throughput, latency, and utilization
+//! This design ensures correct timing - the Tower future only completes when the server
+//! actually finishes processing, regardless of whether the service was called from within
+//! or outside of event processing.
 
 use crate::{Server, ServerEvent, ClientEvent};
 use des_core::{Component, Key, Scheduler, SimTime, Simulation, RequestAttempt, RequestAttemptId, RequestId, Response};
 use des_core::{defer_wake, in_scheduler_context};
-use des_core::task::Task;
+use des_core::dists::{ServiceTimeDistribution, ConstantServiceTime, ExponentialDistribution};
 
 use http::Request;
 use pin_project::pin_project;
@@ -115,210 +57,96 @@ use tower_layer::Layer;
 use super::{ServiceError, SimBody, response_to_http, serialize_http_request};
 
 // ============================================================================
-// Pending Request Queue for Deferred Scheduling
+// Response Router - Pre-registered component for routing server responses
 // ============================================================================
 
-/// A pending request waiting to be scheduled
-struct PendingRequest {
-    attempt: RequestAttempt,
-    response_tx: oneshot::Sender<Response>,
-}
-
-/// Events for the SchedulerBridge component
-#[derive(Debug)]
-pub enum SchedulerBridgeEvent {
-    /// Process all pending requests that were queued
-    ProcessPendingRequests,
-}
-
-/// Bridge component that processes pending requests from the SchedulerHandle
-/// 
-/// This component exists to break the deadlock cycle. When a Tower service call
-/// happens during event processing, instead of trying to lock the simulation,
-/// the request is queued and this component processes it via defer_wake.
-pub struct SchedulerBridge {
-    /// Shared state with SchedulerHandle
-    shared_state: Arc<SchedulerBridgeState>,
-}
-
-impl SchedulerBridge {
-    fn new(shared_state: Arc<SchedulerBridgeState>) -> Self {
-        Self { shared_state }
-    }
-}
-
-impl Component for SchedulerBridge {
-    type Event = SchedulerBridgeEvent;
-
-    fn process_event(
-        &mut self,
-        _self_id: Key<Self::Event>,
-        event: &Self::Event,
-        scheduler: &mut Scheduler,
-    ) {
-        match event {
-            SchedulerBridgeEvent::ProcessPendingRequests => {
-                // Drain all pending requests and schedule them
-                let requests: Vec<PendingRequest> = {
-                    let mut pending = self.shared_state.pending_requests.lock().unwrap();
-                    pending.drain(..).collect()
-                };
-
-                for req in requests {
-                    self.shared_state.schedule_request_internal(req, scheduler);
-                }
-            }
-        }
-    }
-}
-
-/// Shared state between SchedulerHandle and SchedulerBridge
-struct SchedulerBridgeState {
-    /// Queue of pending requests waiting to be scheduled
-    pending_requests: Mutex<Vec<PendingRequest>>,
-    /// Server component key in the simulation
-    server_key: Key<ServerEvent>,
-    /// Key for the bridge component (set after registration)
-    bridge_key: Mutex<Option<Key<SchedulerBridgeEvent>>>,
-    /// Pending response channels
+/// Routes server responses to Tower service futures.
+///
+/// This component is registered ONCE when the service is built, and handles ALL
+/// responses for that service. This avoids the need to create a new component
+/// per request, which would require locking the simulation during event processing.
+pub struct ResponseRouter {
+    /// Map from attempt_id to oneshot sender for pending responses
     pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
-    /// Current load tracking
+    /// Current load tracking (decremented when response is received)
     current_load: Arc<AtomicUsize>,
     /// Wakers for pending poll_ready calls
     wakers: Arc<Mutex<Vec<Waker>>>,
 }
 
-impl SchedulerBridgeState {
+impl ResponseRouter {
+    /// Create a new response router with shared state
     fn new(
-        server_key: Key<ServerEvent>,
         pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
         current_load: Arc<AtomicUsize>,
         wakers: Arc<Mutex<Vec<Waker>>>,
     ) -> Self {
         Self {
-            pending_requests: Mutex::new(Vec::new()),
-            server_key,
-            bridge_key: Mutex::new(None),
             pending_responses,
             current_load,
             wakers,
         }
     }
-
-    fn set_bridge_key(&self, key: Key<SchedulerBridgeEvent>) {
-        *self.bridge_key.lock().unwrap() = Some(key);
-    }
-
-    /// Schedule a request using the scheduler reference (called from within event processing)
-    /// 
-    /// Since we're inside the SchedulerBridge's process_event, we have access to &mut Scheduler
-    /// but NOT to the Simulation. We can schedule events but not add components.
-    /// 
-    /// Solution: Use a task to handle the response, since tasks can be scheduled from here.
-    fn schedule_request_internal(&self, req: PendingRequest, scheduler: &mut Scheduler) {
-        // Store the response channel
-        {
-            let mut pending = self.pending_responses.lock().unwrap();
-            pending.insert(req.attempt.id, req.response_tx);
-        }
-
-        // Create a task that will be scheduled to handle the response
-        // We use a ResponseHandlerTask that polls for the response
-        let attempt_id = req.attempt.id;
-        let pending_responses = self.pending_responses.clone();
-        let current_load = self.current_load.clone();
-        let wakers = self.wakers.clone();
-
-        // Schedule the request to the server using a placeholder client_id
-        // The server will send the response, but since we can't add a component here,
-        // we'll use a different approach: schedule a task to check for the response
-        scheduler.schedule(
-            SimTime::from_duration(Duration::from_millis(1)),
-            self.server_key,
-            ServerEvent::ProcessRequest {
-                attempt: req.attempt.clone(),
-                // Use a nil UUID - the server will still process the request
-                // but the response will go to a non-existent component
-                client_id: Key::new_with_id(uuid::Uuid::nil()),
-            },
-        );
-
-        // Since the response will be sent to a nil component (which won't exist),
-        // we need a different approach. Let's schedule a task that will be executed
-        // after the service time to complete the response.
-        // 
-        // This is a workaround - ideally we'd have proper response routing.
-        // For now, we'll simulate the response completion after a delay.
-        let response_task = DeferredResponseTask {
-            attempt_id,
-            request_payload: req.attempt.payload.clone(),
-            pending_responses,
-            current_load,
-            wakers,
-        };
-
-        // Schedule the response task to run after the expected service time
-        // Note: This is approximate - in a real implementation we'd need proper response routing
-        scheduler.schedule_task(SimTime::from_duration(Duration::from_millis(50)), response_task);
-    }
 }
 
-/// Task that completes a deferred response
-/// This is used when we can't add a response bridge component
-struct DeferredResponseTask {
-    attempt_id: RequestAttemptId,
-    request_payload: Vec<u8>,
-    pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
-    current_load: Arc<AtomicUsize>,
-    wakers: Arc<Mutex<Vec<Waker>>>,
-}
+impl Component for ResponseRouter {
+    type Event = ClientEvent;
 
-impl Task for DeferredResponseTask {
-    type Output = ();
+    fn process_event(
+        &mut self,
+        _self_id: Key<Self::Event>,
+        event: &Self::Event,
+        _scheduler: &mut Scheduler,
+    ) {
+        match event {
+            ClientEvent::ResponseReceived { response } => {
+                // Decrement load
+                self.current_load.fetch_sub(1, Ordering::Relaxed);
 
-    fn execute(self, scheduler: &mut Scheduler) -> Self::Output {
-        // Decrement load
-        self.current_load.fetch_sub(1, Ordering::Relaxed);
+                // Route response to the correct oneshot channel
+                if let Some(tx) = self.pending_responses.lock().unwrap().remove(&response.attempt_id) {
+                    let _ = tx.send(response.clone());
+                }
 
-        // Send a success response with the echoed payload
-        if let Some(tx) = {
-            let mut pending = self.pending_responses.lock().unwrap();
-            pending.remove(&self.attempt_id)
-        } {
-            let response = Response::success(
-                self.attempt_id,
-                RequestId(self.attempt_id.0), // Use attempt_id as request_id for simplicity
-                scheduler.time(),
-                self.request_payload, // Echo the request payload
-            );
-            let _ = tx.send(response);
-        }
-
-        // Wake up any pending poll_ready calls
-        let wakers = {
-            let mut wakers = self.wakers.lock().unwrap();
-            std::mem::take(&mut *wakers)
-        };
-        for waker in wakers {
-            waker.wake();
+                // Wake up any pending poll_ready calls
+                let wakers: Vec<Waker> = {
+                    let mut wakers = self.wakers.lock().unwrap();
+                    std::mem::take(&mut *wakers)
+                };
+                for waker in wakers {
+                    waker.wake();
+                }
+            }
+            ClientEvent::SendRequest => {
+                // Response router doesn't send requests
+            }
+            ClientEvent::RequestTimeout { .. } => {
+                // Response router doesn't handle timeouts directly
+            }
+            ClientEvent::RetryRequest { .. } => {
+                // Response router doesn't handle retries directly
+            }
         }
     }
 }
 
-/// Handle to interact with the DES scheduler from Tower services
-/// 
-/// This handle uses deferred scheduling to avoid deadlocks when Tower services
-/// are called from within DES event handlers. Instead of immediately locking
-/// the simulation, requests are queued and processed via `defer_wake`.
+// ============================================================================
+// Scheduler Handle - Interface for scheduling requests
+// ============================================================================
+
+/// Handle to interact with the DES scheduler from Tower services.
+///
+/// This handle uses a pre-registered `ResponseRouter` component to receive server
+/// responses, avoiding the need to create components during event processing.
 #[derive(Clone)]
 pub struct SchedulerHandle {
     /// Weak reference to avoid circular dependencies
     simulation: Weak<Mutex<Simulation>>,
     /// Server component key in the simulation
     server_key: Key<ServerEvent>,
-    /// Shared state with the SchedulerBridge component
-    bridge_state: Arc<SchedulerBridgeState>,
-    /// Pending response channels
+    /// Response router component key (pre-registered)
+    router_key: Key<ClientEvent>,
+    /// Pending response channels (shared with ResponseRouter)
     pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
     /// Request ID generator
     next_request_id: Arc<AtomicU64>,
@@ -333,27 +161,20 @@ pub struct SchedulerHandle {
 }
 
 impl SchedulerHandle {
-    /// Create a new scheduler handle
+    /// Create a new scheduler handle with a pre-registered response router
     pub fn new(
         simulation: Weak<Mutex<Simulation>>,
         server_key: Key<ServerEvent>,
+        router_key: Key<ClientEvent>,
+        pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
+        current_load: Arc<AtomicUsize>,
+        wakers: Arc<Mutex<Vec<Waker>>>,
         capacity: usize,
     ) -> Self {
-        let pending_responses = Arc::new(Mutex::new(HashMap::new()));
-        let current_load = Arc::new(AtomicUsize::new(0));
-        let wakers = Arc::new(Mutex::new(Vec::new()));
-
-        let bridge_state = Arc::new(SchedulerBridgeState::new(
-            server_key,
-            pending_responses.clone(),
-            current_load.clone(),
-            wakers.clone(),
-        ));
-
         Self {
             simulation,
             server_key,
-            bridge_state,
+            router_key,
             pending_responses,
             next_request_id: Arc::new(AtomicU64::new(1)),
             next_attempt_id: Arc::new(AtomicU64::new(1)),
@@ -363,26 +184,19 @@ impl SchedulerHandle {
         }
     }
 
-    /// Register the bridge component with the simulation
-    /// This must be called after creating the handle to enable deferred scheduling
-    pub fn register_bridge(&self, simulation: &mut Simulation) -> Key<SchedulerBridgeEvent> {
-        let bridge = SchedulerBridge::new(self.bridge_state.clone());
-        let key = simulation.add_component(bridge);
-        self.bridge_state.set_bridge_key(key);
-        key
-    }
-
     /// Check if the service has capacity
     pub fn has_capacity(&self) -> bool {
         self.current_load.load(Ordering::Relaxed) < self.capacity
     }
 
-    /// Schedule a request in the DES
-    /// 
-    /// This method uses deferred scheduling to avoid deadlocks:
-    /// - If called from within scheduler context (during event processing),
-    ///   the request is queued and processed via defer_wake
-    /// - If called from outside scheduler context, the simulation is locked directly
+    /// Schedule a request in the DES.
+    ///
+    /// This method works correctly from both inside and outside scheduler context:
+    /// - Inside scheduler context: uses `defer_wake` to schedule at end of current step
+    /// - Outside scheduler context: locks simulation and schedules directly
+    ///
+    /// In both cases, the server response will be routed through the pre-registered
+    /// `ResponseRouter` component, ensuring correct timing.
     pub fn schedule_request(
         &self,
         attempt: RequestAttempt,
@@ -391,82 +205,41 @@ impl SchedulerHandle {
         // Increment load immediately
         self.current_load.fetch_add(1, Ordering::Relaxed);
 
-        // Check if we're inside scheduler context (during event processing)
-        if in_scheduler_context() {
-            // We're inside event processing - use deferred scheduling to avoid deadlock
-            self.schedule_request_deferred(attempt, response_tx)
-        } else {
-            // We're outside event processing - can safely lock the simulation
-            self.schedule_request_direct(attempt, response_tx)
-        }
-    }
-
-    /// Schedule a request using deferred scheduling (called from within event processing)
-    fn schedule_request_deferred(
-        &self,
-        attempt: RequestAttempt,
-        response_tx: oneshot::Sender<Response>,
-    ) -> Result<(), ServiceError> {
-        // Queue the request
-        {
-            let mut pending = self.bridge_state.pending_requests.lock().unwrap();
-            pending.push(PendingRequest {
-                attempt,
-                response_tx,
-            });
-        }
-
-        // Use defer_wake to schedule processing at the end of the current step
-        if let Some(bridge_key) = *self.bridge_state.bridge_key.lock().unwrap() {
-            defer_wake(bridge_key, SchedulerBridgeEvent::ProcessPendingRequests);
-            Ok(())
-        } else {
-            // Bridge not registered yet - fall back to direct scheduling
-            // This can happen if the service is called before the bridge is registered
-            Err(ServiceError::Internal(
-                "SchedulerBridge not registered - call register_bridge() first".to_string(),
-            ))
-        }
-    }
-
-    /// Schedule a request directly by locking the simulation (called from outside event processing)
-    fn schedule_request_direct(
-        &self,
-        attempt: RequestAttempt,
-        response_tx: oneshot::Sender<Response>,
-    ) -> Result<(), ServiceError> {
-        // Store the response channel
+        // Store the response channel in the shared map
+        // The ResponseRouter will look this up when the server responds
         {
             let mut pending = self.pending_responses.lock().unwrap();
             pending.insert(attempt.id, response_tx);
         }
 
-        // Create a response bridge component
-        let response_bridge = TowerResponseBridge::new(
-            attempt.id,
-            self.pending_responses.clone(),
-            self.current_load.clone(),
-            self.wakers.clone(),
-        );
-
-        // Schedule in DES
-        if let Some(sim) = self.simulation.upgrade() {
-            let mut simulation = sim.lock().unwrap();
-            let bridge_key = simulation.add_component(response_bridge);
-            
-            simulation.schedule(
-                SimTime::from_duration(Duration::from_millis(1)),
-                self.server_key,
-                ServerEvent::ProcessRequest {
-                    attempt,
-                    client_id: bridge_key,
-                },
-            );
+        // Schedule the request to the server with the router as the client
+        if in_scheduler_context() {
+            // Inside event processing - use defer_wake to avoid issues
+            // The server_key event will be scheduled at the end of the current step
+            defer_wake(self.server_key, ServerEvent::ProcessRequest {
+                attempt,
+                client_id: self.router_key,
+            });
             Ok(())
         } else {
-            Err(ServiceError::Internal(
-                "Simulation has been dropped".to_string(),
-            ))
+            // Outside event processing - can safely lock the simulation
+            if let Some(sim) = self.simulation.upgrade() {
+                let mut simulation = sim.lock().unwrap();
+                simulation.schedule(
+                    SimTime::zero(),
+                    self.server_key,
+                    ServerEvent::ProcessRequest {
+                        attempt,
+                        client_id: self.router_key,
+                    },
+                );
+                Ok(())
+            } else {
+                // Simulation dropped - clean up
+                self.current_load.fetch_sub(1, Ordering::Relaxed);
+                self.pending_responses.lock().unwrap().remove(&attempt.id);
+                Err(ServiceError::Internal("Simulation has been dropped".to_string()))
+            }
         }
     }
 
@@ -477,137 +250,19 @@ impl SchedulerHandle {
     }
 }
 
-/// Bridge component that receives responses and schedules response tasks
-/// This component exists temporarily to receive the response event and then schedules
-/// a TowerResponseTask to handle the actual response processing
-struct TowerResponseBridge {
-    attempt_id: RequestAttemptId,
-    pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
-    current_load: Arc<AtomicUsize>,
-    wakers: Arc<Mutex<Vec<Waker>>>,
-}
+// ============================================================================
+// Service Builder
+// ============================================================================
 
-impl TowerResponseBridge {
-    fn new(
-        attempt_id: RequestAttemptId,
-        pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
-        current_load: Arc<AtomicUsize>,
-        wakers: Arc<Mutex<Vec<Waker>>>,
-    ) -> Self {
-        Self {
-            attempt_id,
-            pending_responses,
-            current_load,
-            wakers,
-        }
-    }
-}
-
-impl Component for TowerResponseBridge {
-    type Event = ClientEvent;
-
-    fn process_event(
-        &mut self,
-        _self_id: Key<Self::Event>,
-        event: &Self::Event,
-        scheduler: &mut Scheduler,
-    ) {
-        match event {
-            ClientEvent::ResponseReceived { response } => {
-                // Schedule a task to handle the response
-                let response_task = TowerResponseTask::new(
-                    self.attempt_id,
-                    response.clone(),
-                    self.pending_responses.clone(),
-                    self.current_load.clone(),
-                    self.wakers.clone(),
-                );
-                
-                // Schedule the task to execute immediately
-                scheduler.schedule_task(SimTime::from_duration(Duration::ZERO), response_task);
-                
-                // This bridge component has served its purpose and can be garbage collected
-            }
-            ClientEvent::SendRequest => {
-                // Response bridges don't send requests
-            }
-            ClientEvent::RequestTimeout { .. } => {
-                // Response bridges don't handle timeouts directly
-            }
-            ClientEvent::RetryRequest { .. } => {
-                // Response bridges don't handle retries directly
-            }
-        }
-    }
-}
-
-/// Task that handles a single Tower request response
-/// This task exists only to bridge the DES event system back to Tower futures
-/// and automatically cleans up after execution
-struct TowerResponseTask {
-    attempt_id: RequestAttemptId,
-    response: Response,
-    pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
-    current_load: Arc<AtomicUsize>,
-    wakers: Arc<Mutex<Vec<Waker>>>,
-}
-
-impl TowerResponseTask {
-    fn new(
-        attempt_id: RequestAttemptId,
-        response: Response,
-        pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
-        current_load: Arc<AtomicUsize>,
-        wakers: Arc<Mutex<Vec<Waker>>>,
-    ) -> Self {
-        Self {
-            attempt_id,
-            response,
-            pending_responses,
-            current_load,
-            wakers,
-        }
-    }
-}
-
-impl Task for TowerResponseTask {
-    type Output = ();
-
-    fn execute(self, _scheduler: &mut Scheduler) -> Self::Output {
-        // Decrement load
-        self.current_load.fetch_sub(1, Ordering::Relaxed);
-
-        // Send response to waiting future
-        if let Some(tx) = {
-            let mut pending = self.pending_responses.lock().unwrap();
-            pending.remove(&self.attempt_id)
-        } {
-            let _ = tx.send(self.response);
-        }
-
-        // Wake up any pending poll_ready calls
-        let wakers = {
-            let mut wakers = self.wakers.lock().unwrap();
-            std::mem::take(&mut *wakers)
-        };
-        for waker in wakers {
-            waker.wake();
-        }
-        
-        // Task automatically cleans up after execution - no manual component removal needed
-    }
-}
-
-/// Builder for creating DES-backed Tower services with full Tower ServiceBuilder compatibility
-/// 
+/// Builder for creating DES-backed Tower services with full Tower ServiceBuilder compatibility.
+///
 /// This builder provides all the methods available in Tower's ServiceBuilder, adapted for
 /// discrete event simulation. It allows you to compose middleware layers and build services
 /// that run within the simulation environment.
-#[derive(Clone)]
 pub struct DesServiceBuilder<L> {
     server_name: String,
     thread_capacity: usize,
-    service_time: Duration,
+    service_time_distribution: Option<Box<dyn ServiceTimeDistribution>>,
     layer: L,
 }
 
@@ -623,7 +278,7 @@ impl DesServiceBuilder<tower_layer::Identity> {
         Self {
             server_name,
             thread_capacity: 10,
-            service_time: Duration::from_millis(100),
+            service_time_distribution: None,
             layer: tower_layer::Identity::new(),
         }
     }
@@ -636,21 +291,29 @@ impl<L> DesServiceBuilder<L> {
         self
     }
 
-    /// Set the service time per request
-    pub fn service_time(mut self, duration: Duration) -> Self {
-        self.service_time = duration;
+    /// Set the service time distribution
+    pub fn service_time_distribution<D: ServiceTimeDistribution + 'static>(mut self, distribution: D) -> Self {
+        self.service_time_distribution = Some(Box::new(distribution));
         self
     }
 
+    /// Set constant service time per request (backward compatibility)
+    pub fn service_time(self, duration: Duration) -> Self {
+        self.service_time_distribution(ConstantServiceTime::new(duration))
+    }
+
+    /// Set exponential service time distribution
+    pub fn exponential_service_time(self, mean_service_time: Duration) -> Self {
+        let rate = 1.0 / mean_service_time.as_secs_f64();
+        self.service_time_distribution(ExponentialDistribution::new(rate))
+    }
+
     /// Add a new layer `T` into the [`DesServiceBuilder`].
-    ///
-    /// This wraps the inner service with the service provided by a user-defined
-    /// [`Layer`]. The provided layer must implement the [`Layer`] trait.
     pub fn layer<T>(self, layer: T) -> DesServiceBuilder<tower_layer::Stack<T, L>> {
         DesServiceBuilder {
             server_name: self.server_name,
             thread_capacity: self.thread_capacity,
-            service_time: self.service_time,
+            service_time_distribution: self.service_time_distribution,
             layer: tower_layer::Stack::new(layer, self.layer),
         }
     }
@@ -672,7 +335,6 @@ impl<L> DesServiceBuilder<L> {
     }
 
     /// Buffer requests when the next layer is not ready.
-    /// Note: This uses Tower's buffer layer which requires the "buffer" feature.
     pub fn buffer<Request>(
         self,
         bound: usize,
@@ -689,7 +351,6 @@ impl<L> DesServiceBuilder<L> {
     }
 
     /// Drop requests when the next layer is unable to respond to requests.
-    /// Note: This uses Tower's load shed layer which requires the "load-shed" feature.
     pub fn load_shed(self) -> DesServiceBuilder<tower_layer::Stack<tower::load_shed::LoadShedLayer, L>> {
         self.layer(tower::load_shed::LoadShedLayer::new())
     }
@@ -727,7 +388,6 @@ impl<L> DesServiceBuilder<L> {
     }
 
     /// Conditionally reject requests based on `predicate`.
-    /// Note: This uses Tower's filter layer which requires the "filter" feature.
     pub fn filter<P>(
         self,
         predicate: P,
@@ -736,7 +396,6 @@ impl<L> DesServiceBuilder<L> {
     }
 
     /// Conditionally reject requests based on an asynchronous `predicate`.
-    /// Note: This uses Tower's async filter layer which requires the "filter" feature.
     pub fn filter_async<P>(
         self,
         predicate: P,
@@ -745,7 +404,6 @@ impl<L> DesServiceBuilder<L> {
     }
 
     /// Map one request type to another.
-    /// Note: This uses Tower's util layer which requires the "util" feature.
     pub fn map_request<F, R1, R2>(
         self,
         f: F,
@@ -757,7 +415,6 @@ impl<L> DesServiceBuilder<L> {
     }
 
     /// Map one response type to another.
-    /// Note: This uses Tower's util layer which requires the "util" feature.
     pub fn map_response<F>(
         self,
         f: F,
@@ -766,32 +423,26 @@ impl<L> DesServiceBuilder<L> {
     }
 
     /// Map one error type to another.
-    /// Note: This uses Tower's util layer which requires the "util" feature.
     pub fn map_err<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapErrLayer<F>, L>> {
         self.layer(tower::util::MapErrLayer::new(f))
     }
 
     /// Composes a function that transforms futures produced by the service.
-    /// Note: This uses Tower's util layer which requires the "util" feature.
     pub fn map_future<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapFutureLayer<F>, L>> {
         self.layer(tower::util::MapFutureLayer::new(f))
     }
 
-    /// Apply an asynchronous function after the service, regardless of whether the future
-    /// succeeds or fails.
-    /// Note: This uses Tower's util layer which requires the "util" feature.
+    /// Apply an asynchronous function after the service.
     pub fn then<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::ThenLayer<F>, L>> {
         self.layer(tower::util::ThenLayer::new(f))
     }
 
     /// Executes a new future after this service's future resolves.
-    /// Note: This uses Tower's util layer which requires the "util" feature.
     pub fn and_then<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::AndThenLayer<F>, L>> {
         self.layer(tower::util::AndThenLayer::new(f))
     }
 
     /// Maps this service's result type to a different value.
-    /// Note: This uses Tower's util layer which requires the "util" feature.
     pub fn map_result<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapResultLayer<F>, L>> {
         self.layer(tower::util::MapResultLayer::new(f))
     }
@@ -824,7 +475,7 @@ impl<L> DesServiceBuilder<L> {
         delay: std::time::Duration,
         simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
     ) -> DesServiceBuilder<tower_layer::Stack<super::hedge::DesHedgeLayer, L>> {
-        self.layer(super::hedge::DesHedgeLayer::new(delay, 2, simulation)) // Default to 2 hedged requests
+        self.layer(super::hedge::DesHedgeLayer::new(delay, 2, simulation))
     }
 
     /// Returns the underlying `Layer` implementation.
@@ -832,8 +483,7 @@ impl<L> DesServiceBuilder<L> {
         self.layer
     }
 
-    /// Wrap the service `S` with the middleware provided by this
-    /// [`DesServiceBuilder`]'s [`Layer`]'s, returning a new [`Service`].
+    /// Wrap the service `S` with the middleware provided by this builder's layers.
     pub fn service<S>(&self, service: S) -> L::Service
     where
         L: tower_layer::Layer<S>,
@@ -841,9 +491,7 @@ impl<L> DesServiceBuilder<L> {
         self.layer.layer(service)
     }
 
-    /// Wrap the async function `F` with the middleware provided by this [`DesServiceBuilder`]'s
-    /// [`Layer`]s, returning a new [`Service`].
-    /// Note: This uses Tower's util layer which requires the "util" feature.
+    /// Wrap the async function `F` with the middleware provided by this builder's layers.
     pub fn service_fn<F>(self, f: F) -> L::Service
     where
         L: tower_layer::Layer<tower::util::ServiceFn<F>>,
@@ -860,8 +508,7 @@ impl<L> DesServiceBuilder<L> {
         self
     }
 
-    /// Check that the builder when given a service of type `S` produces a service that implements
-    /// `Clone`.
+    /// Check that the builder when given a service of type `S` produces a service that implements `Clone`.
     #[inline]
     pub fn check_service_clone<S>(self) -> Self
     where
@@ -871,8 +518,7 @@ impl<L> DesServiceBuilder<L> {
         self
     }
 
-    /// Check that the builder when given a service of type `S` produces a service with the given
-    /// request, response, and error types.
+    /// Check that the builder when given a service of type `S` produces a service with the given types.
     #[inline]
     pub fn check_service<S, T, U, E>(self) -> Self
     where
@@ -882,7 +528,13 @@ impl<L> DesServiceBuilder<L> {
         self
     }
 
-    /// Build the base DES service and integrate it with the simulation
+    /// Build the base DES service and integrate it with the simulation.
+    ///
+    /// This method:
+    /// 1. Creates the server component with the configured service time distribution
+    /// 2. Creates and registers a `ResponseRouter` component to handle all responses
+    /// 3. Creates the `SchedulerHandle` with references to both components
+    /// 4. Wraps the base service with any configured middleware layers
     pub fn build(
         self,
         simulation: Arc<Mutex<Simulation>>,
@@ -892,19 +544,42 @@ impl<L> DesServiceBuilder<L> {
     {
         let mut sim = simulation.lock().unwrap();
 
+        // Use the configured distribution or default to 100ms constant
+        let service_time_distribution = self.service_time_distribution
+            .unwrap_or_else(|| Box::new(ConstantServiceTime::new(Duration::from_millis(100))));
+
+        // Create shared state for response routing
+        let pending_responses = Arc::new(Mutex::new(HashMap::new()));
+        let current_load = Arc::new(AtomicUsize::new(0));
+        let wakers = Arc::new(Mutex::new(Vec::new()));
+
+        // Create and register the ResponseRouter component ONCE
+        // This component will handle ALL responses for this service
+        let router = ResponseRouter::new(
+            pending_responses.clone(),
+            current_load.clone(),
+            wakers.clone(),
+        );
+        let router_key = sim.add_component(router);
+
         // Create the DES server
-        let server = Server::new(self.server_name.clone(), self.thread_capacity, self.service_time);
+        let server = Server::new(
+            self.server_name.clone(), 
+            self.thread_capacity, 
+            service_time_distribution,
+        );
         let server_key = sim.add_component(server);
 
-        // Create scheduler handle
+        // Create scheduler handle with the pre-registered router
         let handle = SchedulerHandle::new(
             Arc::downgrade(&simulation),
             server_key,
+            router_key,
+            pending_responses,
+            current_load,
+            wakers,
             self.thread_capacity,
         );
-
-        // Register the bridge component for deferred scheduling
-        let _bridge_key = handle.register_bridge(&mut sim);
 
         drop(sim); // Release the lock
 
@@ -918,7 +593,7 @@ impl<L: std::fmt::Debug> std::fmt::Debug for DesServiceBuilder<L> {
         f.debug_struct("DesServiceBuilder")
             .field("server_name", &self.server_name)
             .field("thread_capacity", &self.thread_capacity)
-            .field("service_time", &self.service_time)
+            .field("has_service_time_distribution", &self.service_time_distribution.is_some())
             .field("layer", &self.layer)
             .finish()
     }
@@ -935,7 +610,15 @@ where
     }
 }
 
-/// Tower Service implementation backed by DES
+// ============================================================================
+// DES Service Implementation
+// ============================================================================
+
+/// Tower Service implementation backed by DES.
+///
+/// This service schedules requests to a simulated server and returns futures
+/// that complete when the server finishes processing. The timing is controlled
+/// by the DES scheduler, ensuring deterministic and reproducible behavior.
 #[derive(Clone)]
 pub struct DesService {
     scheduler_handle: SchedulerHandle,

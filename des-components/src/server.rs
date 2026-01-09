@@ -6,6 +6,7 @@
 
 use crate::queue::{Queue, QueueItem};
 use des_core::{Component, Key, Scheduler, SimTime, RequestAttempt, RequestAttemptId, RequestId, Response};
+use des_core::dists::{ServiceTimeDistribution, RequestContext};
 use des_metrics::SimulationMetrics;
 use std::time::Duration;
 use uuid::Uuid;
@@ -51,7 +52,7 @@ pub use crate::simple_client::ClientEvent;
 /// This server combines:
 /// - Simulated thread capacity (no actual threads)
 /// - Integrated queue for request buffering
-/// - Configurable service time
+/// - Configurable service time distribution (can be request-dependent)
 /// - Comprehensive metrics
 /// - Easy middleware wrapping support
 ///
@@ -65,8 +66,8 @@ pub struct Server {
     pub thread_capacity: usize,
     /// Current number of active "threads" (simulated)
     pub active_threads: usize,
-    /// Service time per request
-    pub service_time: Duration,
+    /// Service time distribution for calculating processing times
+    pub service_time_distribution: Box<dyn ServiceTimeDistribution>,
     /// Optional queue for buffering requests when at capacity
     pub queue: Option<Box<dyn Queue>>,
     /// Total requests processed successfully
@@ -80,24 +81,51 @@ pub struct Server {
 }
 
 impl Server {
-    /// Create a new server
+    /// Create a new server with a service time distribution
     ///
     /// # Arguments
     /// * `name` - Server name for identification
     /// * `thread_capacity` - Maximum number of simulated concurrent threads
-    /// * `service_time` - Time to process each request
-    pub fn new(name: String, thread_capacity: usize, service_time: Duration) -> Self {
+    /// * `service_time_distribution` - Distribution for calculating service times
+    pub fn new(
+        name: String, 
+        thread_capacity: usize, 
+        service_time_distribution: Box<dyn ServiceTimeDistribution>
+    ) -> Self {
         Self {
             name,
             thread_capacity,
             active_threads: 0,
-            service_time,
+            service_time_distribution,
             queue: None,
             requests_processed: 0,
             requests_rejected: 0,
             requests_queued: 0,
             metrics: SimulationMetrics::new(),
         }
+    }
+
+    /// Create a new server with constant service time (backward compatibility)
+    ///
+    /// # Arguments
+    /// * `name` - Server name for identification
+    /// * `thread_capacity` - Maximum number of simulated concurrent threads
+    /// * `service_time` - Fixed time to process each request
+    pub fn with_constant_service_time(name: String, thread_capacity: usize, service_time: Duration) -> Self {
+        use des_core::dists::ConstantServiceTime;
+        Self::new(name, thread_capacity, Box::new(ConstantServiceTime::new(service_time)))
+    }
+
+    /// Create a new server with exponential service time distribution
+    ///
+    /// # Arguments
+    /// * `name` - Server name for identification
+    /// * `thread_capacity` - Maximum number of simulated concurrent threads
+    /// * `mean_service_time` - Mean service time for the exponential distribution
+    pub fn with_exponential_service_time(name: String, thread_capacity: usize, mean_service_time: Duration) -> Self {
+        use des_core::dists::ExponentialDistribution;
+        let rate = 1.0 / mean_service_time.as_secs_f64();
+        Self::new(name, thread_capacity, Box::new(ExponentialDistribution::new(rate)))
     }
 
     /// Add a queue to the server for request buffering
@@ -196,6 +224,10 @@ impl Server {
         // Allocate a simulated thread
         self.active_threads += 1;
 
+        // Calculate service time based on request context
+        let request_context = self.build_request_context(&attempt);
+        let service_time = self.service_time_distribution.sample_service_time(&request_context);
+
         // Record metrics
         self.metrics.increment_counter("requests_accepted", &[("component", &self.name)]);
         self.metrics.record_gauge("active_threads", self.active_threads as f64, &[("component", &self.name)]);
@@ -203,7 +235,7 @@ impl Server {
 
         // Schedule completion
         scheduler.schedule(
-            SimTime::from_duration(self.service_time),
+            SimTime::from_duration(service_time),
             self_id,
             ServerEvent::RequestCompleted { 
                 attempt_id: attempt.id,
@@ -241,7 +273,6 @@ impl Server {
         self.metrics.record_gauge("total_processed", self.requests_processed as f64, &[("component", &self.name)]);
         self.metrics.record_gauge("active_threads", self.active_threads as f64, &[("component", &self.name)]);
         self.metrics.record_gauge("utilization", self.utilization() * 100.0, &[("component", &self.name)]);
-        self.metrics.record_duration("service_time", self.service_time, &[("component", &self.name)]);
 
         // Create and send success response to client - echo the request payload
         let response = Response::success(
@@ -260,7 +291,7 @@ impl Server {
         // Check if we can process queued requests
         if self.has_capacity() && self.queue_depth() > 0 {
             scheduler.schedule(
-                SimTime::from_duration(Duration::from_millis(1)),
+                SimTime::from_duration(Duration::from_millis(0)), // immediately send response
                 self_id,
                 ServerEvent::ProcessQueuedRequests,
             );
@@ -343,8 +374,13 @@ impl Server {
                         attempt.id
                     );
                     self.active_threads += 1;
+                    
+                    // Calculate service time for this request
+                    let request_context = self.build_request_context(&attempt);
+                    let service_time = self.service_time_distribution.sample_service_time(&request_context);
+                    
                     scheduler.schedule(
-                        SimTime::from_duration(self.service_time),
+                        SimTime::from_duration(service_time),
                         self_id,
                         ServerEvent::RequestCompleted { 
                             attempt_id: attempt.id,
@@ -362,6 +398,60 @@ impl Server {
                 // Queue is empty or no queue
                 break;
             }
+        }
+    }
+
+    /// Build request context from a request attempt
+    fn build_request_context(&self, request: &RequestAttempt) -> RequestContext {
+        // Parse the serialized HTTP request payload
+        self.parse_request_payload(&request.payload)
+    }
+
+    /// Parse HTTP request payload into RequestContext
+    fn parse_request_payload(&self, payload: &[u8]) -> RequestContext {
+        // Parse the HTTP request format created by serialize_http_request
+        let payload_str = String::from_utf8_lossy(payload);
+        let lines: Vec<&str> = payload_str.split("\r\n").collect();
+        
+        if lines.is_empty() {
+            return RequestContext::default();
+        }
+        
+        // Parse request line: "METHOD URI HTTP/1.1"
+        let request_line_parts: Vec<&str> = lines[0].split_whitespace().collect();
+        let method = request_line_parts.first().unwrap_or(&"GET").to_string();
+        let uri = request_line_parts.get(1).unwrap_or(&"/").to_string();
+        
+        // Parse headers
+        let mut headers = std::collections::HashMap::new();
+        let mut body_start = lines.len();
+        
+        for (i, line) in lines.iter().enumerate().skip(1) {
+            if line.is_empty() {
+                body_start = i + 1;
+                break;
+            }
+            if let Some(colon_pos) = line.find(':') {
+                let key = line[..colon_pos].trim().to_string();
+                let value = line[colon_pos + 1..].trim().to_string();
+                headers.insert(key, value);
+            }
+        }
+        
+        // Extract body
+        let body = if body_start < lines.len() {
+            lines[body_start..].join("\r\n").into_bytes()
+        } else {
+            Vec::new()
+        };
+        
+        RequestContext {
+            method,
+            uri,
+            headers,
+            body_size: body.len(),
+            payload: body,
+            client_info: None,
         }
     }
 }
@@ -453,7 +543,7 @@ mod tests {
         let mut sim = Simulation::default();
 
         // Create server with 2 thread capacity and 50ms service time
-        let server = Server::new("test-server".to_string(), 2, Duration::from_millis(50));
+        let server = Server::with_constant_service_time("test-server".to_string(), 2, Duration::from_millis(50));
         let server_id = sim.add_component(server);
 
         // Create test client
@@ -493,7 +583,7 @@ mod tests {
         let mut sim = Simulation::default();
 
         // Create server with 1 thread capacity and 100ms service time
-        let server = Server::new("test-server".to_string(), 1, Duration::from_millis(100));
+        let server = Server::with_constant_service_time("test-server".to_string(), 1, Duration::from_millis(100));
         let server_id = sim.add_component(server);
 
         // Create test client
@@ -545,7 +635,7 @@ mod tests {
         let mut sim = Simulation::default();
 
         // Create server with queue
-        let server = Server::new("test-server".to_string(), 1, Duration::from_millis(50))
+        let server = Server::with_constant_service_time("test-server".to_string(), 1, Duration::from_millis(50))
             .with_queue(Box::new(FifoQueue::bounded(5)));
         let server_id = sim.add_component(server);
 
@@ -585,7 +675,7 @@ mod tests {
     fn test_server_metrics() {
         let mut sim = Simulation::default();
 
-        let server = Server::new("metrics-server".to_string(), 4, Duration::from_millis(30));
+        let server = Server::with_constant_service_time("metrics-server".to_string(), 4, Duration::from_millis(30));
         let server_id = sim.add_component(server);
 
         let client = TestClient::new("metrics-client".to_string());

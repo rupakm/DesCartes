@@ -88,7 +88,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Demonstrate method chaining compatibility
     println!("\n7. Method Chaining (Tower ServiceBuilder style):");
     let _chained_service = DesServiceBuilder::new("chained-server".to_string())
-        .check_clone()  // Verify builder is cloneable
         .thread_capacity(4)
         .service_time(Duration::from_millis(120))
         .concurrency_limit(2)

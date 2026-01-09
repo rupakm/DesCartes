@@ -492,7 +492,7 @@ impl ExponentialServiceServer {
         let rate = mu; // Rate parameter for exponential distribution (requests per second)
 
         Self {
-            inner_server: Server::new(name, capacity, mean_service_time),
+            inner_server: Server::with_exponential_service_time(name, capacity, mean_service_time),
             service_time_dist: Exp::new(rate).unwrap(),
             rng: rand::thread_rng(),
             mu,
@@ -550,19 +550,11 @@ impl Component for ExponentialServiceServer {
                     ts_metrics.record_utilization(scheduler.time(), self.utilization());
                 }
 
-                // Override service time with exponential sample
-                let original_service_time = self.inner_server.service_time;
-                self.inner_server.service_time = self.sample_service_time();
-
-                // Process with the inner server
+                // Process with the inner server (now uses built-in exponential distribution)
                 self.inner_server.process_event(self_id, event, scheduler);
 
-                // Restore original service time for consistency
-                self.inner_server.service_time = original_service_time;
-
-                println!("[{}] [{}] Processing request {} with service time {:.3}s",
-                         format_sim_time(scheduler.time()), self.inner_server.name, attempt.id.0, 
-                         self.inner_server.service_time.as_secs_f64());
+                println!("[{}] [{}] Processing request {} with exponential service time distribution",
+                         format_sim_time(scheduler.time()), self.inner_server.name, attempt.id.0);
             }
             _ => {
                 // Delegate other events to inner server

@@ -14,7 +14,7 @@ fn test_client_server_integration() {
     let mut sim = Simulation::default();
 
     // Create a server with capacity 2 and 50ms service time
-    let server = Server::new("web-server".to_string(), 2, Duration::from_millis(50));
+    let server = Server::with_constant_service_time("web-server".to_string(), 2, Duration::from_millis(50));
     let server_id = sim.add_component(server);
 
     // Create a client that sends 5 requests every 100ms with exponential backoff
@@ -69,7 +69,7 @@ fn test_server_overload_scenario() {
     let mut sim = Simulation::default();
 
     // Create a server with capacity 1 and slow service time (200ms)
-    let server = Server::new("slow-server".to_string(), 1, Duration::from_millis(200));
+    let server = Server::with_constant_service_time("slow-server".to_string(), 1, Duration::from_millis(200));
     let server_id = sim.add_component(server);
 
     // Create a fast client that sends 3 requests every 50ms with exponential backoff

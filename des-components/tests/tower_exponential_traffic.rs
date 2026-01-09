@@ -201,7 +201,7 @@ fn test_exponential_traffic_single_server_with_queue() {
     let mut simulation = Simulation::default();
     
     // Create server with queue
-    let server = Server::new(
+    let server = Server::with_constant_service_time(
         "test-server".to_string(),
         2, // capacity
         Duration::from_millis(100), // service time
@@ -263,19 +263,19 @@ fn test_exponential_traffic_load_balancer_three_servers() {
     let mut simulation = Simulation::default();
     
     // Create three backend servers
-    let server1 = Server::new(
+    let server1 = Server::with_constant_service_time(
         "backend-1".to_string(),
         1, // capacity
         Duration::from_millis(80), // service time
     ).with_queue(Box::new(FifoQueue::bounded(5)));
     
-    let server2 = Server::new(
+    let server2 = Server::with_constant_service_time(
         "backend-2".to_string(),
         1, // capacity
         Duration::from_millis(90), // slightly different service time
     ).with_queue(Box::new(FifoQueue::bounded(5)));
     
-    let server3 = Server::new(
+    let server3 = Server::with_constant_service_time(
         "backend-3".to_string(),
         1, // capacity
         Duration::from_millis(85), // service time

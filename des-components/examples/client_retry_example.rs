@@ -40,7 +40,7 @@ fn exponential_backoff_example() {
     let mut sim = Simulation::default();
     
     // Create a server first
-    let server = Server::new("exponential-server".to_string(), 1, Duration::from_millis(100));
+    let server = Server::with_constant_service_time("exponential-server".to_string(), 1, Duration::from_millis(100));
     let server_id = sim.add_component(server);
     
     // Create client with exponential backoff policy
@@ -113,7 +113,7 @@ fn token_bucket_example() {
     let mut sim = Simulation::default();
     
     // Create a server first
-    let server = Server::new("token-bucket-server".to_string(), 1, Duration::from_millis(100));
+    let server = Server::with_constant_service_time("token-bucket-server".to_string(), 1, Duration::from_millis(100));
     let server_id = sim.add_component(server);
     
     // Create client with token bucket policy
@@ -187,7 +187,7 @@ fn success_based_example() {
     let mut sim = Simulation::default();
     
     // Create a server first
-    let server = Server::new("success-based-server".to_string(), 1, Duration::from_millis(100));
+    let server = Server::with_constant_service_time("success-based-server".to_string(), 1, Duration::from_millis(100));
     let server_id = sim.add_component(server);
     
     // Create client with success-based policy
@@ -263,13 +263,13 @@ fn policy_comparison_example() {
     let mut sim = Simulation::default();
     
     // Create servers for each client
-    let exp_server = Server::new("exp-server".to_string(), 1, Duration::from_millis(100));
+    let exp_server = Server::with_constant_service_time("exp-server".to_string(), 1, Duration::from_millis(100));
     let exp_server_id = sim.add_component(exp_server);
     
-    let token_server = Server::new("token-server".to_string(), 1, Duration::from_millis(100));
+    let token_server = Server::with_constant_service_time("token-server".to_string(), 1, Duration::from_millis(100));
     let token_server_id = sim.add_component(token_server);
     
-    let success_server = Server::new("success-server".to_string(), 1, Duration::from_millis(100));
+    let success_server = Server::with_constant_service_time("success-server".to_string(), 1, Duration::from_millis(100));
     let success_server_id = sim.add_component(success_server);
     
     // Create three clients with different policies

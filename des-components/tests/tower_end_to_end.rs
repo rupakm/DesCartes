@@ -7,7 +7,7 @@
 use des_components::tower::{
     DesServiceBuilder, FuturePollerHandle, FuturePollerEvent, SimBody,
 };
-use des_core::{Component, Execute, Executor, Key, Scheduler, SimTime, Simulation};
+use des_core::{Component, Execute, Executor, Key, Scheduler, SimTime, Simulation, defer_wake};
 use http::{Method, Request};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -738,7 +738,7 @@ fn test_retry_on_timeout() {
 
     // The test should show timeout and retry behavior
     // With 200ms service time and 100ms timeout, requests should timeout and retry
-    assert!(handle.completed_count() >= 0, "Should handle timeout/retry scenarios");
+    // Note: completed_count() is u64, so we just verify the test ran without panicking
     
     println!();
     println!("✅ Retry on timeout test completed successfully!");
@@ -749,4 +749,469 @@ fn test_retry_on_timeout() {
     println!("   - Max retry limit enforcement");
     println!("   - Proper handling of late responses");
     println!("   - Realistic timeout scenarios in DES");
+}
+
+
+// ============================================================================
+// Two-Tier Service Test: App -> DB with Async Calls
+// ============================================================================
+
+/// Helper to format simulation time for logging
+fn format_time(time: SimTime) -> String {
+    let ms = time.as_duration().as_millis();
+    if ms >= 1000 {
+        format!("{}.{:03}s", ms / 1000, ms % 1000)
+    } else {
+        format!("{}ms", ms)
+    }
+}
+
+/// Events for the App server that calls DB
+#[derive(Debug)]
+enum AppServerEvent {
+    /// Client request received - start initial processing
+    RequestReceived { 
+        request_id: u32, 
+        client_key: Key<TwoTierClientEvent>,
+        arrival_time: SimTime,
+    },
+    /// Initial processing complete - now call DB
+    CallDbService {
+        request_id: u32,
+        client_key: Key<TwoTierClientEvent>,
+        arrival_time: SimTime,
+    },
+    /// DB response received - start post-processing
+    DbResponseReceived { 
+        request_id: u32, 
+        client_key: Key<TwoTierClientEvent>,
+        arrival_time: SimTime,
+    },
+    /// Post-processing complete - send response to client
+    SendResponseToClient {
+        request_id: u32,
+        client_key: Key<TwoTierClientEvent>,
+        arrival_time: SimTime,
+    },
+}
+
+/// App server that forwards requests to DB and waits for response
+struct AppServer<S> {
+    name: String,
+    db_service: S,
+    future_poller: FuturePollerHandle,
+    /// Initial processing time before calling DB
+    initial_processing_time: Duration,
+    /// Mean post-processing time after DB response (exponential distribution)
+    post_processing_mean: Duration,
+    /// RNG for exponential distribution
+    rng: rand::rngs::StdRng,
+}
+
+impl<S> AppServer<S> {
+    fn new(
+        name: String,
+        db_service: S, 
+        future_poller: FuturePollerHandle,
+        initial_processing_time: Duration,
+        post_processing_mean: Duration,
+    ) -> Self {
+        use rand::SeedableRng;
+        Self {
+            name,
+            db_service,
+            future_poller,
+            initial_processing_time,
+            post_processing_mean,
+            rng: rand::rngs::StdRng::seed_from_u64(42), // Fixed seed for reproducibility
+        }
+    }
+
+    /// Sample from exponential distribution
+    fn sample_exponential(&mut self) -> Duration {
+        use rand::Rng;
+        let u: f64 = self.rng.gen();
+        let lambda = 1.0 / self.post_processing_mean.as_secs_f64();
+        let sample = -u.ln() / lambda;
+        Duration::from_secs_f64(sample)
+    }
+}
+
+impl<S> Component for AppServer<S>
+where
+    S: Service<Request<SimBody>, Response = http::Response<SimBody>, Error = des_components::tower::ServiceError> + 'static,
+    S::Future: 'static,
+{
+    type Event = AppServerEvent;
+
+    fn process_event(
+        &mut self,
+        self_id: Key<Self::Event>,
+        event: &Self::Event,
+        scheduler: &mut Scheduler,
+    ) {
+        match event {
+            AppServerEvent::RequestReceived { request_id, client_key, arrival_time } => {
+                println!("[{}] [{}] 📥 Request #{} received from client", 
+                    format_time(scheduler.time()), self.name, request_id);
+                println!("[{}] [{}]    ⏳ Starting initial processing ({}ms)...", 
+                    format_time(scheduler.time()), self.name, self.initial_processing_time.as_millis());
+                
+                // Schedule DB call after initial processing time
+                scheduler.schedule(
+                    SimTime::from_duration(self.initial_processing_time),
+                    self_id,
+                    AppServerEvent::CallDbService {
+                        request_id: *request_id,
+                        client_key: *client_key,
+                        arrival_time: *arrival_time,
+                    },
+                );
+            }
+            
+            AppServerEvent::CallDbService { request_id, client_key, arrival_time } => {
+                println!("[{}] [{}]    ✅ Initial processing complete for request #{}", 
+                    format_time(scheduler.time()), self.name, request_id);
+                println!("[{}] [{}]    📤 Calling DB service...", 
+                    format_time(scheduler.time()), self.name);
+                
+                // Create request to DB
+                let db_request = Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/db/query/{}", request_id))
+                    .body(SimBody::new(format!("DB query for request {}", request_id).into_bytes()))
+                    .unwrap();
+
+                // Check if DB service is ready
+                let waker = create_noop_waker();
+                let mut cx = Context::from_waker(&waker);
+                
+                match self.db_service.poll_ready(&mut cx) {
+                    Poll::Ready(Ok(())) => {
+                        // Call DB service
+                        let future = self.db_service.call(db_request);
+                        
+                        // Spawn future with callback that schedules continuation
+                        let request_id_copy = *request_id;
+                        let client_key_copy = *client_key;
+                        let arrival_time_copy = *arrival_time;
+                        
+                        self.future_poller.spawn(future, move |result| {
+                            match result {
+                                Ok(_response) => {
+                                    // DB call succeeded - schedule continuation via defer_wake
+                                    defer_wake(self_id, AppServerEvent::DbResponseReceived {
+                                        request_id: request_id_copy,
+                                        client_key: client_key_copy,
+                                        arrival_time: arrival_time_copy,
+                                    });
+                                }
+                                Err(e) => {
+                                    println!("   ❌ DB call failed for request {}: {:?}", request_id_copy, e);
+                                }
+                            }
+                        });
+                    }
+                    Poll::Ready(Err(e)) => {
+                        println!("[{}] [{}]    ❌ DB service error: {:?}", 
+                            format_time(scheduler.time()), self.name, e);
+                    }
+                    Poll::Pending => {
+                        println!("[{}] [{}]    ⏳ DB service not ready (capacity limit)", 
+                            format_time(scheduler.time()), self.name);
+                    }
+                }
+            }
+            
+            AppServerEvent::DbResponseReceived { request_id, client_key, arrival_time } => {
+                let post_processing_time = self.sample_exponential();
+                println!("[{}] [{}]    📥 DB response received for request #{}", 
+                    format_time(scheduler.time()), self.name, request_id);
+                println!("[{}] [{}]    ⏳ Starting post-processing ({:.1}ms)...", 
+                    format_time(scheduler.time()), self.name, post_processing_time.as_secs_f64() * 1000.0);
+                
+                // Schedule response to client after post-processing
+                scheduler.schedule(
+                    SimTime::from_duration(post_processing_time),
+                    self_id,
+                    AppServerEvent::SendResponseToClient {
+                        request_id: *request_id,
+                        client_key: *client_key,
+                        arrival_time: *arrival_time,
+                    },
+                );
+            }
+            
+            AppServerEvent::SendResponseToClient { request_id, client_key, arrival_time } => {
+                println!("[{}] [{}]    ✅ Post-processing complete for request #{}", 
+                    format_time(scheduler.time()), self.name, request_id);
+                println!("[{}] [{}] 📤 Sending response to client for request #{}", 
+                    format_time(scheduler.time()), self.name, request_id);
+                
+                // Send response to client
+                scheduler.schedule(
+                    SimTime::zero(), // Immediate
+                    *client_key,
+                    TwoTierClientEvent::ResponseReceived {
+                        request_id: *request_id,
+                        arrival_time: *arrival_time,
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// Events for the two-tier test client
+#[derive(Debug, Clone)]
+enum TwoTierClientEvent {
+    /// Send a request to App server
+    SendRequest { request_id: u32 },
+    /// Response received from App server
+    ResponseReceived { request_id: u32, arrival_time: SimTime },
+}
+
+/// Client that sends periodic requests and tracks latency
+struct TwoTierClient {
+    name: String,
+    app_server_key: Key<AppServerEvent>,
+    interval: Duration,
+    max_requests: u32,
+    request_count: u32,
+    /// Track request arrival times for latency calculation
+    request_times: std::collections::HashMap<u32, SimTime>,
+    /// Completed request latencies
+    latencies: Vec<Duration>,
+}
+
+impl TwoTierClient {
+    fn new(name: String, app_server_key: Key<AppServerEvent>, interval: Duration, max_requests: u32) -> Self {
+        Self {
+            name,
+            app_server_key,
+            interval,
+            max_requests,
+            request_count: 0,
+            request_times: std::collections::HashMap::new(),
+            latencies: Vec::new(),
+        }
+    }
+
+    fn average_latency(&self) -> Option<Duration> {
+        if self.latencies.is_empty() {
+            None
+        } else {
+            let total: Duration = self.latencies.iter().sum();
+            Some(total / self.latencies.len() as u32)
+        }
+    }
+}
+
+impl Component for TwoTierClient {
+    type Event = TwoTierClientEvent;
+
+    fn process_event(
+        &mut self,
+        self_id: Key<Self::Event>,
+        event: &Self::Event,
+        scheduler: &mut Scheduler,
+    ) {
+        match event {
+            TwoTierClientEvent::SendRequest { request_id } => {
+                let current_time = scheduler.time();
+                
+                println!("[{}] [{}] 🚀 Sending request #{} to App server", 
+                    format_time(current_time), self.name, request_id);
+                
+                // Record request time
+                self.request_times.insert(*request_id, current_time);
+                
+                // Send request to App server immediately
+                scheduler.schedule(
+                    SimTime::zero(),
+                    self.app_server_key,
+                    AppServerEvent::RequestReceived {
+                        request_id: *request_id,
+                        client_key: self_id,
+                        arrival_time: current_time,
+                    },
+                );
+
+                // Schedule next request if not at limit
+                self.request_count += 1;
+                if self.request_count < self.max_requests {
+                    scheduler.schedule(
+                        SimTime::from_duration(self.interval),
+                        self_id,
+                        TwoTierClientEvent::SendRequest {
+                            request_id: self.request_count + 1,
+                        },
+                    );
+                }
+            }
+            TwoTierClientEvent::ResponseReceived { request_id, arrival_time } => {
+                let current_time = scheduler.time();
+                let latency = current_time - *arrival_time; // SimTime - SimTime = Duration
+                
+                println!("[{}] [{}] ✅ Response received for request #{} (latency: {:.1}ms)", 
+                    format_time(current_time), self.name, request_id, latency.as_secs_f64() * 1000.0);
+                
+                self.latencies.push(latency);
+            }
+        }
+    }
+}
+
+#[test]
+fn test_two_tier_app_db_service() {
+    println!();
+    println!("🚀 Two-Tier Service Test: App -> DB with Async Calls");
+    println!("====================================================");
+    println!();
+
+    let simulation = Simulation::default();
+    let simulation_arc = Arc::new(Mutex::new(simulation));
+
+    // Create DB service with exponential service time (mean 100ms)
+    let db_service = DesServiceBuilder::new("db-server".to_string())
+        .thread_capacity(10)
+        .exponential_service_time(Duration::from_millis(100))
+        .build(simulation_arc.clone())
+        .expect("Failed to build DB service");
+
+    // Test parameters
+    let request_interval = Duration::from_millis(500);
+    let simulation_duration = Duration::from_secs(10);
+    let max_requests = (simulation_duration.as_millis() / request_interval.as_millis()) as u32;
+    let initial_processing_time = Duration::from_millis(10);
+    let post_processing_mean = Duration::from_millis(20);
+
+    println!("📋 Test Setup:");
+    println!("   - App Server:");
+    println!("       • Initial processing: {}ms (before DB call)", initial_processing_time.as_millis());
+    println!("       • Post-processing: exponential (mean {}ms)", post_processing_mean.as_millis());
+    println!("   - DB Server:");
+    println!("       • Service time: exponential (mean 100ms)");
+    println!("       • Thread capacity: 10");
+    println!("   - Client:");
+    println!("       • Request interval: {}ms", request_interval.as_millis());
+    println!("       • Total requests: {}", max_requests);
+    println!("   - Simulation duration: {}s", simulation_duration.as_secs());
+    println!();
+
+    // Create FuturePoller for async DB calls
+    let future_poller_handle = FuturePollerHandle::new();
+    let future_poller = future_poller_handle.create_component();
+    let future_poller_key = {
+        let mut sim = simulation_arc.lock().unwrap();
+        sim.add_component(future_poller)
+    };
+    future_poller_handle.set_key(future_poller_key);
+
+    // Schedule FuturePoller initialization
+    {
+        let mut sim = simulation_arc.lock().unwrap();
+        sim.schedule(SimTime::zero(), future_poller_key, FuturePollerEvent::Initialize);
+    }
+
+    // Create App server component
+    let app_server = AppServer::new(
+        "app-server".to_string(),
+        db_service, 
+        future_poller_handle.clone(),
+        initial_processing_time,
+        post_processing_mean,
+    );
+    let app_server_key = {
+        let mut sim = simulation_arc.lock().unwrap();
+        sim.add_component(app_server)
+    };
+
+    // Create client
+    let client = TwoTierClient::new(
+        "client".to_string(),
+        app_server_key, 
+        request_interval, 
+        max_requests,
+    );
+    let client_key = {
+        let mut sim = simulation_arc.lock().unwrap();
+        sim.add_component(client)
+    };
+
+    // Schedule first request
+    {
+        let mut sim = simulation_arc.lock().unwrap();
+        sim.schedule(
+            SimTime::zero(),
+            client_key,
+            TwoTierClientEvent::SendRequest { request_id: 1 },
+        );
+    }
+
+    println!("🏃 Running simulation...");
+    println!("─────────────────────────────────────────────────────────────────");
+
+    // Run simulation
+    {
+        let mut sim = simulation_arc.lock().unwrap();
+        Executor::timed(SimTime::from_duration(simulation_duration)).execute(&mut sim);
+    }
+
+    println!("─────────────────────────────────────────────────────────────────");
+    println!();
+
+    // Extract results
+    let (completed_count, avg_latency, latencies) = {
+        let mut sim = simulation_arc.lock().unwrap();
+        let client: TwoTierClient = sim.remove_component(client_key).unwrap();
+        (client.latencies.len(), client.average_latency(), client.latencies.clone())
+    };
+
+    println!("📊 Final Results:");
+    println!("   Completed requests: {} / {}", completed_count, max_requests);
+    println!("   Pending futures: {}", future_poller_handle.pending_count());
+    println!("   Completed futures: {}", future_poller_handle.completed_count());
+    
+    if let Some(avg) = avg_latency {
+        let avg_ms = avg.as_secs_f64() * 1000.0;
+        println!("   Average latency: {:.2}ms", avg_ms);
+        
+        // Calculate min/max
+        if !latencies.is_empty() {
+            let min_ms = latencies.iter().min().unwrap().as_secs_f64() * 1000.0;
+            let max_ms = latencies.iter().max().unwrap().as_secs_f64() * 1000.0;
+            println!("   Min latency: {:.2}ms", min_ms);
+            println!("   Max latency: {:.2}ms", max_ms);
+        }
+    } else {
+        println!("   Average latency: N/A (no completed requests)");
+    }
+
+    {
+        let sim = simulation_arc.lock().unwrap();
+        println!("   Final simulation time: {}ms", sim.scheduler.time().as_duration().as_millis());
+    }
+
+    // Assertions
+    assert!(completed_count > 0, "Should have completed at least some requests");
+    
+    // Expected latency: 10ms (initial) + ~100ms (DB, exponential mean) + ~20ms (post-DB) = ~130ms
+    if let Some(avg) = avg_latency {
+        let avg_ms = avg.as_secs_f64() * 1000.0;
+        println!();
+        println!("   Expected latency breakdown:");
+        println!("     - Initial App processing: {}ms", initial_processing_time.as_millis());
+        println!("     - DB processing (mean): 100ms");
+        println!("     - Post-DB processing (mean): {}ms", post_processing_mean.as_millis());
+        println!("     - Expected total (mean): ~130ms");
+        println!("     - Actual average: {:.2}ms", avg_ms);
+        
+        // Allow for variance - should be roughly in the 80-300ms range
+        assert!(avg_ms > 50.0, "Average latency should be > 50ms");
+        assert!(avg_ms < 500.0, "Average latency should be < 500ms");
+    }
+
+    println!();
+    println!("✅ Two-tier service test completed successfully!");
 }

@@ -138,7 +138,7 @@ fn test_actual_client_server_communication() {
     let mut sim = Simulation::default();
 
     // Create server first
-    let server = Server::new("api-server".to_string(), 2, Duration::from_millis(30));
+    let server = Server::with_constant_service_time("api-server".to_string(), 2, Duration::from_millis(30));
     let server_id = sim.add_component(server);
 
     // Create client that knows about the server
@@ -191,7 +191,7 @@ fn test_server_overload_with_communication() {
     let mut sim = Simulation::default();
 
     // Create server with capacity 1 and slow service time
-    let server = Server::new("slow-server".to_string(), 1, Duration::from_millis(150));
+    let server = Server::with_constant_service_time("slow-server".to_string(), 1, Duration::from_millis(150));
     let server_id = sim.add_component(server);
 
     // Create fast client

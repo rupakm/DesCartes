@@ -353,7 +353,7 @@ mod tests {
         let mut sim = Simulation::default();
         
         // Create a server first
-        let server = Server::new("test-server".to_string(), 1, Duration::from_millis(100));
+        let server = Server::with_constant_service_time("test-server".to_string(), 1, Duration::from_millis(100));
         let server_id = sim.add_component(server);
         
         // Create a client with exponential backoff retry policy
@@ -393,7 +393,7 @@ mod tests {
         let mut sim = Simulation::default();
         
         // Create a server first
-        let server = Server::new("backoff-server".to_string(), 1, Duration::from_millis(50));
+        let server = Server::with_constant_service_time("backoff-server".to_string(), 1, Duration::from_millis(50));
         let server_id = sim.add_component(server);
         
         // Create a client using the convenience constructor
@@ -440,7 +440,7 @@ mod tests {
         
         // Create a simulation to get a proper server key
         let mut sim = Simulation::default();
-        let server = Server::new("test-server".to_string(), 1, Duration::from_millis(100));
+        let server = Server::with_constant_service_time("test-server".to_string(), 1, Duration::from_millis(100));
         let server_key = sim.add_component(server);
         
         // Create clients with different policies
