@@ -1,46 +1,30 @@
-//! DES-aware concurrency limiter layer
+//! DES-aware concurrency limiter layer.
 //!
-//! This module provides a DES-aware implementation of tower::limit::ConcurrencyLimit
-//! that limits the number of concurrent requests being processed by a service.
+//! Limits the number of concurrent requests being processed by a service.
 //!
-//! ## Key Features
-//!
-//! - **Per-Service Limiting**: Each service instance has its own concurrency limit
-//! - **Atomic Tracking**: Uses atomic counters for thread-safe concurrency tracking
-//! - **Backpressure**: Properly implements Tower's backpressure via `poll_ready`
-//! - **Resource Cleanup**: Ensures concurrency slots are released even if futures are dropped
-//!
-//! ## Differences from `tower::limit::ConcurrencyLimit`
-//!
-//! - Designed to work within DES simulation context
-//! - Uses `PinnedDrop` for proper cleanup in simulation environment
-//! - Integrates with DES waker system for efficient waiting
-//!
-//! ## Example
+//! # Usage
 //!
 //! ```rust,no_run
 //! use des_components::tower::limit::DesConcurrencyLimit;
 //! use des_components::tower::DesServiceBuilder;
 //! use des_core::Simulation;
-//! use std::sync::{Arc, Mutex};
 //!
 //! # fn example() {
-//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//! let mut simulation = Simulation::default();
 //! let base_service = DesServiceBuilder::new("concurrent".to_string())
-//!     .thread_capacity(100) // Server can handle 100 threads
-//!     .build(simulation.clone()).unwrap();
+//!     .thread_capacity(100)
+//!     .build(&mut simulation).unwrap();
 //!
-//! // But limit to only 5 concurrent requests at the service layer
+//! // Limit to only 5 concurrent requests at the service layer
 //! let limited_service = DesConcurrencyLimit::new(base_service, 5);
 //! # }
 //! ```
 //!
-//! ## Use Cases
+//! # Behavior
 //!
-//! - Limiting concurrent requests to prevent overload
-//! - Testing backpressure behavior in distributed systems
-//! - Simulating resource-constrained environments
-//! - Modeling connection pool limits
+//! - `poll_ready` returns `Pending` when at capacity
+//! - Slots are released when futures complete or are dropped
+//! - Uses atomic counters for thread-safe tracking
 
 use http::Request;
 use pin_project::pin_project;

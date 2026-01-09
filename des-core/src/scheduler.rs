@@ -1,9 +1,52 @@
+//! Event scheduling and time management for discrete event simulation.
+//!
+//! This module provides the core scheduling infrastructure:
+//!
+//! - [`Scheduler`]: The internal event queue and time management (owned by [`Simulation`]).
+//! - [`SchedulerHandle`]: A thread-safe handle for scheduling events from anywhere.
+//! - [`ClockRef`]: A lightweight, lock-free reference for reading simulation time.
+//!
+//! # Scheduling Events
+//!
+//! Use [`SchedulerHandle`] to schedule events from Tower layers or other components:
+//!
+//! ```rust,ignore
+//! let scheduler = simulation.scheduler_handle();
+//!
+//! // Schedule an event 100ms from now
+//! scheduler.schedule(SimTime::from_millis(100), component_key, MyEvent::Tick);
+//!
+//! // Schedule immediately
+//! scheduler.schedule_now(component_key, MyEvent::Poll);
+//!
+//! // Schedule a task
+//! let handle = scheduler.timeout(SimTime::from_secs(5), |_| {
+//!     println!("Timeout fired!");
+//! });
+//! ```
+//!
+//! # Reading Time
+//!
+//! For lock-free time reading, use [`ClockRef`]:
+//!
+//! ```rust,ignore
+//! let clock = simulation.clock();
+//! let current_time = clock.time();  // No lock required
+//! ```
+//!
+//! # Deferred Wakes
+//!
+//! The [`defer_wake`] function allows wakers to schedule events during event processing
+//! without deadlocking. This is used internally by async futures.
+//!
+//! [`Simulation`]: crate::Simulation
+
 use std::any::Any;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering as AtomicOrdering}};
 use uuid::Uuid;
 use tracing::{debug, trace};
 
@@ -11,13 +54,8 @@ use crate::{Key, SimTime};
 use crate::types::EventId;
 use crate::task::{Task, TaskId, TaskHandle, TaskExecution, TaskWrapper, ClosureTask, TimeoutTask};
 
-// ============================================================================
-// Thread-local scheduler access for wakers
-// ============================================================================
-
 thread_local! {
     /// Thread-local pointer to the current scheduler during event processing.
-    /// This allows wakers to defer event scheduling without needing mutex locks.
     static CURRENT_SCHEDULER: RefCell<Option<*mut Scheduler>> = const { RefCell::new(None) };
 }
 
@@ -26,17 +64,7 @@ thread_local! {
 /// This function is designed to be called from wakers during event processing.
 /// It uses thread-local storage to access the scheduler without locks.
 /// 
-/// # Safety
-/// 
-/// This function is safe to call during event processing (when `CURRENT_SCHEDULER` is set).
 /// If called outside of event processing, the event will be silently dropped.
-/// 
-/// # Example
-/// 
-/// ```rust,ignore
-/// // In a waker implementation:
-/// des_core::scheduler::defer_wake(component_key, MyEvent::Poll { id });
-/// ```
 pub fn defer_wake<E: fmt::Debug + 'static>(component: Key<E>, event: E) {
     CURRENT_SCHEDULER.with(|sched| {
         if let Some(ptr) = *sched.borrow() {
@@ -64,11 +92,7 @@ pub fn current_time() -> Option<SimTime> {
 }
 
 /// Execute a closure with access to the scheduler via thread-local storage.
-/// This is used internally by the simulation step to enable deferred wakes.
-/// 
-/// Note: The closure receives a mutable reference to the scheduler, and the
-/// thread-local pointer is set to point to the same scheduler. This allows
-/// wakers to defer events while the closure has mutable access.
+/// Used internally by the simulation step to enable deferred wakes.
 pub(crate) fn set_scheduler_context(scheduler: &mut Scheduler) {
     CURRENT_SCHEDULER.with(|sched| {
         *sched.borrow_mut() = Some(scheduler as *mut Scheduler);
@@ -85,7 +109,7 @@ pub(crate) fn clear_scheduler_context() {
 // Deferred Wake Storage
 // ============================================================================
 
-/// A type-erased deferred wake event
+/// A type-erased deferred wake event.
 struct DeferredWake {
     /// Closure that schedules the event when called with the scheduler
     schedule_fn: Box<dyn FnOnce(&mut Scheduler)>,
@@ -105,12 +129,10 @@ impl DeferredWake {
     }
 }
 
-/// Entry type stored in the scheduler, including the event value, component key, and the time when
-/// it is supposed to occur.
+/// Entry type stored in the scheduler's event queue.
 ///
-/// Besides being stored in the scheduler's internal priority queue,
-/// event entries are simply passed to [`crate::Components`] object, which unpacks them, and passes them
-/// to the correct component.
+/// Events are passed to [`Components`](crate::Components) for dispatch to the
+/// appropriate component or task.
 #[derive(Debug)]
 pub enum EventEntry {
     Component(ComponentEventEntry),
@@ -239,20 +261,32 @@ pub struct EventEntryTyped<'e, E: fmt::Debug> {
 }
 
 
-type Clock = Rc<Cell<SimTime>>;
+type Clock = Arc<AtomicU64>;
 
-/// This struct exposes only immutable access to the simulation clock.
-/// The clock itself is owned by the scheduler, while others can obtain `ClockRef`
-/// to read the current simulation time.
+/// Convert SimTime to/from atomic storage (nanoseconds as u64)
+fn simtime_to_nanos(time: SimTime) -> u64 {
+    time.as_duration().as_nanos() as u64
+}
+
+fn nanos_to_simtime(nanos: u64) -> SimTime {
+    SimTime::from_duration(std::time::Duration::from_nanos(nanos))
+}
+
+/// A lightweight, lock-free reference for reading simulation time.
+///
+/// Obtain a `ClockRef` from [`Simulation::clock()`](crate::Simulation::clock) or
+/// [`SchedulerHandle::clock()`]. Multiple `ClockRef` instances can read the time
+/// concurrently without synchronization.
 ///
 /// # Example
 ///
-/// ```
+/// ```rust
 /// # use des_core::Scheduler;
 /// let scheduler = Scheduler::default();
-/// let clock_ref = scheduler.clock();
-/// assert_eq!(clock_ref.time(), scheduler.time());
+/// let clock = scheduler.clock();
+/// assert_eq!(clock.time(), scheduler.time());
 /// ```
+#[derive(Clone)]
 pub struct ClockRef {
     clock: Clock,
 }
@@ -267,13 +301,115 @@ impl ClockRef {
     /// Return the current simulation time.
     #[must_use]
     pub fn time(&self) -> SimTime {
-        self.clock.get()
+        nanos_to_simtime(self.clock.load(AtomicOrdering::Relaxed))
     }
 }
 
-/// Scheduler is used to keep the current time and information about the upcoming events.
+// ============================================================================
+// SchedulerHandle - Thread-safe handle for scheduling events
+// ============================================================================
+
+/// A thread-safe, cloneable handle for scheduling events.
 ///
-/// See the [crate-level documentation](index.html) for more information.
+/// `SchedulerHandle` provides a way to schedule events without direct access to
+/// the [`Simulation`](crate::Simulation). This is the primary interface for Tower
+/// service layers and other components that need to schedule events.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let mut simulation = Simulation::default();
+/// let scheduler = simulation.scheduler_handle();
+///
+/// // Can be cloned and passed to Tower layers
+/// let scheduler_clone = scheduler.clone();
+///
+/// // Schedule events
+/// scheduler.schedule(SimTime::from_millis(100), component_key, MyEvent::Tick);
+/// scheduler.schedule_now(component_key, MyEvent::Poll);
+///
+/// // Schedule tasks
+/// scheduler.timeout(SimTime::from_secs(5), |_| println!("Timeout!"));
+/// ```
+#[derive(Clone)]
+pub struct SchedulerHandle {
+    scheduler: Arc<Mutex<Scheduler>>,
+}
+
+impl SchedulerHandle {
+    /// Create a new SchedulerHandle wrapping the given scheduler
+    pub(crate) fn new(scheduler: Arc<Mutex<Scheduler>>) -> Self {
+        Self { scheduler }
+    }
+
+    /// Schedule an event to be executed at `time` from now for `component`.
+    pub fn schedule<E: fmt::Debug + 'static>(
+        &self,
+        time: SimTime,
+        component: Key<E>,
+        event: E,
+    ) {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.schedule(time, component, event);
+    }
+
+    /// Schedule an event to be executed immediately for `component`.
+    pub fn schedule_now<E: fmt::Debug + 'static>(
+        &self,
+        component: Key<E>,
+        event: E,
+    ) {
+        self.schedule(SimTime::zero(), component, event);
+    }
+
+    /// Returns the current simulation time.
+    #[must_use]
+    pub fn time(&self) -> SimTime {
+        let scheduler = self.scheduler.lock().unwrap();
+        scheduler.time()
+    }
+
+    /// Returns a ClockRef for reading the simulation time without locking.
+    #[must_use]
+    pub fn clock(&self) -> ClockRef {
+        let scheduler = self.scheduler.lock().unwrap();
+        scheduler.clock()
+    }
+
+    /// Get a weak reference to the underlying scheduler.
+    /// This is useful for components that need to check if the simulation is still alive.
+    pub fn downgrade(&self) -> std::sync::Weak<Mutex<Scheduler>> {
+        Arc::downgrade(&self.scheduler)
+    }
+
+    /// Schedule a task to run at a specific time
+    pub fn schedule_task<T: Task>(
+        &self,
+        delay: SimTime,
+        task: T,
+    ) -> TaskHandle<T::Output> {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.schedule_task(delay, task)
+    }
+
+    /// Schedule a timeout callback
+    pub fn timeout<F>(
+        &self,
+        delay: SimTime,
+        callback: F,
+    ) -> TaskHandle<()>
+    where
+        F: FnOnce(&mut Scheduler) + 'static,
+    {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.timeout(delay, callback)
+    }
+}
+
+/// The internal event scheduler (owned by [`Simulation`](crate::Simulation)).
+///
+/// Most users should interact with the scheduler through [`SchedulerHandle`] or
+/// the methods on [`Simulation`](crate::Simulation) rather than directly.
 pub struct Scheduler {
     next_event_id: u64,
     events: BinaryHeap<EventEntry>,
@@ -290,7 +426,7 @@ impl Default for Scheduler {
         Self {
             next_event_id: 0,
             events: BinaryHeap::default(),
-            clock: Rc::new(Cell::new(SimTime::default())),
+            clock: Arc::new(AtomicU64::new(0)),
             pending_tasks: HashMap::new(),
             completed_task_results: HashMap::new(),
             deferred_wakes: Vec::new(),
@@ -342,14 +478,14 @@ impl Scheduler {
     /// Returns the current simulation time.
     #[must_use]
     pub fn time(&self) -> SimTime {
-        self.clock.get()
+        nanos_to_simtime(self.clock.load(AtomicOrdering::Relaxed))
     }
 
     /// Returns a structure with immutable access to the simulation time.
     #[must_use]
     pub fn clock(&self) -> ClockRef {
         ClockRef {
-            clock: Rc::clone(&self.clock),
+            clock: Arc::clone(&self.clock),
         }
     }
 
@@ -361,7 +497,7 @@ impl Scheduler {
     /// Removes and returns the next scheduled event or `None` if none are left.
     pub fn pop(&mut self) -> Option<EventEntry> {
         self.events.pop().inspect(|event| {
-            self.clock.replace(event.time());
+            self.clock.store(simtime_to_nanos(event.time()), AtomicOrdering::Relaxed);
         })
     }
 
@@ -497,7 +633,7 @@ mod test {
     #[test]
     fn test_clock_ref() {
         let time = SimTime::from_duration(Duration::from_secs(1));
-        let clock = Clock::new(Cell::new(time));
+        let clock: Clock = Arc::new(AtomicU64::new(simtime_to_nanos(time)));
         let clock_ref = ClockRef::from(clock);
         assert_eq!(clock_ref.time(), time);
     }

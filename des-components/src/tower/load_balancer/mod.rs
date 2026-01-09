@@ -1,44 +1,29 @@
-//! DES-aware load balancer layer
+//! DES-aware load balancer layer.
 //!
-//! This module provides load balancing capabilities that distribute requests across
-//! multiple backend services within the discrete event simulation. The load balancer
-//! supports multiple strategies and maintains deterministic behavior for reproducible
-//! simulation results.
+//! Distributes requests across multiple backend services with deterministic behavior.
 //!
-//! # Load Balancing Strategies
+//! # Strategies
 //!
-//! ## Round Robin (`DesLoadBalanceStrategy::RoundRobin`)
-//! Distributes requests evenly across all available services in a circular fashion.
-//! This strategy ensures fair distribution and is deterministic across simulation runs.
+//! - **Round Robin**: Distributes requests evenly in circular order
+//! - **Random**: Selects services randomly (seeded for determinism)
+//! - **Least Connections**: Routes to service with fewest active connections
 //!
-//! ## Random (`DesLoadBalanceStrategy::Random`)
-//! Selects services randomly using a seeded random number generator for deterministic
-//! behavior. This can help distribute load more evenly when services have different
-//! processing characteristics.
-//!
-//! ## Least Connections (`DesLoadBalanceStrategy::LeastConnections`)
-//! Routes requests to the service with the fewest active connections. Currently
-//! implemented as round-robin but can be extended to track actual connection counts.
-//!
-//! # Usage Examples
-//!
-//! ## Basic Load Balancer Setup
+//! # Usage
 //!
 //! ```rust,no_run
 //! use des_components::tower::{DesServiceBuilder, DesLoadBalancer, DesLoadBalanceStrategy};
 //! use des_core::Simulation;
-//! use std::sync::{Arc, Mutex};
 //! use std::time::Duration;
 //!
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//! let mut simulation = Simulation::default();
 //!
 //! // Create multiple backend services
 //! let services = (0..3).map(|i| {
 //!     DesServiceBuilder::new(format!("backend-{}", i))
 //!         .thread_capacity(5)
 //!         .service_time(Duration::from_millis(100))
-//!         .build(simulation.clone())
+//!         .build(&mut simulation)
 //! }).collect::<Result<Vec<_>, _>>()?;
 //!
 //! // Create round-robin load balancer
@@ -47,67 +32,14 @@
 //! # }
 //! ```
 //!
-//! ## Using Tower Layer Pattern
+//! # Deterministic Random
+//!
+//! For reproducible random load balancing:
 //!
 //! ```rust,no_run
-//! use des_components::tower::{DesServiceBuilder, DesLoadBalancerLayer};
-//! use tower::Layer;
-//!
-//! # fn layer_example() -> Result<(), Box<dyn std::error::Error>> {
-//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
-//! let base_service = DesServiceBuilder::new("backend".to_string())
-//!     .thread_capacity(10)
-//!     .service_time(std::time::Duration::from_millis(50))
-//!     .build(simulation.clone())?;
-//!
-//! // Apply load balancer layer
-//! let load_balanced_service = DesLoadBalancerLayer::round_robin()
-//!     .layer(base_service);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## Deterministic Random Load Balancing
-//!
-//! ```rust,no_run
-//! use des_components::tower::DesLoadBalancer;
-//!
-//! # fn random_example() {
+//! # use des_components::tower::DesLoadBalancer;
 //! # let services: Vec<des_components::tower::DesService> = vec![];
-//! // Create random load balancer with specific seed for reproducible results
 //! let load_balancer = DesLoadBalancer::random_with_seed(services, 12345);
-//! # }
-//! ```
-//!
-//! # Performance Characteristics
-//!
-//! - **Strategy Overhead**: Minimal computational cost for service selection
-//! - **Memory Usage**: O(n) where n is the number of backend services
-//! - **Determinism**: All strategies produce reproducible results across simulation runs
-//! - **Scalability**: Supports arbitrary number of backend services
-//!
-//! # Integration with Other Middleware
-//!
-//! Load balancers can be composed with other Tower middleware:
-//!
-//! ```rust,no_run
-//! use des_components::tower::*;
-//! use tower::ServiceBuilder;
-//!
-//! # fn composition_example() -> Result<(), Box<dyn std::error::Error>> {
-//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
-//! # let services = vec![
-//! #     DesServiceBuilder::new("backend-1".to_string()).build(simulation.clone())?,
-//! #     DesServiceBuilder::new("backend-2".to_string()).build(simulation.clone())?,
-//! # ];
-//! let load_balancer = DesLoadBalancer::round_robin(services);
-//!
-//! let service = ServiceBuilder::new()
-//!     .layer(DesRateLimitLayer::new(100.0, 50, std::sync::Arc::downgrade(&simulation)))
-//!     .layer(DesConcurrencyLimitLayer::new(10))
-//!     .service(load_balancer);
-//! # Ok(())
-//! # }
 //! ```
 
 use http::Request;

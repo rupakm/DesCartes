@@ -14,7 +14,7 @@
 //! ## Differences from `tower::limit::RateLimit`
 //!
 //! - Uses `SimTime` instead of `std::time::Instant`
-//! - Integrates with DES simulation weak references
+//! - Integrates with DES scheduler handle
 //! - Token refill is based on simulation time advancement
 //! - No background tasks or timers - purely event-driven
 //!
@@ -24,30 +24,30 @@
 //! use des_components::tower::limit::DesRateLimit;
 //! use des_components::tower::DesServiceBuilder;
 //! use des_core::Simulation;
-//! use std::sync::{Arc, Mutex};
 //! use std::time::Duration;
 //!
 //! # fn example() {
-//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//! let mut simulation = Simulation::default();
+//! let scheduler = simulation.scheduler_handle();
 //! let base_service = DesServiceBuilder::new("rate-limited".to_string())
-//!     .build(simulation.clone()).unwrap();
+//!     .build(&mut simulation).unwrap();
 //!
 //! // Allow 10 requests per second with a burst of 20
 //! let rate_limited_service = DesRateLimit::new(
 //!     base_service,
 //!     10.0, // 10 requests per second
 //!     20,   // burst capacity of 20 requests
-//!     Arc::downgrade(&simulation),
+//!     scheduler,
 //! );
 //! # }
 //! ```
 
-use des_core::{SimTime, Simulation};
+use des_core::{SimTime, SchedulerHandle};
 use http::Request;
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
@@ -60,16 +60,16 @@ use crate::tower::{ServiceError, SimBody};
 pub struct DesRateLimitLayer {
     rate: f64, // requests per second
     burst: usize, // burst capacity
-    simulation: Weak<Mutex<Simulation>>,
+    scheduler: SchedulerHandle,
 }
 
 impl DesRateLimitLayer {
     /// Create a new rate limit layer
-    pub fn new(rate: f64, burst: usize, simulation: Weak<Mutex<Simulation>>) -> Self {
+    pub fn new(rate: f64, burst: usize, scheduler: SchedulerHandle) -> Self {
         Self {
             rate,
             burst,
-            simulation,
+            scheduler,
         }
     }
 }
@@ -78,7 +78,7 @@ impl<S> Layer<S> for DesRateLimitLayer {
     type Service = DesRateLimit<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        DesRateLimit::new(inner, self.rate, self.burst, self.simulation.clone())
+        DesRateLimit::new(inner, self.rate, self.burst, self.scheduler.clone())
     }
 }
 
@@ -90,7 +90,7 @@ pub struct DesRateLimit<S> {
     burst: usize, // burst capacity
     tokens: Arc<Mutex<f64>>,
     last_refill: Arc<Mutex<SimTime>>,
-    simulation: Weak<Mutex<Simulation>>,
+    scheduler: SchedulerHandle,
 }
 
 impl<S> DesRateLimit<S> {
@@ -98,7 +98,7 @@ impl<S> DesRateLimit<S> {
         inner: S,
         rate: f64,
         burst: usize,
-        simulation: Weak<Mutex<Simulation>>,
+        scheduler: SchedulerHandle,
     ) -> Self {
         Self {
             inner,
@@ -106,31 +106,26 @@ impl<S> DesRateLimit<S> {
             burst,
             tokens: Arc::new(Mutex::new(burst as f64)),
             last_refill: Arc::new(Mutex::new(SimTime::zero())),
-            simulation,
+            scheduler,
         }
     }
 
     fn try_acquire_token(&self) -> bool {
-        if let Some(sim) = self.simulation.upgrade() {
-            let simulation = sim.lock().unwrap();
-            let current_time = simulation.scheduler.time();
-            
-            let mut tokens = self.tokens.lock().unwrap();
-            let mut last_refill = self.last_refill.lock().unwrap();
-            
-            // Calculate tokens to add based on elapsed time
-            let elapsed = current_time.duration_since(*last_refill);
-            let tokens_to_add = elapsed.as_secs_f64() * self.rate;
-            
-            *tokens = (*tokens + tokens_to_add).min(self.burst as f64);
-            *last_refill = current_time;
-            
-            if *tokens >= 1.0 {
-                *tokens -= 1.0;
-                true
-            } else {
-                false
-            }
+        let current_time = self.scheduler.time();
+        
+        let mut tokens = self.tokens.lock().unwrap();
+        let mut last_refill = self.last_refill.lock().unwrap();
+        
+        // Calculate tokens to add based on elapsed time
+        let elapsed = current_time.duration_since(*last_refill);
+        let tokens_to_add = elapsed.as_secs_f64() * self.rate;
+        
+        *tokens = (*tokens + tokens_to_add).min(self.burst as f64);
+        *last_refill = current_time;
+        
+        if *tokens >= 1.0 {
+            *tokens -= 1.0;
+            true
         } else {
             false
         }

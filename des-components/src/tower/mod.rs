@@ -1,40 +1,55 @@
-//! Tower Service trait integration for DES components
+//! Tower Service trait integration for DES components.
 //!
-//! This module provides comprehensive implementations of the Tower Service trait that allow
-//! Tower-based services and middleware to run within discrete event simulations.
-//! This enables testing of real-world service architectures under simulated
-//! network conditions, failures, and performance characteristics with deterministic,
+//! This module provides Tower Service implementations that run within discrete event
+//! simulations, enabling testing of real-world service architectures with deterministic,
 //! reproducible results.
 //!
 //! # Overview
 //!
-//! The Tower ecosystem provides a powerful set of composable middleware for building
-//! robust network services. This module adapts Tower's abstractions to work within
-//! the DES framework, providing:
+//! All Tower middleware is adapted to use simulation time instead of wall-clock time:
 //!
-//! - **Deterministic Timing**: All operations use simulation time instead of wall-clock time
-//! - **Event-Driven Architecture**: Service operations are scheduled as discrete events
-//! - **Reproducible Results**: Identical simulation parameters produce identical outcomes
-//! - **Performance Testing**: Measure latency, throughput, and resource utilization
-//! - **Failure Simulation**: Test circuit breakers, retries, and timeouts under controlled conditions
+//! - **Deterministic Timing**: Operations use simulation time for reproducible results
+//! - **Event-Driven**: Service operations are scheduled as discrete events
+//! - **Full Compatibility**: Works with standard Tower middleware and utilities
 //!
-//! # Core Components
+//! # Quick Start
 //!
-//! ## Base Service (`DesService`)
-//! The foundation service that processes HTTP requests within the simulation:
-//! - Configurable thread capacity and service times
-//! - Automatic backpressure when capacity is exceeded
-//! - Integration with DES scheduler for timing control
+//! ```rust,no_run
+//! use des_components::tower::{DesServiceBuilder, DesTimeoutLayer, DesRateLimitLayer};
+//! use des_core::Simulation;
+//! use tower::ServiceBuilder;
+//! use std::time::Duration;
 //!
-//! ## Middleware Layers
-//! All standard Tower middleware adapted for DES:
-//! - **Rate Limiting**: Token bucket algorithm with simulated time
-//! - **Concurrency Limiting**: Per-service and global concurrency control
-//! - **Circuit Breaker**: Failure detection and recovery with DES timing
-//! - **Timeout**: Request timeouts using simulation events
-//! - **Retry**: Exponential backoff with deterministic timing
-//! - **Load Balancing**: Round-robin, random, and least-connections strategies
-//! - **Hedging**: Request duplication for latency reduction
+//! # fn example() -> Result<(), des_components::tower::ServiceError> {
+//! let mut simulation = Simulation::default();
+//! let scheduler = simulation.scheduler_handle();
+//!
+//! // Create a base service
+//! let base_service = DesServiceBuilder::new("api-server".to_string())
+//!     .thread_capacity(5)
+//!     .service_time(Duration::from_millis(100))
+//!     .build(&mut simulation)?;
+//!
+//! // Add middleware layers
+//! let service = ServiceBuilder::new()
+//!     .layer(DesTimeoutLayer::new(Duration::from_secs(5), scheduler.clone()))
+//!     .layer(DesRateLimitLayer::new(10.0, 20, scheduler))
+//!     .service(base_service);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Available Middleware
+//!
+//! - [`DesService`] / [`DesServiceBuilder`]: Base service with configurable capacity and timing
+//! - [`DesRateLimit`] / [`DesRateLimitLayer`]: Token bucket rate limiting
+//! - [`DesConcurrencyLimit`] / [`DesConcurrencyLimitLayer`]: Per-service concurrency control
+//! - [`DesGlobalConcurrencyLimit`]: Shared concurrency limits across services
+//! - [`DesCircuitBreaker`] / [`DesCircuitBreakerLayer`]: Failure detection and recovery
+//! - [`DesTimeout`] / [`DesTimeoutLayer`]: Request timeouts using simulation events
+//! - [`DesRetry`] / [`DesRetryLayer`]: Retry with configurable backoff
+//! - [`DesLoadBalancer`]: Round-robin, random, and least-connections strategies
+//! - [`DesHedge`] / [`DesHedgeLayer`]: Request hedging for tail latency reduction
 //!
 //! # Usage Patterns
 //!
@@ -43,16 +58,15 @@
 //! ```rust,no_run
 //! use des_components::tower::{DesServiceBuilder, ServiceError};
 //! use des_core::Simulation;
-//! use std::sync::{Arc, Mutex};
 //! use std::time::Duration;
 //!
 //! # fn example() -> Result<(), ServiceError> {
-//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//! let mut simulation = Simulation::default();
 //!
 //! let service = DesServiceBuilder::new("web-server".to_string())
 //!     .thread_capacity(10)
 //!     .service_time(Duration::from_millis(50))
-//!     .build(simulation.clone())?;
+//!     .build(&mut simulation)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -65,20 +79,18 @@
 //! use std::time::Duration;
 //!
 //! # fn middleware_example() -> Result<(), ServiceError> {
-//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! # let mut simulation = des_core::Simulation::default();
+//! # let scheduler = simulation.scheduler_handle();
 //! let base_service = DesServiceBuilder::new("api-server".to_string())
 //!     .thread_capacity(5)
 //!     .service_time(Duration::from_millis(100))
-//!     .build(simulation.clone())?;
+//!     .build(&mut simulation)?;
 //!
 //! let service = ServiceBuilder::new()
-//!     .layer(DesTimeoutLayer::new(Duration::from_secs(5), std::sync::Arc::downgrade(&simulation)))
-//!     .layer(DesRateLimitLayer::new(10.0, 20, std::sync::Arc::downgrade(&simulation)))
+//!     .layer(DesTimeoutLayer::new(Duration::from_secs(5), scheduler.clone()))
+//!     .layer(DesRateLimitLayer::new(10.0, 20, scheduler.clone()))
 //!     .layer(DesConcurrencyLimitLayer::new(3))
-//!     .layer(DesRetryLayer::new(
-//!         DesRetryPolicy::new(3),
-//!         std::sync::Arc::downgrade(&simulation)
-//!     ))
+//!     .layer(DesRetryLayer::new(DesRetryPolicy::new(3), scheduler))
 //!     .service(base_service);
 //! # Ok(())
 //! # }
@@ -90,12 +102,12 @@
 //! use des_components::tower::*;
 //!
 //! # fn load_balancing_example() -> Result<(), ServiceError> {
-//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! # let mut simulation = des_core::Simulation::default();
 //! let services = (0..3).map(|i| {
 //!     DesServiceBuilder::new(format!("server-{}", i))
 //!         .thread_capacity(5)
 //!         .service_time(std::time::Duration::from_millis(100))
-//!         .build(simulation.clone())
+//!         .build(&mut simulation)
 //! }).collect::<Result<Vec<_>, _>>()?;
 //!
 //! let load_balancer = DesLoadBalancer::round_robin(services);
@@ -105,23 +117,9 @@
 //!
 //! # Performance Characteristics
 //!
-//! ## Timing Model
 //! - **Service Time**: Configurable processing time per request
-//! - **Queue Delays**: Automatic when capacity is exceeded
-//! - **Network Latency**: Can be modeled through service times
-//! - **Middleware Overhead**: Each layer adds minimal simulation overhead
-//!
-//! ## Resource Management
-//! - **Thread Pools**: Simulated with configurable capacity
-//! - **Memory Usage**: Tracked through request queuing
-//! - **Connection Limits**: Enforced through concurrency limiters
-//! - **Rate Limits**: Token bucket with configurable refill rates
-//!
-//! ## Metrics and Observability
-//! - **Request Latency**: End-to-end timing through simulation
-//! - **Throughput**: Requests processed per simulation time unit
-//! - **Error Rates**: Circuit breaker and retry statistics
-//! - **Resource Utilization**: Thread pool and queue occupancy
+//! - **Queue Delays**: Automatic backpressure when capacity is exceeded
+//! - **Middleware Overhead**: Minimal simulation overhead per layer
 //!
 //! # Testing Scenarios
 //!
@@ -130,19 +128,15 @@
 //! # use des_components::tower::*;
 //! # use std::time::Duration;
 //! # fn load_test_example() {
-//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! # let mut simulation = des_core::Simulation::default();
+//! # let scheduler = simulation.scheduler_handle();
 //! // Simulate high load with rate limiting
 //! let service = DesServiceBuilder::new("load-test".to_string())
-//!     .thread_capacity(2)  // Limited capacity
-//!     .service_time(Duration::from_millis(200))  // Slow processing
-//!     .build(simulation.clone()).unwrap();
+//!     .thread_capacity(2)
+//!     .service_time(Duration::from_millis(200))
+//!     .build(&mut simulation).unwrap();
 //!
-//! let rate_limited = DesRateLimit::new(
-//!     service,
-//!     100.0,  // 100 requests per second
-//!     50,     // Burst capacity
-//!     std::sync::Arc::downgrade(&simulation),
-//! );
+//! let rate_limited = DesRateLimit::new(service, 100.0, 50, scheduler);
 //! # }
 //! ```
 //!
@@ -151,35 +145,22 @@
 //! # use des_components::tower::*;
 //! # use std::time::Duration;
 //! # fn failure_test_example() {
-//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
+//! # let mut simulation = des_core::Simulation::default();
+//! # let scheduler = simulation.scheduler_handle();
 //! // Test circuit breaker behavior
 //! let service = DesServiceBuilder::new("failure-test".to_string())
 //!     .thread_capacity(1)
 //!     .service_time(Duration::from_millis(100))
-//!     .build(simulation.clone()).unwrap();
+//!     .build(&mut simulation).unwrap();
 //!
 //! let circuit_breaker = DesCircuitBreaker::new(
 //!     service,
 //!     3,  // Failure threshold
 //!     Duration::from_secs(10),  // Recovery timeout
-//!     std::sync::Arc::downgrade(&simulation),
+//!     scheduler,
 //! );
 //! # }
 //! ```
-//!
-//! # Integration with Standard Tower
-//!
-//! All DES services implement the standard Tower `Service` trait, making them
-//! compatible with existing Tower middleware and utilities. The key differences:
-//!
-//! - **Timing**: Uses simulation time instead of system time
-//! - **Determinism**: Reproducible behavior across runs
-//! - **Event Scheduling**: Operations are scheduled as discrete events
-//! - **Resource Modeling**: Accurate simulation of system resources
-//!
-//! This allows you to test Tower-based applications in a controlled environment
-//! before deploying to production, validating behavior under various load and
-//! failure conditions.
 
 use bytes::Bytes;
 use http::{Response as HttpResponse, StatusCode};
@@ -198,7 +179,8 @@ pub mod hedge;
 pub mod retry;
 pub mod future_poller;
 
-pub use service::{DesService, DesServiceBuilder, SchedulerHandle};
+pub use service::{DesService, DesServiceBuilder, TowerSchedulerHandle};
+pub use des_core::SchedulerHandle;
 pub use timeout::{DesTimeout, DesTimeoutLayer};
 pub use load_balancer::{DesLoadBalancer, DesLoadBalanceStrategy, DesLoadBalancerLayer};
 pub use circuit_breaker::{DesCircuitBreaker, DesCircuitBreakerLayer};
@@ -331,7 +313,6 @@ mod tests {
     use super::*;
     use des_core::Simulation;
     use http::{Method, Request};
-    use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll, Waker};
     use std::future::Future;
     use std::pin::Pin;
@@ -354,13 +335,13 @@ mod tests {
 
     #[test]
     fn test_des_service_basic() {
-        let simulation = Arc::new(std::sync::Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
 
         // Build the service
         let mut service = DesServiceBuilder::new("test-server".to_string())
             .thread_capacity(2)
             .service_time(std::time::Duration::from_millis(50))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         // Create a test request
@@ -379,13 +360,11 @@ mod tests {
         let mut response_future = service.call(request);
 
         // Run simulation steps to process the request
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..20 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
 
         // The response should be ready now
         let response = match Pin::new(&mut response_future).poll(&mut cx) {
@@ -399,13 +378,14 @@ mod tests {
 
     #[test]
     fn test_des_rate_limit_layer() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
+        let scheduler = simulation.scheduler_handle();
 
         // Create base service
         let base_service = DesServiceBuilder::new("rate-limit-test".to_string())
             .thread_capacity(5)
             .service_time(Duration::from_millis(50))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         // Wrap with rate limiter (2 requests per second, burst of 3)
@@ -413,7 +393,7 @@ mod tests {
             base_service,
             2.0, // 2 requests per second
             3,   // burst capacity
-            Arc::downgrade(&simulation),
+            scheduler,
         );
 
         let waker = noop_waker();
@@ -431,13 +411,11 @@ mod tests {
         }
 
         // Run simulation
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..100 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
 
         // Check results - first 3 should succeed (burst), others should be rate limited
         let mut successes = 0;
@@ -470,13 +448,13 @@ mod tests {
 
     #[test]
     fn test_des_concurrency_limit_basic() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
 
         // Create base service
         let base_service = DesServiceBuilder::new("basic-concurrency-test".to_string())
             .thread_capacity(5)
             .service_time(Duration::from_millis(50))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         // Wrap with concurrency limiter (limit to 1 concurrent request)
@@ -499,13 +477,11 @@ mod tests {
         assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Pending));
         
         // Complete the first request
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..100 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
         
         // Check if first request completed
         let mut future1 = future1;
@@ -518,13 +494,13 @@ mod tests {
 
     #[test]
     fn test_des_concurrency_limit_backpressure() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
 
         // Create base service with high capacity but slow processing
         let base_service = DesServiceBuilder::new("backpressure-test".to_string())
             .thread_capacity(10)
             .service_time(Duration::from_millis(200)) // Slow service
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         // Wrap with concurrency limiter (limit to 2 concurrent requests)
@@ -554,25 +530,21 @@ mod tests {
         assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Pending));
 
         // Run simulation partially to start processing
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..10 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
 
         // Still should be blocked since requests are still processing
         assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Pending));
 
         // Complete the simulation
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..300 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
 
         // Poll the futures to completion to release their slots
         let futures = vec![future1, future2];
@@ -590,13 +562,13 @@ mod tests {
 
     #[test]
     fn test_des_concurrency_limit_sequential_processing() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
 
         // Create base service with capacity 1 to force sequential processing
         let base_service = DesServiceBuilder::new("sequential-test".to_string())
             .thread_capacity(1)
             .service_time(Duration::from_millis(50))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         // Concurrency limit of 1 should enforce strict sequential processing
@@ -621,13 +593,11 @@ mod tests {
             assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Pending));
             
             // Run simulation to complete this request
-            let mut sim = simulation.lock().unwrap();
             for _ in 0..100 {
-                if !sim.step() {
+                if !simulation.step() {
                     break;
                 }
             }
-            drop(sim);
             
             // Poll the future to completion to release the slot
             assert!(matches!(Pin::new(&mut future).poll(&mut cx), Poll::Ready(Ok(_))));
@@ -639,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_des_global_concurrency_limit_shared_state() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
 
         // Create shared global concurrency state with limit of 2
         let global_state = crate::tower::limit::global_concurrency::GlobalConcurrencyLimitState::new(2);
@@ -648,13 +618,13 @@ mod tests {
         let service1 = DesServiceBuilder::new("global-service-1".to_string())
             .thread_capacity(5)
             .service_time(Duration::from_millis(100))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         let service2 = DesServiceBuilder::new("global-service-2".to_string())
             .thread_capacity(5)
             .service_time(Duration::from_millis(100))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         let mut global_service1 = DesGlobalConcurrencyLimit::new(service1, global_state.clone());
@@ -692,13 +662,11 @@ mod tests {
         assert_eq!(global_state.max_concurrency(), 2);
 
         // Run simulation to complete requests
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..200 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
 
         // Poll futures to completion to release their slots
         let futures = vec![future1, future2];
@@ -720,7 +688,7 @@ mod tests {
 
     #[test]
     fn test_des_global_concurrency_limit_fairness() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
 
         // Create shared global state with limit of 1 to test fairness
         let global_state = crate::tower::limit::global_concurrency::GlobalConcurrencyLimitState::new(1);
@@ -729,19 +697,19 @@ mod tests {
         let service1 = DesServiceBuilder::new("fair-service-1".to_string())
             .thread_capacity(2)
             .service_time(Duration::from_millis(50))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         let service2 = DesServiceBuilder::new("fair-service-2".to_string())
             .thread_capacity(2)
             .service_time(Duration::from_millis(50))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         let service3 = DesServiceBuilder::new("fair-service-3".to_string())
             .thread_capacity(2)
             .service_time(Duration::from_millis(50))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         let mut global_service1 = DesGlobalConcurrencyLimit::new(service1, global_state.clone());
@@ -769,13 +737,11 @@ mod tests {
             assert!(matches!(global_service3.poll_ready(&mut cx), Poll::Pending));
 
             // Complete this request
-            let mut sim = simulation.lock().unwrap();
             for _ in 0..100 {
-                if !sim.step() {
+                if !simulation.step() {
                     break;
                 }
             }
-            drop(sim);
 
             // Verify completion
             if let Poll::Ready(Ok(_)) = Pin::new(&mut { future }).poll(&mut cx) {
@@ -789,13 +755,13 @@ mod tests {
 
     #[test]
     fn test_concurrency_limit_precise_tracking() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
 
         // Create base service with high capacity
         let base_service = DesServiceBuilder::new("precise-tracking-test".to_string())
             .thread_capacity(10)
             .service_time(Duration::from_millis(100))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         // Wrap with concurrency limiter (limit to 3 concurrent requests)
@@ -845,13 +811,11 @@ mod tests {
         assert_eq!(concurrency_service.current_concurrency(), 3, "Should still be at capacity");
 
         // Run simulation to complete first request
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..150 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
 
         // Poll first future to completion to release its slot
         let mut future1 = future1;
@@ -869,13 +833,11 @@ mod tests {
         assert_eq!(concurrency_service.current_concurrency(), 3, "Should be back at capacity with new request");
 
         // Complete remaining requests
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..200 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
 
         // Poll all remaining futures to completion
         let futures = vec![future2, future3, future4];
@@ -894,13 +856,14 @@ mod tests {
 
     #[test]
     fn test_tower_layer_composition() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
+        let scheduler = simulation.scheduler_handle();
 
         // Create base service
         let base_service = DesServiceBuilder::new("layer-composition-test".to_string())
             .thread_capacity(5)
             .service_time(Duration::from_millis(50))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         // Use Layer trait for composable middleware
@@ -908,7 +871,7 @@ mod tests {
         
         let mut service = ServiceBuilder::new()
             // Add rate limiting layer (5 requests per second, burst of 10)
-            .layer(DesRateLimitLayer::new(5.0, 10, Arc::downgrade(&simulation)))
+            .layer(DesRateLimitLayer::new(5.0, 10, scheduler))
             // Add concurrency limiting layer (max 2 concurrent requests)
             .layer(DesConcurrencyLimitLayer::new(2))
             .service(base_service);
@@ -927,13 +890,11 @@ mod tests {
         let mut future = service.call(req);
 
         // Run simulation
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..200 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
 
         // Check response
         let result = Pin::new(&mut future).poll(&mut cx);
@@ -952,20 +913,21 @@ mod tests {
 
     #[test]
     fn test_timeout_layer_success() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
+        let scheduler = simulation.scheduler_handle();
 
         // Create base service with very fast service time (1ms)
         let base_service = DesServiceBuilder::new("timeout-success-test".to_string())
             .thread_capacity(5)
             .service_time(Duration::from_millis(1))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         // Wrap with timeout layer (very long timeout - 1000ms)
         use tower::Layer;
         let mut timeout_service = DesTimeoutLayer::new(
             Duration::from_millis(1000),
-            Arc::downgrade(&simulation),
+            scheduler,
         ).layer(base_service);
 
         let waker = noop_waker();
@@ -987,13 +949,11 @@ mod tests {
 
         // Run simulation to complete the request
         // The timeout is scheduled for 1000ms, request completes in ~2ms
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..50 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
 
         // Request should succeed (no timeout)
         let result = Pin::new(&mut future).poll(&mut cx);
@@ -1009,13 +969,11 @@ mod tests {
             }
             Poll::Pending => {
                 // Try polling again after more simulation steps
-                let mut sim = simulation.lock().unwrap();
                 for _ in 0..50 {
-                    if !sim.step() {
+                    if !simulation.step() {
                         break;
                     }
                 }
-                drop(sim);
                 
                 let result2 = Pin::new(&mut future).poll(&mut cx);
                 match result2 {
@@ -1035,20 +993,21 @@ mod tests {
 
     #[test]
     fn test_timeout_layer_timeout() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
+        let scheduler = simulation.scheduler_handle();
 
         // Create base service with long service time (200ms)
         let base_service = DesServiceBuilder::new("timeout-test".to_string())
             .thread_capacity(5)
             .service_time(Duration::from_millis(200))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         // Wrap with timeout layer (short timeout - 50ms)
         use tower::Layer;
         let mut timeout_service = DesTimeoutLayer::new(
             Duration::from_millis(50),
-            Arc::downgrade(&simulation),
+            scheduler,
         ).layer(base_service);
 
         let waker = noop_waker();
@@ -1074,16 +1033,13 @@ mod tests {
         // Run simulation until timeout or request completion
         for _ in 0..1000 {
             // Run one simulation step
-            let should_poll = {
-                let mut sim = simulation.lock().unwrap();
-                if !sim.step() {
-                    break;
-                }
-                
-                // Check current simulation time
-                let current_time = sim.scheduler.time();
-                current_time >= des_core::SimTime::from_duration(Duration::from_millis(50))
-            };
+            if !simulation.step() {
+                break;
+            }
+            
+            // Check current simulation time
+            let current_time = simulation.time();
+            let should_poll = current_time >= des_core::SimTime::from_duration(Duration::from_millis(50));
             
             // Poll future if we've passed timeout threshold
             if should_poll {
@@ -1129,20 +1085,21 @@ mod tests {
 
     #[test]
     fn test_timeout_layer_resource_cleanup() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
+        let scheduler = simulation.scheduler_handle();
 
         // Create base service
         let base_service = DesServiceBuilder::new("cleanup-test".to_string())
             .thread_capacity(5)
             .service_time(Duration::from_millis(50))
-            .build(simulation.clone())
+            .build(&mut simulation)
             .unwrap();
 
         // Wrap with timeout layer
         use tower::Layer;
         let mut timeout_service = DesTimeoutLayer::new(
             Duration::from_millis(100),
-            Arc::downgrade(&simulation),
+            scheduler,
         ).layer(base_service);
 
         let waker = noop_waker();
@@ -1164,13 +1121,11 @@ mod tests {
         }
 
         // Run a few simulation steps to allow any cleanup to occur
-        let mut sim = simulation.lock().unwrap();
         for _ in 0..10 {
-            if !sim.step() {
+            if !simulation.step() {
                 break;
             }
         }
-        drop(sim);
 
         // Test passes if no panics or resource leaks occur
         // The PinnedDrop implementation should clean up timeout components
@@ -1178,7 +1133,8 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_failure_threshold() {
-        let simulation = Arc::new(Mutex::new(Simulation::default()));
+        let mut simulation = Simulation::default();
+        let scheduler = simulation.scheduler_handle();
 
         // Create a service that always fails
         let failing_service = FailingService;
@@ -1188,7 +1144,7 @@ mod tests {
             failing_service,
             3, // failure threshold
             Duration::from_secs(1),
-            Arc::downgrade(&simulation),
+            scheduler,
         );
 
         let waker = noop_waker();

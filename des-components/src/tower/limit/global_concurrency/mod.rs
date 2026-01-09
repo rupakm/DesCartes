@@ -1,61 +1,37 @@
-//! DES-aware global concurrency limiter layer
+//! DES-aware global concurrency limiter layer.
 //!
-//! This module provides a DES-aware implementation similar to tower::limit::GlobalConcurrencyLimit
-//! that allows sharing a concurrency limit across multiple service instances.
+//! Shares a concurrency limit across multiple service instances.
 //!
-//! ## Key Features
-//!
-//! - **Shared State**: Multiple service instances share the same concurrency limit
-//! - **System-Wide Limiting**: Enables global resource management across services
-//! - **Atomic Operations**: Thread-safe concurrency tracking using atomic counters
-//! - **Flexible Configuration**: Can be applied to any subset of services
-//!
-//! ## Architecture
-//!
-//! The global concurrency limiter consists of two main components:
-//!
-//! 1. **`GlobalConcurrencyLimitState`**: Shared state that tracks the global concurrency
-//! 2. **`DesGlobalConcurrencyLimit`**: Service wrapper that uses the shared state
-//!
-//! ## Differences from `tower::limit::GlobalConcurrencyLimit`
-//!
-//! - Designed for DES simulation environments
-//! - Uses `PinnedDrop` for proper resource cleanup
-//! - Integrates with DES waker system
-//! - Supports cloning state across multiple services
-//!
-//! ## Example
+//! # Usage
 //!
 //! ```rust,no_run
 //! use des_components::tower::limit::{DesGlobalConcurrencyLimit, GlobalConcurrencyLimitState};
 //! use des_components::tower::DesServiceBuilder;
 //! use des_core::Simulation;
-//! use std::sync::{Arc, Mutex};
 //!
 //! # fn example() {
-//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//! let mut simulation = Simulation::default();
 //!
 //! // Create shared global state with limit of 10
 //! let global_state = GlobalConcurrencyLimitState::new(10);
 //!
 //! // Create multiple services sharing the same global limit
 //! let service1 = DesServiceBuilder::new("service1".to_string())
-//!     .build(simulation.clone()).unwrap();
+//!     .build(&mut simulation).unwrap();
 //! let service2 = DesServiceBuilder::new("service2".to_string())
-//!     .build(simulation.clone()).unwrap();
+//!     .build(&mut simulation).unwrap();
 //!
 //! let global_service1 = DesGlobalConcurrencyLimit::new(service1, global_state.clone());
-//! let global_service2 = DesGlobalConcurrencyLimit::new(service2, global_state.clone());
+//! let global_service2 = DesGlobalConcurrencyLimit::new(service2, global_state);
 //!
-//! // Now both services share the same global concurrency limit of 10
+//! // Both services share the same global concurrency limit of 10
 //! # }
 //! ```
 //!
-//! ## Use Cases
+//! # Use Cases
 //!
 //! - Modeling system-wide resource limits (e.g., database connections)
 //! - Simulating shared infrastructure constraints
-//! - Testing distributed system behavior under global limits
 //! - Load balancing with global capacity management
 
 use http::Request;

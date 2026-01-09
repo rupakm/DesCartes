@@ -1,155 +1,43 @@
-//! DES-aware hedge layer for request hedging/duplication
+//! DES-aware hedge layer for request hedging/duplication.
 //!
-//! This module provides request hedging capabilities, also known as request duplication
-//! or speculative execution. Hedging improves tail latency by sending duplicate requests
-//! to multiple backends and using the first response that arrives.
+//! Hedging improves tail latency by sending duplicate requests and using the first
+//! response that arrives.
 //!
-//! # Hedging Strategy
-//!
-//! The hedge layer implements a time-based hedging strategy:
-//! 1. Send the primary request immediately
-//! 2. After a configurable delay, send duplicate requests to other backends
-//! 3. Return the first successful response and cancel remaining requests
-//! 4. Limit the total number of hedged requests to prevent resource exhaustion
-//!
-//! # Use Cases
-//!
-//! ## Tail Latency Reduction
-//! Hedging is particularly effective when:
-//! - Backend services have variable response times
-//! - Occasional slow responses significantly impact user experience
-//! - The cost of duplicate requests is acceptable for improved latency
-//!
-//! ## High Availability
-//! Hedging can improve availability by:
-//! - Automatically working around slow or failing backends
-//! - Reducing the impact of temporary performance degradation
-//! - Providing graceful degradation under partial failures
-//!
-//! # Configuration Parameters
-//!
-//! ## Hedge Delay
-//! The time to wait before sending duplicate requests. This should be tuned based on:
-//! - Typical response time distribution of your services
-//! - Acceptable latency targets (e.g., 95th percentile)
-//! - Resource constraints and duplicate request costs
-//!
-//! ## Maximum Hedged Requests
-//! Limits the total number of duplicate requests to prevent:
-//! - Resource exhaustion under high load
-//! - Amplification attacks or cascading failures
-//! - Excessive backend load from hedging
-//!
-//! # Usage Examples
-//!
-//! ## Basic Hedging Setup
+//! # Usage
 //!
 //! ```rust,no_run
-//! use des_components::tower::{DesServiceBuilder, DesHedge};
+//! use des_components::tower::{DesServiceBuilder, DesHedge, DesHedgeLayer};
 //! use des_core::Simulation;
-//! use std::sync::{Arc, Mutex};
+//! use tower::Layer;
 //! use std::time::Duration;
 //!
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let simulation = Arc::new(Mutex::new(Simulation::default()));
+//! let mut simulation = Simulation::default();
+//! let scheduler = simulation.scheduler_handle();
 //!
 //! let base_service = DesServiceBuilder::new("backend".to_string())
 //!     .thread_capacity(10)
 //!     .service_time(Duration::from_millis(100))
-//!     .build(simulation.clone())?;
+//!     .build(&mut simulation)?;
 //!
 //! // Hedge after 50ms, maximum 2 additional requests
-//! let hedged_service = DesHedge::new(
-//!     base_service,
-//!     Duration::from_millis(50),  // hedge_delay
-//!     2,                          // max_hedged_requests
-//!     Arc::downgrade(&simulation),
-//! );
+//! let hedged_service = DesHedgeLayer::new(Duration::from_millis(50), 2, scheduler)
+//!     .layer(base_service);
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! ## Using Tower Layer Pattern
+//! # Current Status
 //!
-//! ```rust,no_run
-//! use des_components::tower::{DesServiceBuilder, DesHedgeLayer};
-//! use tower::Layer;
-//! use std::time::Duration;
-//!
-//! # fn layer_example() -> Result<(), Box<dyn std::error::Error>> {
-//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
-//! let base_service = DesServiceBuilder::new("backend".to_string())
-//!     .thread_capacity(5)
-//!     .service_time(Duration::from_millis(200))
-//!     .build(simulation.clone())?;
-//!
-//! // Apply hedge layer
-//! let hedged_service = DesHedgeLayer::new(
-//!     Duration::from_millis(100),  // hedge after 100ms
-//!     3,                           // maximum 3 hedged requests
-//!     std::sync::Arc::downgrade(&simulation),
-//! ).layer(base_service);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## Integration with Load Balancing
-//!
-//! ```rust,no_run
-//! use des_components::tower::*;
-//! use tower::ServiceBuilder;
-//! use std::time::Duration;
-//!
-//! # fn integration_example() -> Result<(), Box<dyn std::error::Error>> {
-//! # let simulation = std::sync::Arc::new(std::sync::Mutex::new(des_core::Simulation::default()));
-//! # let services = vec![
-//! #     DesServiceBuilder::new("backend-1".to_string()).build(simulation.clone())?,
-//! #     DesServiceBuilder::new("backend-2".to_string()).build(simulation.clone())?,
-//! # ];
-//! let load_balancer = DesLoadBalancer::round_robin(services);
-//!
-//! // Combine hedging with load balancing for maximum effectiveness
-//! let service = ServiceBuilder::new()
-//!     .layer(DesHedgeLayer::new(
-//!         Duration::from_millis(75),
-//!         2,
-//!         std::sync::Arc::downgrade(&simulation),
-//!     ))
-//!     .service(load_balancer);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! # Performance Considerations
-//!
-//! ## Resource Usage
-//! - **CPU**: Minimal overhead for scheduling hedge requests
-//! - **Memory**: Small per-request state for tracking hedged requests
-//! - **Network**: Multiplies request volume by (1 + max_hedged_requests)
-//!
-//! ## Tuning Guidelines
-//! - Set hedge_delay to ~95th percentile of normal response time
-//! - Limit max_hedged_requests to 2-3 to balance latency vs. resource usage
-//! - Monitor backend load to ensure hedging doesn't cause overload
-//!
-//! # Current Implementation Status
-//!
-//! The current implementation provides the basic framework for hedging but only
-//! processes the primary request. A full implementation would:
-//! - Schedule hedge requests using DES timing
-//! - Track multiple concurrent requests per hedge operation
-//! - Cancel remaining requests when the first response arrives
-//! - Provide metrics on hedge effectiveness and resource usage
-//!
-//! This foundation can be extended to provide complete hedging functionality
-//! as simulation requirements evolve.
+//! The current implementation provides the framework but only processes the primary
+//! request. Full hedging (scheduling duplicate requests and racing them) can be
+//! added as simulation requirements evolve.
 
-use des_core::Simulation;
+use des_core::SchedulerHandle;
 use http::Request;
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Mutex, Weak};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tower::{Layer, Service};
@@ -163,7 +51,7 @@ use super::{ServiceError, SimBody};
 pub struct DesHedgeLayer {
     hedge_delay: Duration,
     max_hedged_requests: usize,
-    simulation: Weak<Mutex<Simulation>>,
+    scheduler: SchedulerHandle,
 }
 
 impl DesHedgeLayer {
@@ -171,12 +59,12 @@ impl DesHedgeLayer {
     pub fn new(
         hedge_delay: Duration,
         max_hedged_requests: usize,
-        simulation: Weak<Mutex<Simulation>>,
+        scheduler: SchedulerHandle,
     ) -> Self {
         Self {
             hedge_delay,
             max_hedged_requests,
-            simulation,
+            scheduler,
         }
     }
 }
@@ -192,7 +80,7 @@ where
             inner,
             self.hedge_delay,
             self.max_hedged_requests,
-            self.simulation.clone(),
+            self.scheduler.clone(),
         )
     }
 }
@@ -203,7 +91,7 @@ pub struct DesHedge<S> {
     inner: S,
     hedge_delay: Duration,
     max_hedged_requests: usize,
-    simulation: Weak<Mutex<Simulation>>,
+    scheduler: SchedulerHandle,
 }
 
 impl<S> DesHedge<S>
@@ -214,13 +102,13 @@ where
         inner: S,
         hedge_delay: Duration,
         max_hedged_requests: usize,
-        simulation: Weak<Mutex<Simulation>>,
+        scheduler: SchedulerHandle,
     ) -> Self {
         Self {
             inner,
             hedge_delay,
             max_hedged_requests,
-            simulation,
+            scheduler,
         }
     }
 }
@@ -233,7 +121,7 @@ pub struct DesHedgeFuture<F> {
     hedge_scheduled: bool,
     _hedge_delay: Duration,
     _max_hedged: usize,
-    _simulation: Weak<Mutex<Simulation>>,
+    _scheduler: SchedulerHandle,
 }
 
 impl<S, ReqBody> Service<Request<ReqBody>> for DesHedge<S>
@@ -257,7 +145,7 @@ where
             hedge_scheduled: false,
             _hedge_delay: self.hedge_delay,
             _max_hedged: self.max_hedged_requests,
-            _simulation: self.simulation.clone(),
+            _scheduler: self.scheduler.clone(),
         }
     }
 }

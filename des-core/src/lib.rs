@@ -1,7 +1,52 @@
-//! Core discrete event simulation engine
+//! Core discrete event simulation engine.
 //!
-//! This crate provides the fundamental building blocks for discrete event simulation,
-//! including time management, event scheduling, and process execution.
+//! This crate provides the fundamental building blocks for discrete event simulation:
+//! time management, event scheduling, task execution, and component-based architecture.
+//!
+//! # Architecture Overview
+//!
+//! The simulation is built around two main types:
+//!
+//! - [`Simulation`]: The main entry point that owns the scheduler and components.
+//!   Use this to run simulations, add components, and access simulation state.
+//!
+//! - [`SchedulerHandle`]: A thread-safe, cloneable handle for scheduling events.
+//!   Pass this to Tower service layers and other components that need to schedule
+//!   events without direct access to the simulation.
+//!
+//! # Basic Usage
+//!
+//! ```rust,no_run
+//! use des_core::{Simulation, SimTime, Executor};
+//! use std::time::Duration;
+//!
+//! // Create a simulation
+//! let mut simulation = Simulation::default();
+//!
+//! // Get a scheduler handle for Tower layers or other components
+//! let scheduler = simulation.scheduler_handle();
+//!
+//! // Schedule events, add components, run simulation
+//! simulation.execute(Executor::unbound());
+//! ```
+//!
+//! # Scheduling Events
+//!
+//! For simple scheduling from within the simulation:
+//! ```rust,ignore
+//! simulation.schedule(SimTime::from_millis(100), component_key, MyEvent::Tick);
+//! ```
+//!
+//! For Tower layers or components that need a cloneable handle:
+//! ```rust,ignore
+//! let scheduler = simulation.scheduler_handle();
+//! scheduler.schedule(SimTime::from_millis(100), component_key, MyEvent::Tick);
+//! ```
+//!
+//! # Time Model
+//!
+//! All timing uses [`SimTime`], which represents simulation time (not wall-clock time).
+//! This ensures deterministic, reproducible behavior across simulation runs.
 
 pub mod async_runtime;
 pub mod dists;
@@ -18,6 +63,7 @@ pub mod formal;
 
 use std::collections::HashMap;
 use std::any::Any;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info, trace, warn, instrument};
 
 //pub use environment::Environment;
@@ -29,7 +75,7 @@ pub use types::EventId;
 pub use execute::{Executor, Execute};
 pub use logging::{init_simulation_logging, init_simulation_logging_with_level, init_detailed_simulation_logging, simulation_span, component_span, event_span, task_span};
 pub use request::{Request, RequestAttempt, RequestStatus, AttemptStatus, Response, ResponseStatus, RequestId, RequestAttemptId};
-pub use scheduler::{EventEntry, Scheduler, defer_wake, in_scheduler_context, current_time};
+pub use scheduler::{EventEntry, Scheduler, SchedulerHandle, ClockRef, defer_wake, in_scheduler_context, current_time};
 pub use task::{Task, TaskId, TaskHandle, ClosureTask, TimeoutTask, RetryTask, PeriodicTask};
 
 
@@ -164,20 +210,62 @@ impl Components {
 /// Simulation struct that puts different parts of the simulation together.
 ///
 /// See the [crate-level documentation](index.html) for more information.
-#[derive(Default)]
 pub struct Simulation {
-    /// Event scheduler.
-    pub scheduler: Scheduler,
+    /// Event scheduler (wrapped in Arc<Mutex<>> for thread-safe access).
+    scheduler: Arc<Mutex<Scheduler>>,
     /// Component container.
     pub components: Components,
 }
 
+impl Default for Simulation {
+    fn default() -> Self {
+        Self {
+            scheduler: Arc::new(Mutex::new(Scheduler::default())),
+            components: Components::default(),
+        }
+    }
+}
+
 impl Simulation {
+    /// Returns a thread-safe handle for scheduling events.
+    ///
+    /// The `SchedulerHandle` can be cloned and passed to Tower service layers
+    /// or other components that need to schedule events without locking the
+    /// entire simulation.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut simulation = Simulation::default();
+    /// let scheduler = simulation.scheduler_handle();
+    ///
+    /// // Pass to Tower layers
+    /// let service = DesServiceBuilder::new("server".to_string())
+    ///     .timeout(Duration::from_secs(5), scheduler.clone())
+    ///     .build(&mut simulation)?;
+    /// ```
+    #[must_use]
+    pub fn scheduler_handle(&self) -> SchedulerHandle {
+        SchedulerHandle::new(Arc::clone(&self.scheduler))
+    }
+
+    /// Returns the current simulation time.
+    #[must_use]
+    pub fn time(&self) -> SimTime {
+        self.scheduler.lock().unwrap().time()
+    }
+
     /// Performs one step of the simulation. Returns `true` if there was in fact an event
     /// available to process, and `false` otherwise, which signifies that the simulation
     /// ended.
     pub fn step(&mut self) -> bool {
-        self.scheduler.pop().is_some_and(|event| {
+        // Pop the next event while holding the lock briefly
+        let event = {
+            let mut scheduler = self.scheduler.lock().unwrap();
+            scheduler.pop()
+        };
+
+        event.is_some_and(|event| {
             trace!(
                 event_time = ?event.time(),
                 event_type = match &event {
@@ -188,17 +276,25 @@ impl Simulation {
             );
             
             // Set scheduler context for deferred wakes
-            scheduler::set_scheduler_context(&mut self.scheduler);
+            {
+                let mut scheduler = self.scheduler.lock().unwrap();
+                scheduler::set_scheduler_context(&mut scheduler);
+            }
             
-            // Process the event
-            self.components
-                .process_event_entry(event, &mut self.scheduler);
+            // Process the event - need mutable access to scheduler for task execution
+            {
+                let mut scheduler = self.scheduler.lock().unwrap();
+                self.components.process_event_entry(event, &mut scheduler);
+            }
             
             // Clear scheduler context
             scheduler::clear_scheduler_context();
             
             // Process any deferred wakes that were registered during event processing
-            self.scheduler.process_deferred_wakes();
+            {
+                let mut scheduler = self.scheduler.lock().unwrap();
+                scheduler.process_deferred_wakes();
+            }
             
             true
         })
@@ -209,13 +305,13 @@ impl Simulation {
     /// The stopping condition and other execution details depend on the executor used.
     /// See [`Execute`] and [`Executor`] for more details.
     #[instrument(skip(self, executor), fields(
-        initial_time = ?self.scheduler.time()
+        initial_time = ?self.time()
     ))]
     pub fn execute<E: Execute>(&mut self, executor: E) {
         info!("Starting simulation execution");
         executor.execute(self);
         info!(
-            final_time = ?self.scheduler.time(),
+            final_time = ?self.time(),
             "Simulation execution completed"
         );
     }
@@ -266,6 +362,74 @@ impl Simulation {
         component: Key<E>,
         event: E,
     ) {
-        self.scheduler.schedule(time, component, event);
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.schedule(time, component, event);
+    }
+
+    /// Returns the time of the next scheduled event, or None if no events are scheduled.
+    pub fn peek_next_event_time(&self) -> Option<SimTime> {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.peek().map(|e| e.time())
+    }
+
+    /// Returns a ClockRef for reading the simulation time.
+    pub fn clock(&self) -> scheduler::ClockRef {
+        let scheduler = self.scheduler.lock().unwrap();
+        scheduler.clock()
+    }
+
+    /// Schedule a closure as a task
+    pub fn schedule_closure<F, R>(
+        &mut self,
+        delay: SimTime,
+        closure: F,
+    ) -> task::TaskHandle<R>
+    where
+        F: FnOnce(&mut Scheduler) -> R + 'static,
+        R: 'static,
+    {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.schedule_closure(delay, closure)
+    }
+
+    /// Schedule a timeout callback
+    pub fn timeout<F>(
+        &mut self,
+        delay: SimTime,
+        callback: F,
+    ) -> task::TaskHandle<()>
+    where
+        F: FnOnce(&mut Scheduler) + 'static,
+    {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.timeout(delay, callback)
+    }
+
+    /// Schedule a task to run at a specific time
+    pub fn schedule_task<T: task::Task>(
+        &mut self,
+        delay: SimTime,
+        task: T,
+    ) -> task::TaskHandle<T::Output> {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.schedule_task(delay, task)
+    }
+
+    /// Cancel a scheduled task
+    pub fn cancel_task<T>(&mut self, handle: task::TaskHandle<T>) -> bool {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.cancel_task(handle)
+    }
+
+    /// Get the result of a completed task
+    pub fn get_task_result<T: 'static>(&mut self, handle: task::TaskHandle<T>) -> Option<T> {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.get_task_result(handle)
+    }
+
+    /// Check if there are pending events
+    pub fn has_pending_events(&self) -> bool {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.peek().is_some()
     }
 }
