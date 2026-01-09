@@ -11,7 +11,9 @@ pub mod retry_policy;
 
 pub mod server;
 pub mod simple_client;
+pub mod tonic;
 pub mod tower;
+pub mod transport;
 
 // Export distribution patterns from des-core
 pub use des_core::dists::{
@@ -36,6 +38,16 @@ pub use tower::{
     DesLoadBalanceStrategy, DesLoadBalancer, DesRateLimit, DesTimeout,
 };
 pub use tower::{DesService, DesServiceBuilder, SchedulerHandle, ServiceError, SimBody};
+pub use transport::{
+    EndpointId, EndpointInfo, EndpointRegistry, LatencyConfig, LatencyJitterModel, MessageType,
+    NetworkModel, SharedEndpointRegistry, SimEndpointRegistry, SimTransport, SimpleNetworkModel,
+    TransportEvent, TransportMessage,
+};
+pub use tonic::{
+    codec::{JsonCodec, ProtobufCodec}, MethodDescriptor, RpcCodec, RpcEvent, RpcRequest, RpcResponse,
+    RpcService, RpcStatus, RpcStatusCode, SimTonicClient, SimTonicServer, TonicClientBuilder,
+    TonicClientComponent, TonicError, TonicResult, TonicServerBuilder, TonicServerComponent,
+};
 
 pub use builder::{
     validate_non_empty, validate_non_negative, validate_positive, validate_range, BuilderState,
