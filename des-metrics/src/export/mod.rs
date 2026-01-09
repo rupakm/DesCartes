@@ -3,8 +3,8 @@
 //! This module provides exporters for different data formats to enable
 //! visualization and analysis with external tools.
 
-pub mod json;
 pub mod csv;
+pub mod json;
 
 use crate::error::MetricsError;
 use crate::simulation_metrics::SimulationMetrics;

@@ -38,7 +38,9 @@ impl CsvExporter {
 
     /// Get the path for a specific CSV file
     fn get_path_for_type(&self, suffix: &str) -> PathBuf {
-        let stem = self.path.file_stem()
+        let stem = self
+            .path
+            .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("metrics");
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
@@ -87,7 +89,13 @@ impl CsvExporter {
         for (name, labels, value) in counters {
             if self.include_labels {
                 let labels_str = format_labels(labels);
-                writeln!(file, "{},{},{}", escape_csv(name), escape_csv(&labels_str), value)
+                writeln!(
+                    file,
+                    "{},{},{}",
+                    escape_csv(name),
+                    escape_csv(&labels_str),
+                    value
+                )
             } else {
                 writeln!(file, "{},{}", escape_csv(name), value)
             }
@@ -117,7 +125,13 @@ impl CsvExporter {
         for (name, labels, value) in gauges {
             if self.include_labels {
                 let labels_str = format_labels(labels);
-                writeln!(file, "{},{},{}", escape_csv(name), escape_csv(&labels_str), value)
+                writeln!(
+                    file,
+                    "{},{},{}",
+                    escape_csv(name),
+                    escape_csv(&labels_str),
+                    value
+                )
             } else {
                 writeln!(file, "{},{}", escape_csv(name), value)
             }
@@ -129,7 +143,11 @@ impl CsvExporter {
 
     fn export_histograms(
         &self,
-        histograms: &[(String, std::collections::BTreeMap<String, String>, crate::simulation_metrics::HistogramStats)],
+        histograms: &[(
+            String,
+            std::collections::BTreeMap<String, String>,
+            crate::simulation_metrics::HistogramStats,
+        )],
     ) -> Result<(), MetricsError> {
         let path = self.get_path_for_type("histograms");
         let mut file = File::create(&path)
@@ -137,7 +155,10 @@ impl CsvExporter {
 
         // Write header
         if self.include_labels {
-            writeln!(file, "metric_name,labels,count,sum,min,max,mean,median,p95,p99")
+            writeln!(
+                file,
+                "metric_name,labels,count,sum,min,max,mean,median,p95,p99"
+            )
         } else {
             writeln!(file, "metric_name,count,sum,min,max,mean,median,p95,p99")
         }
@@ -191,11 +212,8 @@ impl CsvExporter {
             .map_err(|e| MetricsError::ExportError(format!("Failed to create file: {e}")))?;
 
         // Write header
-        writeln!(
-            file,
-            "metric,value"
-        )
-        .map_err(|e| MetricsError::ExportError(format!("Failed to write header: {e}")))?;
+        writeln!(file, "metric,value")
+            .map_err(|e| MetricsError::ExportError(format!("Failed to write header: {e}")))?;
 
         // Write aggregate stats
         writeln!(file, "active_requests,{}", stats.active_requests)?;
@@ -210,18 +228,58 @@ impl CsvExporter {
         writeln!(file, "success_rate,{}", stats.success_rate)?;
 
         // Write request latency stats
-        writeln!(file, "request_latency_mean_ms,{}", stats.request_latency.mean.as_secs_f64() * 1000.0)?;
-        writeln!(file, "request_latency_median_ms,{}", stats.request_latency.median.as_secs_f64() * 1000.0)?;
-        writeln!(file, "request_latency_p95_ms,{}", stats.request_latency.p95.as_secs_f64() * 1000.0)?;
-        writeln!(file, "request_latency_p99_ms,{}", stats.request_latency.p99.as_secs_f64() * 1000.0)?;
-        writeln!(file, "request_latency_p999_ms,{}", stats.request_latency.p999.as_secs_f64() * 1000.0)?;
+        writeln!(
+            file,
+            "request_latency_mean_ms,{}",
+            stats.request_latency.mean.as_secs_f64() * 1000.0
+        )?;
+        writeln!(
+            file,
+            "request_latency_median_ms,{}",
+            stats.request_latency.median.as_secs_f64() * 1000.0
+        )?;
+        writeln!(
+            file,
+            "request_latency_p95_ms,{}",
+            stats.request_latency.p95.as_secs_f64() * 1000.0
+        )?;
+        writeln!(
+            file,
+            "request_latency_p99_ms,{}",
+            stats.request_latency.p99.as_secs_f64() * 1000.0
+        )?;
+        writeln!(
+            file,
+            "request_latency_p999_ms,{}",
+            stats.request_latency.p999.as_secs_f64() * 1000.0
+        )?;
 
         // Write attempt latency stats
-        writeln!(file, "attempt_latency_mean_ms,{}", stats.attempt_latency.mean.as_secs_f64() * 1000.0)?;
-        writeln!(file, "attempt_latency_median_ms,{}", stats.attempt_latency.median.as_secs_f64() * 1000.0)?;
-        writeln!(file, "attempt_latency_p95_ms,{}", stats.attempt_latency.p95.as_secs_f64() * 1000.0)?;
-        writeln!(file, "attempt_latency_p99_ms,{}", stats.attempt_latency.p99.as_secs_f64() * 1000.0)?;
-        writeln!(file, "attempt_latency_p999_ms,{}", stats.attempt_latency.p999.as_secs_f64() * 1000.0)?;
+        writeln!(
+            file,
+            "attempt_latency_mean_ms,{}",
+            stats.attempt_latency.mean.as_secs_f64() * 1000.0
+        )?;
+        writeln!(
+            file,
+            "attempt_latency_median_ms,{}",
+            stats.attempt_latency.median.as_secs_f64() * 1000.0
+        )?;
+        writeln!(
+            file,
+            "attempt_latency_p95_ms,{}",
+            stats.attempt_latency.p95.as_secs_f64() * 1000.0
+        )?;
+        writeln!(
+            file,
+            "attempt_latency_p99_ms,{}",
+            stats.attempt_latency.p99.as_secs_f64() * 1000.0
+        )?;
+        writeln!(
+            file,
+            "attempt_latency_p999_ms,{}",
+            stats.attempt_latency.p999.as_secs_f64() * 1000.0
+        )?;
 
         Ok(())
     }

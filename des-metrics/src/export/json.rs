@@ -5,8 +5,8 @@
 
 use crate::error::MetricsError;
 use crate::export::MetricsExporter;
-use crate::simulation_metrics::{HistogramStats, LatencyStats, MetricsSnapshot, SimulationMetrics};
 use crate::request_tracker::{LatencyStats as RequestLatencyStats, RequestTrackerStats};
+use crate::simulation_metrics::{HistogramStats, LatencyStats, MetricsSnapshot, SimulationMetrics};
 use serde::Serialize;
 use std::fs::File;
 use std::io::Write;
@@ -42,7 +42,12 @@ impl MetricsExporter for JsonExporter {
 
         // Collect all latency stats
         let mut latency_stats = Vec::new();
-        for name in &["latency", "response_time_ms", "request_duration_ms", "service_time"] {
+        for name in &[
+            "latency",
+            "response_time_ms",
+            "request_duration_ms",
+            "service_time",
+        ] {
             if let Some(stats) = metrics.get_latency_stats(name) {
                 latency_stats.push((name.to_string(), SerializableLatencyStats::from(stats)));
             }
@@ -94,13 +99,27 @@ struct SerializableMetricsSnapshot {
 impl SerializableMetricsSnapshot {
     fn from(snapshot: MetricsSnapshot) -> Self {
         Self {
-            counters: snapshot.counters.into_iter()
-                .map(|(name, labels, value)| CounterEntry { name, labels, value })
+            counters: snapshot
+                .counters
+                .into_iter()
+                .map(|(name, labels, value)| CounterEntry {
+                    name,
+                    labels,
+                    value,
+                })
                 .collect(),
-            gauges: snapshot.gauges.into_iter()
-                .map(|(name, labels, value)| GaugeEntry { name, labels, value })
+            gauges: snapshot
+                .gauges
+                .into_iter()
+                .map(|(name, labels, value)| GaugeEntry {
+                    name,
+                    labels,
+                    value,
+                })
                 .collect(),
-            histograms: snapshot.histograms.into_iter()
+            histograms: snapshot
+                .histograms
+                .into_iter()
                 .map(|(name, labels, stats)| HistogramEntry {
                     name,
                     labels,

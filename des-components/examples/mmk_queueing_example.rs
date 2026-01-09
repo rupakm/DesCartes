@@ -12,18 +12,18 @@
 //! Run with: cargo run --package des-components --example mmk_queueing_example
 
 use des_components::{
-    SimpleClient, Server, ServerEvent, ClientEvent, FifoQueue,
-    ExponentialBackoffPolicy, FixedRetryPolicy,
+    ClientEvent, ExponentialBackoffPolicy, FifoQueue, FixedRetryPolicy, Server, ServerEvent,
+    SimpleClient,
 };
 use des_core::{
-    Component, Key, Scheduler, SimTime, Simulation, Execute, Executor,
-    RequestAttempt, RequestAttemptId, RequestId, Response,
+    Component, Execute, Executor, Key, RequestAttempt, RequestAttemptId, RequestId, Response,
+    Scheduler, SimTime, Simulation,
 };
-use des_metrics::SimulationMetrics;
 use des_metrics::MmkTimeSeriesMetrics;
-use des_viz::charts::time_series::{TimeSeries, create_mmk_time_series_chart};
-use plotters::prelude::{RED, BLUE, GREEN};
-use rand_distr::{Exp, Distribution};
+use des_metrics::SimulationMetrics;
+use des_viz::charts::time_series::{create_mmk_time_series_chart, TimeSeries};
+use plotters::prelude::{BLUE, GREEN, RED};
+use rand_distr::{Distribution, Exp};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -34,7 +34,7 @@ fn format_sim_time(sim_time: SimTime) -> String {
     let total_ms = duration.as_millis();
     let seconds = total_ms / 1000;
     let ms = total_ms % 1000;
-    
+
     if seconds > 0 {
         format!("{seconds}.{ms:03}s")
     } else {
@@ -79,7 +79,13 @@ impl MmkConfig {
     }
 
     /// Create config for classic M/M/k queue
-    pub fn mmk(lambda: f64, mu: f64, k: usize, duration: Duration, queue_capacity: Option<usize>) -> Self {
+    pub fn mmk(
+        lambda: f64,
+        mu: f64,
+        k: usize,
+        duration: Duration,
+        queue_capacity: Option<usize>,
+    ) -> Self {
         Self {
             lambda,
             mu,
@@ -170,7 +176,7 @@ impl ExponentialArrivalClient {
         time_series_metrics: Arc<Mutex<MmkTimeSeriesMetrics>>,
     ) -> Self {
         let exp_dist = Exp::new(lambda).unwrap();
-        
+
         Self {
             name,
             server_key,
@@ -202,7 +208,7 @@ impl ExponentialArrivalClient {
         // Sample inter-arrival time from exponential distribution
         let inter_arrival = self.exp_dist.sample(&mut self.rng);
         let delay = Duration::from_secs_f64(inter_arrival);
-        
+
         scheduler.schedule(
             SimTime::from_duration(delay),
             self_key,
@@ -213,10 +219,11 @@ impl ExponentialArrivalClient {
     fn send_request(&mut self, scheduler: &mut Scheduler, self_key: Key<ClientEvent>) {
         let request_id = RequestId(self.next_request_id);
         let attempt_id = RequestAttemptId(self.next_request_id);
-        
+
         // Record request start time for latency calculation
-        self.request_start_times.insert(request_id, scheduler.time());
-        
+        self.request_start_times
+            .insert(request_id, scheduler.time());
+
         // Create request attempt
         let attempt = RequestAttempt::new(
             attempt_id,
@@ -225,16 +232,16 @@ impl ExponentialArrivalClient {
             scheduler.time(),
             format!("Request {} from {}", self.next_request_id, self.name).into_bytes(),
         );
-        
+
         self.next_request_id += 1;
         self.requests_sent += 1;
-        
+
         // Record metrics
         {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.increment_counter("requests_sent", &[("component", &self.name)]);
         }
-        
+
         // Send to server
         scheduler.schedule_now(
             self.server_key,
@@ -243,10 +250,15 @@ impl ExponentialArrivalClient {
                 client_id: self_key,
             },
         );
-        
-        println!("[{}] [{}] Sent request {} at {}", 
-                 format_sim_time(scheduler.time()), self.name, request_id.0, format_sim_time(scheduler.time()));
-        
+
+        println!(
+            "[{}] [{}] Sent request {} at {}",
+            format_sim_time(scheduler.time()),
+            self.name,
+            request_id.0,
+            format_sim_time(scheduler.time())
+        );
+
         // Schedule next request
         self.schedule_next_request(scheduler, self_key);
     }
@@ -256,7 +268,7 @@ impl ExponentialArrivalClient {
         if let Some(start_time) = self.request_start_times.remove(&response.request_id) {
             let latency = scheduler.time().duration_since(start_time);
             let latency_ms = latency.as_millis() as f64;
-            
+
             // Record metrics
             {
                 let mut metrics = self.metrics.lock().unwrap();
@@ -265,17 +277,27 @@ impl ExponentialArrivalClient {
                 } else {
                     metrics.increment_counter("responses_failure", &[("component", &self.name)]);
                 }
-                metrics.record_histogram("response_time_ms", latency_ms, &[("component", &self.name)]);
+                metrics.record_histogram(
+                    "response_time_ms",
+                    latency_ms,
+                    &[("component", &self.name)],
+                );
             }
-            
+
             // Record time-series data
             {
                 let mut ts_metrics = self.time_series_metrics.lock().unwrap();
                 ts_metrics.record_latency(scheduler.time(), latency_ms);
             }
-            
-            println!("[{}] [{}] Received response for request {} (latency: {:.2}ms, success: {})", 
-                     format_sim_time(scheduler.time()), self.name, response.request_id.0, latency_ms, response.is_success());
+
+            println!(
+                "[{}] [{}] Received response for request {} (latency: {:.2}ms, success: {})",
+                format_sim_time(scheduler.time()),
+                self.name,
+                response.request_id.0,
+                latency_ms,
+                response.is_success()
+            );
         }
     }
 }
@@ -297,10 +319,18 @@ impl Component for ExponentialArrivalClient {
                 self.handle_response(response, scheduler);
             }
             ClientEvent::RequestTimeout { .. } => {
-                println!("[{}] [{}] Request timeout occurred", format_sim_time(scheduler.time()), self.name);
+                println!(
+                    "[{}] [{}] Request timeout occurred",
+                    format_sim_time(scheduler.time()),
+                    self.name
+                );
             }
             ClientEvent::RetryRequest { .. } => {
-                println!("[{}] [{}] Retry request (should not occur with NoRetryPolicy)", format_sim_time(scheduler.time()), self.name);
+                println!(
+                    "[{}] [{}] Retry request (should not occur with NoRetryPolicy)",
+                    format_sim_time(scheduler.time()),
+                    self.name
+                );
             }
         }
     }
@@ -349,7 +379,13 @@ impl ConstantArrivalClient {
         time_series_metrics: Arc<Mutex<MmkTimeSeriesMetrics>>,
     ) -> Self {
         let inter_arrival_time = Duration::from_secs_f64(1.0 / rate);
-        Self::new(name, server_key, inter_arrival_time, metrics, time_series_metrics)
+        Self::new(
+            name,
+            server_key,
+            inter_arrival_time,
+            metrics,
+            time_series_metrics,
+        )
     }
 
     pub fn with_max_requests(mut self, max_requests: u64) -> Self {
@@ -376,10 +412,11 @@ impl ConstantArrivalClient {
     fn send_request(&mut self, scheduler: &mut Scheduler, self_key: Key<ClientEvent>) {
         let request_id = RequestId(self.next_request_id);
         let attempt_id = RequestAttemptId(self.next_request_id);
-        
+
         // Record request start time for latency calculation
-        self.request_start_times.insert(request_id, scheduler.time());
-        
+        self.request_start_times
+            .insert(request_id, scheduler.time());
+
         // Create request attempt
         let attempt = RequestAttempt::new(
             attempt_id,
@@ -388,16 +425,16 @@ impl ConstantArrivalClient {
             scheduler.time(),
             format!("Request {} from {}", self.next_request_id, self.name).into_bytes(),
         );
-        
+
         self.next_request_id += 1;
         self.requests_sent += 1;
-        
+
         // Record metrics
         {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.increment_counter("requests_sent", &[("component", &self.name)]);
         }
-        
+
         // Send to server
         scheduler.schedule_now(
             self.server_key,
@@ -406,11 +443,16 @@ impl ConstantArrivalClient {
                 client_id: self_key,
             },
         );
-        
-        println!("[{}] [{}] Sent request {} at {} (constant interval: {:.0}ms)", 
-                 format_sim_time(scheduler.time()), self.name, request_id.0, 
-                 format_sim_time(scheduler.time()), self.inter_arrival_time.as_millis());
-        
+
+        println!(
+            "[{}] [{}] Sent request {} at {} (constant interval: {:.0}ms)",
+            format_sim_time(scheduler.time()),
+            self.name,
+            request_id.0,
+            format_sim_time(scheduler.time()),
+            self.inter_arrival_time.as_millis()
+        );
+
         // Schedule next request
         self.schedule_next_request(scheduler, self_key);
     }
@@ -420,7 +462,7 @@ impl ConstantArrivalClient {
         if let Some(start_time) = self.request_start_times.remove(&response.request_id) {
             let latency = scheduler.time().duration_since(start_time);
             let latency_ms = latency.as_millis() as f64;
-            
+
             // Record metrics
             {
                 let mut metrics = self.metrics.lock().unwrap();
@@ -429,17 +471,27 @@ impl ConstantArrivalClient {
                 } else {
                     metrics.increment_counter("responses_failure", &[("component", &self.name)]);
                 }
-                metrics.record_histogram("response_time_ms", latency_ms, &[("component", &self.name)]);
+                metrics.record_histogram(
+                    "response_time_ms",
+                    latency_ms,
+                    &[("component", &self.name)],
+                );
             }
-            
+
             // Record time-series data
             {
                 let mut ts_metrics = self.time_series_metrics.lock().unwrap();
                 ts_metrics.record_latency(scheduler.time(), latency_ms);
             }
-            
-            println!("[{}] [{}] Received response for request {} (latency: {:.2}ms, success: {})", 
-                     format_sim_time(scheduler.time()), self.name, response.request_id.0, latency_ms, response.is_success());
+
+            println!(
+                "[{}] [{}] Received response for request {} (latency: {:.2}ms, success: {})",
+                format_sim_time(scheduler.time()),
+                self.name,
+                response.request_id.0,
+                latency_ms,
+                response.is_success()
+            );
         }
     }
 }
@@ -461,10 +513,18 @@ impl Component for ConstantArrivalClient {
                 self.handle_response(response, scheduler);
             }
             ClientEvent::RequestTimeout { .. } => {
-                println!("[{}] [{}] Request timeout occurred", format_sim_time(scheduler.time()), self.name);
+                println!(
+                    "[{}] [{}] Request timeout occurred",
+                    format_sim_time(scheduler.time()),
+                    self.name
+                );
             }
             ClientEvent::RetryRequest { .. } => {
-                println!("[{}] [{}] Retry request (should not occur with NoRetryPolicy)", format_sim_time(scheduler.time()), self.name);
+                println!(
+                    "[{}] [{}] Retry request (should not occur with NoRetryPolicy)",
+                    format_sim_time(scheduler.time()),
+                    self.name
+                );
             }
         }
     }
@@ -532,15 +592,22 @@ impl Component for ExponentialServiceServer {
         scheduler: &mut Scheduler,
     ) {
         match event {
-            ServerEvent::ProcessRequest { attempt, client_id: _ } => {
+            ServerEvent::ProcessRequest {
+                attempt,
+                client_id: _,
+            } => {
                 // Check if request will be rejected
-                let will_reject = self.inner_server.active_threads >= self.inner_server.thread_capacity
+                let will_reject = self.inner_server.active_threads
+                    >= self.inner_server.thread_capacity
                     && self.inner_server.queue.as_ref().is_none_or(|q| q.is_full());
 
                 if will_reject {
                     // Record drop in metrics
                     let mut metrics = self.metrics.lock().unwrap();
-                    metrics.increment_counter("requests_dropped", &[("component", &self.inner_server.name)]);
+                    metrics.increment_counter(
+                        "requests_dropped",
+                        &[("component", &self.inner_server.name)],
+                    );
                 }
 
                 // Record time-series data for queue size and utilization
@@ -553,8 +620,12 @@ impl Component for ExponentialServiceServer {
                 // Process with the inner server (now uses built-in exponential distribution)
                 self.inner_server.process_event(self_id, event, scheduler);
 
-                println!("[{}] [{}] Processing request {} with exponential service time distribution",
-                         format_sim_time(scheduler.time()), self.inner_server.name, attempt.id.0);
+                println!(
+                    "[{}] [{}] Processing request {} with exponential service time distribution",
+                    format_sim_time(scheduler.time()),
+                    self.inner_server.name,
+                    attempt.id.0
+                );
             }
             _ => {
                 // Delegate other events to inner server
@@ -588,21 +659,36 @@ impl MmkResults {
         println!("  λ (arrival rate): {:.2} req/s", self.config.lambda);
         println!("  μ (service rate): {:.2} req/s per server", self.config.mu);
         println!("  k (servers): {}", self.config.k);
-        println!("  Queue capacity: {}", format_queue_capacity(self.config.queue_capacity));
-        println!("  Theoretical ρ: {:.3} ({})", 
-                 self.theoretical_utilization,
-                 if self.config.is_stable() { "stable" } else { "unstable" });
-        
+        println!(
+            "  Queue capacity: {}",
+            format_queue_capacity(self.config.queue_capacity)
+        );
+        println!(
+            "  Theoretical ρ: {:.3} ({})",
+            self.theoretical_utilization,
+            if self.config.is_stable() {
+                "stable"
+            } else {
+                "unstable"
+            }
+        );
+
         println!("\nPerformance Metrics:");
         println!("  Requests sent: {}", self.requests_sent);
         println!("  Requests completed: {}", self.requests_completed);
         println!("  Requests dropped: {}", self.requests_dropped);
         println!("  Success rate: {:.2}%", self.success_rate * 100.0);
         println!("  Throughput: {:.2} req/s", self.throughput_rps);
-        println!("  Server utilization: {:.2}%", self.server_utilization * 100.0);
-        
+        println!(
+            "  Server utilization: {:.2}%",
+            self.server_utilization * 100.0
+        );
+
         println!("\nLatency Metrics:");
-        println!("  Average response time: {:.2} ms", self.avg_response_time_ms);
+        println!(
+            "  Average response time: {:.2} ms",
+            self.avg_response_time_ms
+        );
         if let Some(p95) = self.p95_response_time_ms {
             println!("  P95 response time: {p95:.2} ms");
         }
@@ -610,22 +696,30 @@ impl MmkResults {
             println!("  P99 response time: {p99:.2} ms");
         }
         println!("  Average queue depth: {:.2}", self.avg_queue_depth);
-        
+
         // Queue-specific analysis
         match self.config.queue_capacity {
             None => println!("\n🔄 Queue Analysis: Unlimited queue capacity"),
             Some(0) => {
                 println!("\n🚫 Queue Analysis: No queue - requests rejected when server busy");
                 if self.requests_dropped > 0 {
-                    let drop_rate = self.requests_dropped as f64 / self.requests_sent as f64 * 100.0;
-                    println!("  Drop rate: {:.1}% ({} requests)", drop_rate, self.requests_dropped);
+                    let drop_rate =
+                        self.requests_dropped as f64 / self.requests_sent as f64 * 100.0;
+                    println!(
+                        "  Drop rate: {:.1}% ({} requests)",
+                        drop_rate, self.requests_dropped
+                    );
                 }
-            },
+            }
             Some(capacity) => {
                 println!("\n📦 Queue Analysis: Bounded queue (capacity: {capacity})");
                 if self.requests_dropped > 0 {
-                    let drop_rate = self.requests_dropped as f64 / self.requests_sent as f64 * 100.0;
-                    println!("  Drop rate: {:.1}% ({} requests)", drop_rate, self.requests_dropped);
+                    let drop_rate =
+                        self.requests_dropped as f64 / self.requests_sent as f64 * 100.0;
+                    println!(
+                        "  Drop rate: {:.1}% ({} requests)",
+                        drop_rate, self.requests_dropped
+                    );
                     println!("  Queue likely reached capacity during high load periods");
                 }
                 let queue_utilization = self.avg_queue_depth / capacity as f64 * 100.0;
@@ -641,40 +735,46 @@ fn generate_time_series_charts(
     scenario_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ts_metrics = time_series_metrics.lock().unwrap();
-    
+
     // Create output directory
     std::fs::create_dir_all("target/mmk_charts")?;
-    
+
     // Convert time-series data to visualization format
-    let latency_data: Vec<des_viz::charts::time_series::TimeSeriesPoint> = ts_metrics.latency.get_aggregated_data()
+    let latency_data: Vec<des_viz::charts::time_series::TimeSeriesPoint> = ts_metrics
+        .latency
+        .get_aggregated_data()
         .iter()
         .map(|point| des_viz::charts::time_series::TimeSeriesPoint {
             timestamp: point.timestamp,
             value: point.value,
         })
         .collect();
-    
-    let queue_size_data: Vec<des_viz::charts::time_series::TimeSeriesPoint> = ts_metrics.queue_size.get_aggregated_data()
+
+    let queue_size_data: Vec<des_viz::charts::time_series::TimeSeriesPoint> = ts_metrics
+        .queue_size
+        .get_aggregated_data()
         .iter()
         .map(|point| des_viz::charts::time_series::TimeSeriesPoint {
             timestamp: point.timestamp,
             value: point.value,
         })
         .collect();
-    
-    let timeout_rate_data: Vec<des_viz::charts::time_series::TimeSeriesPoint> = ts_metrics.timeout_rate.get_aggregated_data()
+
+    let timeout_rate_data: Vec<des_viz::charts::time_series::TimeSeriesPoint> = ts_metrics
+        .timeout_rate
+        .get_aggregated_data()
         .iter()
         .map(|point| des_viz::charts::time_series::TimeSeriesPoint {
             timestamp: point.timestamp,
             value: point.value,
         })
         .collect();
-    
+
     // Create time series
     let latency_series = TimeSeries::new("Average Latency", latency_data, RED);
     let queue_size_series = TimeSeries::new("Average Queue Size", queue_size_data, BLUE);
     let timeout_rate_series = TimeSeries::new("Timeout Rate", timeout_rate_data, GREEN);
-    
+
     // Generate the chart
     let output_path = format!("target/mmk_charts/{scenario_name}_time_series.png");
     create_mmk_time_series_chart(
@@ -683,7 +783,7 @@ fn generate_time_series_charts(
         &timeout_rate_series,
         &output_path,
     )?;
-    
+
     println!("📊 Generated time-series chart: {output_path}");
     Ok(())
 }
@@ -691,11 +791,14 @@ fn generate_time_series_charts(
 /// Run a classic M/M/1 queue simulation (no retries)
 pub fn run_classic_mm1_queue(config: MmkConfig) -> MmkResults {
     println!("\n🔄 Running Classic M/M/1 Queue Simulation");
-    println!("λ={:.2}, μ={:.2}, duration={:?}", config.lambda, config.mu, config.duration);
-    
+    println!(
+        "λ={:.2}, μ={:.2}, duration={:?}",
+        config.lambda, config.mu, config.duration
+    );
+
     let mut simulation = Simulation::default();
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
-    
+
     // Create time-series metrics with 100ms aggregation window and 0.1 EMA alpha
     let time_series_metrics = Arc::new(Mutex::new(MmkTimeSeriesMetrics::new(
         Duration::from_millis(100),
@@ -710,7 +813,7 @@ pub fn run_classic_mm1_queue(config: MmkConfig) -> MmkResults {
         metrics.clone(),
         time_series_metrics.clone(),
     );
-    
+
     let server = if let Some(capacity) = config.queue_capacity {
         if capacity > 0 {
             server.with_queue(Box::new(FifoQueue::bounded(capacity)))
@@ -757,8 +860,12 @@ pub fn run_classic_mm1_queue(config: MmkConfig) -> MmkResults {
     });
 
     // Collect results
-    let final_server = simulation.remove_component::<ServerEvent, ExponentialServiceServer>(server_key).unwrap();
-    let final_client = simulation.remove_component::<ClientEvent, ExponentialArrivalClient>(client_key).unwrap();
+    let final_server = simulation
+        .remove_component::<ServerEvent, ExponentialServiceServer>(server_key)
+        .unwrap();
+    let final_client = simulation
+        .remove_component::<ClientEvent, ExponentialArrivalClient>(client_key)
+        .unwrap();
     let final_metrics = {
         let metrics_guard = metrics.lock().unwrap();
         // Get a snapshot instead of cloning the guard
@@ -769,7 +876,7 @@ pub fn run_classic_mm1_queue(config: MmkConfig) -> MmkResults {
     let requests_sent = final_client.requests_sent;
     let requests_completed = final_server.inner_server.requests_processed;
     let requests_dropped = final_server.inner_server.requests_rejected;
-    
+
     let success_rate = if requests_sent > 0 {
         requests_completed as f64 / requests_sent as f64
     } else {
@@ -777,22 +884,21 @@ pub fn run_classic_mm1_queue(config: MmkConfig) -> MmkResults {
     };
 
     let throughput_rps = requests_completed as f64 / config.duration.as_secs_f64();
-    
+
     // Get response time metrics
-    let response_times_stats = final_metrics.histograms.iter()
-        .find(|(name, labels, _)| name == "response_time_ms" && 
-              labels.get("component").is_some_and(|c| c == "mm1-client"))
+    let response_times_stats = final_metrics
+        .histograms
+        .iter()
+        .find(|(name, labels, _)| {
+            name == "response_time_ms" && labels.get("component").is_some_and(|c| c == "mm1-client")
+        })
         .map(|(_, _, stats)| stats);
-    
-    let avg_response_time_ms = response_times_stats
-        .map(|stats| stats.mean)
-        .unwrap_or(0.0);
 
-    let p95_response_time_ms = response_times_stats
-        .map(|stats| stats.p95);
+    let avg_response_time_ms = response_times_stats.map(|stats| stats.mean).unwrap_or(0.0);
 
-    let p99_response_time_ms = response_times_stats
-        .map(|stats| stats.p99);
+    let p95_response_time_ms = response_times_stats.map(|stats| stats.p95);
+
+    let p99_response_time_ms = response_times_stats.map(|stats| stats.p99);
 
     MmkResults {
         config: config.clone(),
@@ -813,12 +919,14 @@ pub fn run_classic_mm1_queue(config: MmkConfig) -> MmkResults {
 /// Run a classic M/M/k queue simulation (no retries)
 pub fn run_classic_mmk_queue(config: MmkConfig) -> MmkResults {
     println!("\n🔄 Running Classic M/M/{} Queue Simulation", config.k);
-    println!("λ={:.2}, μ={:.2}, k={}, duration={:?}", 
-             config.lambda, config.mu, config.k, config.duration);
-    
+    println!(
+        "λ={:.2}, μ={:.2}, k={}, duration={:?}",
+        config.lambda, config.mu, config.k, config.duration
+    );
+
     let mut simulation = Simulation::default();
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
-    
+
     // Create time-series metrics with 100ms aggregation window and 0.1 EMA alpha
     let time_series_metrics = Arc::new(Mutex::new(MmkTimeSeriesMetrics::new(
         Duration::from_millis(100),
@@ -833,7 +941,7 @@ pub fn run_classic_mmk_queue(config: MmkConfig) -> MmkResults {
         metrics.clone(),
         time_series_metrics.clone(),
     );
-    
+
     let server = if let Some(capacity) = config.queue_capacity {
         if capacity > 0 {
             server.with_queue(Box::new(FifoQueue::bounded(capacity)))
@@ -875,13 +983,18 @@ pub fn run_classic_mmk_queue(config: MmkConfig) -> MmkResults {
     }
 
     // Generate time-series visualizations
-    generate_time_series_charts(&time_series_metrics, &format!("mm{}_classic", config.k)).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to generate time-series charts: {e}");
-    });
+    generate_time_series_charts(&time_series_metrics, &format!("mm{}_classic", config.k))
+        .unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to generate time-series charts: {e}");
+        });
 
     // Collect results (same as MM1)
-    let final_server = simulation.remove_component::<ServerEvent, ExponentialServiceServer>(server_key).unwrap();
-    let final_client = simulation.remove_component::<ClientEvent, ExponentialArrivalClient>(client_key).unwrap();
+    let final_server = simulation
+        .remove_component::<ServerEvent, ExponentialServiceServer>(server_key)
+        .unwrap();
+    let final_client = simulation
+        .remove_component::<ClientEvent, ExponentialArrivalClient>(client_key)
+        .unwrap();
     let final_metrics = {
         let metrics_guard = metrics.lock().unwrap();
         // Get a snapshot instead of cloning the guard
@@ -892,7 +1005,7 @@ pub fn run_classic_mmk_queue(config: MmkConfig) -> MmkResults {
     let requests_sent = final_client.requests_sent;
     let requests_completed = final_server.inner_server.requests_processed;
     let requests_dropped = final_server.inner_server.requests_rejected;
-    
+
     let success_rate = if requests_sent > 0 {
         requests_completed as f64 / requests_sent as f64
     } else {
@@ -900,23 +1013,22 @@ pub fn run_classic_mmk_queue(config: MmkConfig) -> MmkResults {
     };
 
     let throughput_rps = requests_completed as f64 / config.duration.as_secs_f64();
-    
+
     // Get response time metrics
     let client_name = format!("mm{}-client", config.k);
-    let response_times_stats = final_metrics.histograms.iter()
-        .find(|(name, labels, _)| name == "response_time_ms" && 
-              (labels.get("component") == Some(&client_name)))
+    let response_times_stats = final_metrics
+        .histograms
+        .iter()
+        .find(|(name, labels, _)| {
+            name == "response_time_ms" && (labels.get("component") == Some(&client_name))
+        })
         .map(|(_, _, stats)| stats);
-    
-    let avg_response_time_ms = response_times_stats
-        .map(|stats| stats.mean)
-        .unwrap_or(0.0);
 
-    let p95_response_time_ms = response_times_stats
-        .map(|stats| stats.p95);
+    let avg_response_time_ms = response_times_stats.map(|stats| stats.mean).unwrap_or(0.0);
 
-    let p99_response_time_ms = response_times_stats
-        .map(|stats| stats.p99);
+    let p95_response_time_ms = response_times_stats.map(|stats| stats.p95);
+
+    let p99_response_time_ms = response_times_stats.map(|stats| stats.p99);
 
     MmkResults {
         config: config.clone(),
@@ -937,13 +1049,17 @@ pub fn run_classic_mmk_queue(config: MmkConfig) -> MmkResults {
 /// Run M/M/1 queue with fixed retry policy (no exponential backoff)
 pub fn run_mm1_with_retry(config: MmkConfig) -> MmkResults {
     println!("\n🔄 Running M/M/1 with Fixed Retry Policy");
-    println!("λ={:.2}, μ={:.2}, timeout={:?}, max_retries={}", 
-             config.lambda, config.mu, 
-             config.timeout.unwrap(), config.max_retries.unwrap());
-    
+    println!(
+        "λ={:.2}, μ={:.2}, timeout={:?}, max_retries={}",
+        config.lambda,
+        config.mu,
+        config.timeout.unwrap(),
+        config.max_retries.unwrap()
+    );
+
     let mut simulation = Simulation::default();
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
-    
+
     // Create time-series metrics with 100ms aggregation window and 0.1 EMA alpha
     let time_series_metrics = Arc::new(Mutex::new(MmkTimeSeriesMetrics::new(
         Duration::from_millis(100),
@@ -958,7 +1074,7 @@ pub fn run_mm1_with_retry(config: MmkConfig) -> MmkResults {
         metrics.clone(),
         time_series_metrics.clone(),
     );
-    
+
     let server = if let Some(capacity) = config.queue_capacity {
         if capacity > 0 {
             server.with_queue(Box::new(FifoQueue::bounded(capacity)))
@@ -976,13 +1092,14 @@ pub fn run_mm1_with_retry(config: MmkConfig) -> MmkResults {
         config.max_retries.unwrap(),
         config.base_retry_delay.unwrap(),
     );
-    
+
     let client = SimpleClient::new(
         "mm1-retry-client".to_string(),
         server_key,
         Duration::from_secs_f64(1.0 / config.lambda), // Mean inter-arrival time
         retry_policy,
-    ).with_timeout(config.timeout.unwrap());
+    )
+    .with_timeout(config.timeout.unwrap());
 
     let client_key = simulation.add_component(client);
 
@@ -1012,15 +1129,19 @@ pub fn run_mm1_with_retry(config: MmkConfig) -> MmkResults {
     });
 
     // Collect results
-    let final_server = simulation.remove_component::<ServerEvent, ExponentialServiceServer>(server_key).unwrap();
-    let final_client = simulation.remove_component::<ClientEvent, SimpleClient<FixedRetryPolicy>>(client_key).unwrap();
+    let final_server = simulation
+        .remove_component::<ServerEvent, ExponentialServiceServer>(server_key)
+        .unwrap();
+    let final_client = simulation
+        .remove_component::<ClientEvent, SimpleClient<FixedRetryPolicy>>(client_key)
+        .unwrap();
     let final_metrics = final_client.get_metrics();
 
     // Calculate results
     let requests_sent = final_client.requests_sent;
     let requests_completed = final_server.inner_server.requests_processed;
     let requests_dropped = final_server.inner_server.requests_rejected;
-    
+
     let success_rate = if requests_sent > 0 {
         requests_completed as f64 / requests_sent as f64
     } else {
@@ -1028,21 +1149,18 @@ pub fn run_mm1_with_retry(config: MmkConfig) -> MmkResults {
     };
 
     let throughput_rps = requests_completed as f64 / config.duration.as_secs_f64();
-    
+
     // Get response time metrics
-    let response_times_stats = final_metrics.get_histogram_stats("response_time_ms", &[("component", "mm1-retry-client")]);
+    let response_times_stats =
+        final_metrics.get_histogram_stats("response_time_ms", &[("component", "mm1-retry-client")]);
     let avg_response_time_ms = response_times_stats
         .as_ref()
         .map(|stats| stats.mean)
         .unwrap_or(0.0);
 
-    let p95_response_time_ms = response_times_stats
-        .as_ref()
-        .map(|stats| stats.p95);
+    let p95_response_time_ms = response_times_stats.as_ref().map(|stats| stats.p95);
 
-    let p99_response_time_ms = response_times_stats
-        .as_ref()
-        .map(|stats| stats.p99);
+    let p99_response_time_ms = response_times_stats.as_ref().map(|stats| stats.p99);
 
     MmkResults {
         config: config.clone(),
@@ -1063,14 +1181,18 @@ pub fn run_mm1_with_retry(config: MmkConfig) -> MmkResults {
 /// Run M/M/1 queue with exponential backoff retry policy
 pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
     println!("\n🔄 Running M/M/1 with Exponential Backoff Retry Policy");
-    println!("λ={:.2}, μ={:.2}, timeout={:?}, max_retries={}, base_delay={:?}", 
-             config.lambda, config.mu, 
-             config.timeout.unwrap(), config.max_retries.unwrap(),
-             config.base_retry_delay.unwrap());
-    
+    println!(
+        "λ={:.2}, μ={:.2}, timeout={:?}, max_retries={}, base_delay={:?}",
+        config.lambda,
+        config.mu,
+        config.timeout.unwrap(),
+        config.max_retries.unwrap(),
+        config.base_retry_delay.unwrap()
+    );
+
     let mut simulation = Simulation::default();
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
-    
+
     // Create time-series metrics with 100ms aggregation window and 0.1 EMA alpha
     let time_series_metrics = Arc::new(Mutex::new(MmkTimeSeriesMetrics::new(
         Duration::from_millis(100),
@@ -1085,7 +1207,7 @@ pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
         metrics.clone(),
         time_series_metrics.clone(),
     );
-    
+
     let server = if let Some(capacity) = config.queue_capacity {
         if capacity > 0 {
             server.with_queue(Box::new(FifoQueue::bounded(capacity)))
@@ -1102,15 +1224,17 @@ pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
     let retry_policy = ExponentialBackoffPolicy::new(
         config.max_retries.unwrap(),
         config.base_retry_delay.unwrap(),
-    ).with_jitter(true) // Add jitter to prevent thundering herd
-     .with_multiplier(2.0); // Standard exponential backoff
-    
+    )
+    .with_jitter(true) // Add jitter to prevent thundering herd
+    .with_multiplier(2.0); // Standard exponential backoff
+
     let client = SimpleClient::new(
         "mm1-backoff-client".to_string(),
         server_key,
         Duration::from_secs_f64(1.0 / config.lambda), // Mean inter-arrival time
         retry_policy,
-    ).with_timeout(config.timeout.unwrap());
+    )
+    .with_timeout(config.timeout.unwrap());
 
     let client_key = simulation.add_component(client);
 
@@ -1140,15 +1264,19 @@ pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
     });
 
     // Collect results
-    let final_server = simulation.remove_component::<ServerEvent, ExponentialServiceServer>(server_key).unwrap();
-    let final_client = simulation.remove_component::<ClientEvent, SimpleClient<ExponentialBackoffPolicy>>(client_key).unwrap();
+    let final_server = simulation
+        .remove_component::<ServerEvent, ExponentialServiceServer>(server_key)
+        .unwrap();
+    let final_client = simulation
+        .remove_component::<ClientEvent, SimpleClient<ExponentialBackoffPolicy>>(client_key)
+        .unwrap();
     let final_metrics = final_client.get_metrics();
 
     // Calculate results
     let requests_sent = final_client.requests_sent;
     let requests_completed = final_server.inner_server.requests_processed;
     let requests_dropped = final_server.inner_server.requests_rejected;
-    
+
     let success_rate = if requests_sent > 0 {
         requests_completed as f64 / requests_sent as f64
     } else {
@@ -1156,21 +1284,18 @@ pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
     };
 
     let throughput_rps = requests_completed as f64 / config.duration.as_secs_f64();
-    
+
     // Get response time metrics
-    let response_times_stats = final_metrics.get_histogram_stats("response_time_ms", &[("component", "mm1-backoff-client")]);
+    let response_times_stats = final_metrics
+        .get_histogram_stats("response_time_ms", &[("component", "mm1-backoff-client")]);
     let avg_response_time_ms = response_times_stats
         .as_ref()
         .map(|stats| stats.mean)
         .unwrap_or(0.0);
 
-    let p95_response_time_ms = response_times_stats
-        .as_ref()
-        .map(|stats| stats.p95);
+    let p95_response_time_ms = response_times_stats.as_ref().map(|stats| stats.p95);
 
-    let p99_response_time_ms = response_times_stats
-        .as_ref()
-        .map(|stats| stats.p99);
+    let p99_response_time_ms = response_times_stats.as_ref().map(|stats| stats.p99);
 
     MmkResults {
         config: config.clone(),
@@ -1200,10 +1325,10 @@ pub fn run_constant_arrival_debug(
     println!("\n🔧 Running Constant Arrival Debug Simulation");
     println!("Inter-arrival: {:.0}ms, Service rate: {:.0}rps, Servers: {} threads, {} qsize, Duration: {:?}", 
              inter_arrival_time.as_millis(), mu, server_num_threads, queue_capacity.unwrap_or(0), duration);
-    
+
     let mut simulation = Simulation::default();
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
-    
+
     // Create time-series metrics with 100ms aggregation window and 0.1 EMA alpha
     let time_series_metrics = Arc::new(Mutex::new(MmkTimeSeriesMetrics::new(
         Duration::from_millis(100),
@@ -1238,7 +1363,7 @@ pub fn run_constant_arrival_debug(
         metrics.clone(),
         time_series_metrics.clone(),
     );
-    
+
     if let Some(max) = max_requests {
         client = client.with_max_requests(max);
     }
@@ -1263,13 +1388,19 @@ pub fn run_constant_arrival_debug(
     }
 
     // Generate time-series visualizations
-    generate_time_series_charts(&time_series_metrics, "constant_arrival_debug").unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to generate time-series charts: {e}");
-    });
+    generate_time_series_charts(&time_series_metrics, "constant_arrival_debug").unwrap_or_else(
+        |e| {
+            eprintln!("Warning: Failed to generate time-series charts: {e}");
+        },
+    );
 
     // Collect results
-    let final_server = simulation.remove_component::<ServerEvent, ExponentialServiceServer>(server_key).unwrap();
-    let final_client = simulation.remove_component::<ClientEvent, ConstantArrivalClient>(client_key).unwrap();
+    let final_server = simulation
+        .remove_component::<ServerEvent, ExponentialServiceServer>(server_key)
+        .unwrap();
+    let final_client = simulation
+        .remove_component::<ClientEvent, ConstantArrivalClient>(client_key)
+        .unwrap();
     let final_metrics = {
         let metrics_guard = metrics.lock().unwrap();
         metrics_guard.get_metrics_snapshot()
@@ -1279,7 +1410,7 @@ pub fn run_constant_arrival_debug(
     let requests_sent = final_client.requests_sent;
     let requests_completed = final_server.inner_server.requests_processed;
     let requests_dropped = final_server.inner_server.requests_rejected;
-    
+
     let success_rate = if requests_sent > 0 {
         requests_completed as f64 / requests_sent as f64
     } else {
@@ -1287,22 +1418,22 @@ pub fn run_constant_arrival_debug(
     };
 
     let throughput_rps = requests_completed as f64 / duration.as_secs_f64();
-    
+
     // Get response time metrics
-    let response_times_stats = final_metrics.histograms.iter()
-        .find(|(name, labels, _)| name == "response_time_ms" && 
-              labels.get("component").is_some_and(|c| c == "debug-client"))
+    let response_times_stats = final_metrics
+        .histograms
+        .iter()
+        .find(|(name, labels, _)| {
+            name == "response_time_ms"
+                && labels.get("component").is_some_and(|c| c == "debug-client")
+        })
         .map(|(_, _, stats)| stats);
-    
-    let avg_response_time_ms = response_times_stats
-        .map(|stats| stats.mean)
-        .unwrap_or(0.0);
 
-    let p95_response_time_ms = response_times_stats
-        .map(|stats| stats.p95);
+    let avg_response_time_ms = response_times_stats.map(|stats| stats.mean).unwrap_or(0.0);
 
-    let p99_response_time_ms = response_times_stats
-        .map(|stats| stats.p99);
+    let p95_response_time_ms = response_times_stats.map(|stats| stats.p95);
+
+    let p99_response_time_ms = response_times_stats.map(|stats| stats.p99);
 
     // Calculate theoretical values for comparison
     let arrival_rate = 1.0 / inter_arrival_time.as_secs_f64();
@@ -1338,27 +1469,26 @@ pub fn run_constant_arrival_debug(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== M/M/k Queueing System Examples ===\n");
-    
+
     let duration = Duration::from_secs(2); // 5 seconds for demo
-    
+
     // Test: Constant Arrival Debug - useful for debugging with predictable timing
     println!("\n🔧 === Constant Arrival Debug Test ===");
     let debug_results = run_constant_arrival_debug(
-        Duration::from_millis(100), 
-        2, 
-        2.0, 
+        Duration::from_millis(100),
+        2,
+        2.0,
         Duration::from_secs(5),
-        Some(25), 
-        Some(5), 
+        Some(25),
+        Some(5),
     );
     debug_results.print_summary();
 
-
     // Test 1: Classic M/M/1 queue with bounded queue (capacity 20)
-    let mm1_config = MmkConfig::mm1(5.0, 8.0, duration, Some(20)); 
+    let mm1_config = MmkConfig::mm1(5.0, 8.0, duration, Some(20));
     let mm1a_results = run_classic_mm1_queue(mm1_config);
-    
-    let mm1_config = MmkConfig::mm1(5.0, 8.0, duration, Some(50)); 
+
+    let mm1_config = MmkConfig::mm1(5.0, 8.0, duration, Some(50));
     let mm1b_results = run_classic_mm1_queue(mm1_config);
 
     let mm1_config = MmkConfig::mmk(16.0, 20.0, 1, duration, Some(50));
@@ -1372,63 +1502,93 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     mm1c_results.print_summary();
     mm1d_results.print_summary();
 
-    
-
     // Test 2: Classic M/M/k queue (k=3) with larger queue (capacity 100)
     let mmk_config = MmkConfig::mmk(12.0, 5.0, 3, duration, Some(100)); // λ=12, μ=5, k=3, queue=100
     let mmk_results = run_classic_mmk_queue(mmk_config);
     mmk_results.print_summary();
-    
+
     // Test 3: M/M/1 with fixed retry policy and small queue (capacity 10)
     let mm1_retry_config = MmkConfig::mm1_with_retry(
-        6.0, 8.0, duration, 
+        6.0,
+        8.0,
+        duration,
         Duration::from_millis(500), // 500ms timeout
-        3, // 3 retries
-        Some(10) // Small queue capacity
+        3,                          // 3 retries
+        Some(10),                   // Small queue capacity
     );
     let mm1_retry_results = run_mm1_with_retry(mm1_retry_config);
     mm1_retry_results.print_summary();
-    
+
     // Test 4: M/M/1 with exponential backoff and no queue (capacity 0)
     let mm1_backoff_config = MmkConfig::mm1_with_exp_backoff(
-        6.0, 8.0, duration,
+        6.0,
+        8.0,
+        duration,
         Duration::from_millis(400), // 400ms timeout
-        4, // 4 retries
-        Duration::from_millis(50), // 50ms base delay
-        Some(0) // No queue - reject immediately when server busy
+        4,                          // 4 retries
+        Duration::from_millis(50),  // 50ms base delay
+        Some(0),                    // No queue - reject immediately when server busy
     );
     let mm1_backoff_results = run_mm1_with_exp_backoff(mm1_backoff_config);
     mm1_backoff_results.print_summary();
-    
+
     println!("\n=== Summary Comparison ===");
-    println!("| Scenario              | Queue | Throughput | Avg Latency | Success Rate | Utilization |");
-    println!("|----------------------|-------|------------|-------------|--------------|-------------|");
-    println!("| Classic M/M/1        | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |", 
-             format_queue_capacity(mm1a_results.config.queue_capacity),
-             mm1a_results.throughput_rps, mm1a_results.avg_response_time_ms, 
-             mm1a_results.success_rate * 100.0, mm1a_results.server_utilization * 100.0);
-    println!("| Classic M/M/1        | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |", 
-             format_queue_capacity(mm1b_results.config.queue_capacity),
-             mm1b_results.throughput_rps, mm1b_results.avg_response_time_ms, 
-             mm1b_results.success_rate * 100.0, mm1b_results.server_utilization * 100.0);
-    println!("| Classic M/M/{}        | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |", 
-             mmk_results.config.k,
-             format_queue_capacity(mmk_results.config.queue_capacity),
-             mmk_results.throughput_rps, mmk_results.avg_response_time_ms,
-             mmk_results.success_rate * 100.0, mmk_results.server_utilization * 100.0);
-    println!("| M/M/1 + Fixed Retry  | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |", 
-             format_queue_capacity(mm1_retry_results.config.queue_capacity),
-             mm1_retry_results.throughput_rps, mm1_retry_results.avg_response_time_ms,
-             mm1_retry_results.success_rate * 100.0, mm1_retry_results.server_utilization * 100.0);
-    println!("| M/M/1 + Exp Backoff  | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |", 
-             format_queue_capacity(mm1_backoff_results.config.queue_capacity),
-             mm1_backoff_results.throughput_rps, mm1_backoff_results.avg_response_time_ms,
-             mm1_backoff_results.success_rate * 100.0, mm1_backoff_results.server_utilization * 100.0);
-    println!("| Constant Arrival     | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |", 
-             format_queue_capacity(debug_results.config.queue_capacity),
-             debug_results.throughput_rps, debug_results.avg_response_time_ms,
-             debug_results.success_rate * 100.0, debug_results.server_utilization * 100.0);
-    
+    println!(
+        "| Scenario              | Queue | Throughput | Avg Latency | Success Rate | Utilization |"
+    );
+    println!(
+        "|----------------------|-------|------------|-------------|--------------|-------------|"
+    );
+    println!(
+        "| Classic M/M/1        | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |",
+        format_queue_capacity(mm1a_results.config.queue_capacity),
+        mm1a_results.throughput_rps,
+        mm1a_results.avg_response_time_ms,
+        mm1a_results.success_rate * 100.0,
+        mm1a_results.server_utilization * 100.0
+    );
+    println!(
+        "| Classic M/M/1        | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |",
+        format_queue_capacity(mm1b_results.config.queue_capacity),
+        mm1b_results.throughput_rps,
+        mm1b_results.avg_response_time_ms,
+        mm1b_results.success_rate * 100.0,
+        mm1b_results.server_utilization * 100.0
+    );
+    println!(
+        "| Classic M/M/{}        | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |",
+        mmk_results.config.k,
+        format_queue_capacity(mmk_results.config.queue_capacity),
+        mmk_results.throughput_rps,
+        mmk_results.avg_response_time_ms,
+        mmk_results.success_rate * 100.0,
+        mmk_results.server_utilization * 100.0
+    );
+    println!(
+        "| M/M/1 + Fixed Retry  | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |",
+        format_queue_capacity(mm1_retry_results.config.queue_capacity),
+        mm1_retry_results.throughput_rps,
+        mm1_retry_results.avg_response_time_ms,
+        mm1_retry_results.success_rate * 100.0,
+        mm1_retry_results.server_utilization * 100.0
+    );
+    println!(
+        "| M/M/1 + Exp Backoff  | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |",
+        format_queue_capacity(mm1_backoff_results.config.queue_capacity),
+        mm1_backoff_results.throughput_rps,
+        mm1_backoff_results.avg_response_time_ms,
+        mm1_backoff_results.success_rate * 100.0,
+        mm1_backoff_results.server_utilization * 100.0
+    );
+    println!(
+        "| Constant Arrival     | {:5} | {:8.2} | {:9.2} | {:10.1}% | {:9.1}% |",
+        format_queue_capacity(debug_results.config.queue_capacity),
+        debug_results.throughput_rps,
+        debug_results.avg_response_time_ms,
+        debug_results.success_rate * 100.0,
+        debug_results.server_utilization * 100.0
+    );
+
     println!("\n✅ All M/M/k queueing system examples completed!");
     println!("\n📊 Time-series charts generated in target/mmk_charts/:");
     println!("  - mm1_classic_time_series.png");
@@ -1442,9 +1602,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  • Request timeout rate over time");
     println!("  • 100ms aggregation window with smoothing");
     println!("\n🔧 Debug Features:");
-    println!("  • ConstantArrivalClient: Sends requests at fixed intervals for predictable debugging");
+    println!(
+        "  • ConstantArrivalClient: Sends requests at fixed intervals for predictable debugging"
+    );
     println!("  • run_constant_arrival_debug(): Helper function for debugging scenarios");
-    
+
     Ok(())
 }
 
@@ -1476,10 +1638,10 @@ mod tests {
     fn test_mmk_config_with_custom_queue() {
         let config = MmkConfig::mm1(5.0, 10.0, Duration::from_secs(30), Some(100));
         assert_eq!(config.queue_capacity, Some(100));
-        
+
         let config_no_queue = MmkConfig::mm1(5.0, 10.0, Duration::from_secs(30), Some(0));
         assert_eq!(config_no_queue.queue_capacity, Some(0));
-        
+
         let config_unlimited = MmkConfig::mm1(5.0, 10.0, Duration::from_secs(30), None);
         assert_eq!(config_unlimited.queue_capacity, None);
     }
@@ -1488,7 +1650,7 @@ mod tests {
     fn test_mmk_config_stability() {
         let stable_config = MmkConfig::mmk(8.0, 5.0, 2, Duration::from_secs(10), Some(50)); // ρ = 8/(2*5) = 0.8
         assert!(stable_config.is_stable());
-        
+
         let unstable_config = MmkConfig::mmk(12.0, 5.0, 2, Duration::from_secs(10), Some(50)); // ρ = 12/(2*5) = 1.2
         assert!(!unstable_config.is_stable());
     }
@@ -1504,7 +1666,7 @@ mod tests {
     fn test_classic_mm1_simulation() {
         let config = MmkConfig::mm1(2.0, 5.0, Duration::from_secs(5), Some(50)); // Short simulation
         let results = run_classic_mm1_queue(config);
-        
+
         assert!(results.requests_sent > 0);
         assert!(results.theoretical_utilization < 1.0); // Should be stable
         assert!(results.success_rate >= 0.0 && results.success_rate <= 1.0);
@@ -1514,7 +1676,7 @@ mod tests {
     fn test_classic_mmk_simulation() {
         let config = MmkConfig::mmk(6.0, 4.0, 2, Duration::from_secs(5), Some(50)); // Short simulation
         let results = run_classic_mmk_queue(config);
-        
+
         assert!(results.requests_sent > 0);
         assert_eq!(results.config.k, 2);
         assert!(results.theoretical_utilization < 1.0); // Should be stable
@@ -1523,11 +1685,15 @@ mod tests {
     #[test]
     fn test_mm1_with_retry_simulation() {
         let config = MmkConfig::mm1_with_retry(
-            3.0, 6.0, Duration::from_secs(5),
-            Duration::from_millis(200), 2, Some(50)
+            3.0,
+            6.0,
+            Duration::from_secs(5),
+            Duration::from_millis(200),
+            2,
+            Some(50),
         );
         let results = run_mm1_with_retry(config);
-        
+
         assert!(results.requests_sent > 0);
         assert!(results.success_rate >= 0.0);
     }
@@ -1535,11 +1701,16 @@ mod tests {
     #[test]
     fn test_mm1_with_exp_backoff_simulation() {
         let config = MmkConfig::mm1_with_exp_backoff(
-            5.5, 6.0, Duration::from_secs(5),
-            Duration::from_millis(200), 3, Duration::from_millis(0), Some(500)
+            5.5,
+            6.0,
+            Duration::from_secs(5),
+            Duration::from_millis(200),
+            3,
+            Duration::from_millis(0),
+            Some(500),
         );
         let results = run_mm1_with_exp_backoff(config);
-        
+
         assert!(results.requests_sent > 0);
         assert!(results.success_rate >= 0.0);
     }
@@ -1548,13 +1719,13 @@ mod tests {
     fn test_constant_arrival_debug_simulation() {
         let results = run_constant_arrival_debug(
             Duration::from_millis(100), // 100ms intervals (10 req/s)
-            1, // Single server
-            Duration::from_millis(50), // 50ms service time (20 req/s capacity)
-            Duration::from_secs(1), // 1 second simulation
-            Some(5), // Send exactly 5 requests
-            Some(10), // Small queue
+            1,                          // Single server
+            Duration::from_millis(50),  // 50ms service time (20 req/s capacity)
+            Duration::from_secs(1),     // 1 second simulation
+            Some(5),                    // Send exactly 5 requests
+            Some(10),                   // Small queue
         );
-        
+
         assert!(results.requests_sent > 0);
         assert!(results.success_rate >= 0.0);
         assert!(results.theoretical_utilization < 1.0); // Should be stable (10/20 = 0.5)
@@ -1562,20 +1733,20 @@ mod tests {
 
     #[test]
     fn test_constant_arrival_client_from_rate() {
-        use std::sync::{Arc, Mutex};
-        use des_metrics::{SimulationMetrics, MmkTimeSeriesMetrics};
-        use des_core::{Simulation, Key};
         use crate::ServerEvent;
-        
+        use des_core::{Key, Simulation};
+        use des_metrics::{MmkTimeSeriesMetrics, SimulationMetrics};
+        use std::sync::{Arc, Mutex};
+
         let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
         let time_series_metrics = Arc::new(Mutex::new(MmkTimeSeriesMetrics::new(
             Duration::from_millis(100),
             0.1,
         )));
-        
+
         let simulation = Simulation::default();
         let server_key = Key::<ServerEvent>::new();
-        
+
         // Test creating from rate
         let client = ConstantArrivalClient::from_rate(
             "test-client".to_string(),
@@ -1584,7 +1755,7 @@ mod tests {
             metrics,
             time_series_metrics,
         );
-        
+
         // Should have 200ms inter-arrival time (1/5 = 0.2 seconds)
         assert_eq!(client.inter_arrival_time, Duration::from_millis(200));
         assert_eq!(client.name, "test-client");

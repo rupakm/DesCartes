@@ -55,34 +55,41 @@ pub mod execute;
 pub mod logging;
 pub mod request;
 pub mod scheduler;
+pub mod task;
 pub mod time;
 pub mod types;
-pub mod task;
 pub mod waker;
 
 pub mod formal;
 
-use std::collections::HashMap;
 use std::any::Any;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::{debug, info, trace, warn, instrument};
+use tracing::{debug, info, instrument, trace, warn};
 
 //pub use environment::Environment;
 pub use error::{EventError, SimError};
 // pub use event::{Event, EventPayload, EventScheduler};
 // pub use process::{Process, ProcessManager, Delay, EventWaiter, delay, wait_for_event};
+pub use execute::{Execute, Executor};
+pub use logging::{
+    component_span, event_span, init_detailed_simulation_logging, init_simulation_logging,
+    init_simulation_logging_with_level, simulation_span, task_span,
+};
+pub use request::{
+    AttemptStatus, Request, RequestAttempt, RequestAttemptId, RequestId, RequestStatus, Response,
+    ResponseStatus,
+};
+pub use scheduler::{
+    current_time, defer_wake, in_scheduler_context, ClockRef, EventEntry, Scheduler,
+    SchedulerHandle,
+};
+pub use task::{ClosureTask, PeriodicTask, RetryTask, Task, TaskHandle, TaskId, TimeoutTask};
 pub use time::SimTime;
 pub use types::EventId;
-pub use execute::{Executor, Execute};
-pub use logging::{init_simulation_logging, init_simulation_logging_with_level, init_detailed_simulation_logging, simulation_span, component_span, event_span, task_span};
-pub use request::{Request, RequestAttempt, RequestStatus, AttemptStatus, Response, ResponseStatus, RequestId, RequestAttemptId};
-pub use scheduler::{EventEntry, Scheduler, SchedulerHandle, ClockRef, defer_wake, in_scheduler_context, current_time};
-pub use task::{Task, TaskId, TaskHandle, ClosureTask, TimeoutTask, RetryTask, PeriodicTask};
 pub use waker::create_des_waker;
 
-
-
-pub use formal::{LyapunovError, CertificateError, VerificationError};
+pub use formal::{CertificateError, LyapunovError, VerificationError};
 
 use uuid::Uuid;
 
@@ -97,7 +104,6 @@ impl<T> Key<T> {
         Self {
             id,
             _marker: std::marker::PhantomData,
-
         }
     }
 
@@ -113,7 +119,6 @@ impl<T> Clone for Key<T> {
     }
 }
 impl<T> Copy for Key<T> {}
-
 
 pub trait ProcessEventEntry: Any {
     fn process_event_entry(&mut self, entry: EventEntry, scheduler: &mut Scheduler);
@@ -161,15 +166,12 @@ pub struct Components {
 impl Components {
     #[allow(clippy::missing_panics_doc)]
     /// Process the event on the component given by the event entry.
-    pub fn process_event_entry(
-        &mut self,
-        entry: EventEntry,
-        scheduler: &mut Scheduler,
-    ) {
+    pub fn process_event_entry(&mut self, entry: EventEntry, scheduler: &mut Scheduler) {
         match entry {
             EventEntry::Component(component_entry) => {
                 if let Some(component) = self.components.get_mut(&component_entry.component) {
-                    component.process_event_entry(EventEntry::Component(component_entry), scheduler);
+                    component
+                        .process_event_entry(EventEntry::Component(component_entry), scheduler);
                 }
             }
             EventEntry::Task(task_entry) => {
@@ -190,7 +192,10 @@ impl Components {
         Key::new_with_id(id)
     }
 
-    pub fn remove<E: 'static, C: Component<Event=E> + 'static>(&mut self, key: Key<E>) -> Option<C> {
+    pub fn remove<E: 'static, C: Component<Event = E> + 'static>(
+        &mut self,
+        key: Key<E>,
+    ) -> Option<C> {
         self.components.remove(&key.id).and_then(|boxed_trait| {
             // Since ProcessEventEntry extends Any, we can cast the Box
             let boxed_any: Box<dyn std::any::Any> = boxed_trait;
@@ -199,7 +204,10 @@ impl Components {
     }
 
     /// Get mutable access to a component
-    pub fn get_component_mut<E: 'static, C: Component<Event=E> + 'static>(&mut self, key: Key<E>) -> Option<&mut C> {
+    pub fn get_component_mut<E: 'static, C: Component<Event = E> + 'static>(
+        &mut self,
+        key: Key<E>,
+    ) -> Option<&mut C> {
         self.components.get_mut(&key.id).and_then(|boxed_trait| {
             // Cast to Any first, then downcast to the concrete type
             let any_ref = boxed_trait.as_any_mut();
@@ -207,7 +215,6 @@ impl Components {
         })
     }
 }
-
 
 /// Simulation struct that puts different parts of the simulation together.
 ///
@@ -276,28 +283,28 @@ impl Simulation {
                 },
                 "Processing simulation step"
             );
-            
+
             // Set scheduler context for deferred wakes
             {
                 let mut scheduler = self.scheduler.lock().unwrap();
                 scheduler::set_scheduler_context(&mut scheduler);
             }
-            
+
             // Process the event - need mutable access to scheduler for task execution
             {
                 let mut scheduler = self.scheduler.lock().unwrap();
                 self.components.process_event_entry(event, &mut scheduler);
             }
-            
+
             // Clear scheduler context
             scheduler::clear_scheduler_context();
-            
+
             // Process any deferred wakes that were registered during event processing
             {
                 let mut scheduler = self.scheduler.lock().unwrap();
                 scheduler.process_deferred_wakes();
             }
-            
+
             true
         })
     }
@@ -336,7 +343,7 @@ impl Simulation {
     /// Remove a component: usually at the end of the simulation to peek at the state
     #[must_use]
     #[instrument(skip(self), fields(component_id = ?key.id()))]
-    pub fn remove_component<E: std::fmt::Debug + 'static, C: Component<Event=E> + 'static>(
+    pub fn remove_component<E: std::fmt::Debug + 'static, C: Component<Event = E> + 'static>(
         &mut self,
         key: Key<E>,
     ) -> Option<C> {
@@ -350,7 +357,7 @@ impl Simulation {
     }
 
     /// Get mutable access to a component
-    pub fn get_component_mut<E: std::fmt::Debug + 'static, C: Component<Event=E> + 'static>(
+    pub fn get_component_mut<E: std::fmt::Debug + 'static, C: Component<Event = E> + 'static>(
         &mut self,
         key: Key<E>,
     ) -> Option<&mut C> {
@@ -381,11 +388,7 @@ impl Simulation {
     }
 
     /// Schedule a closure as a task
-    pub fn schedule_closure<F, R>(
-        &mut self,
-        delay: SimTime,
-        closure: F,
-    ) -> task::TaskHandle<R>
+    pub fn schedule_closure<F, R>(&mut self, delay: SimTime, closure: F) -> task::TaskHandle<R>
     where
         F: FnOnce(&mut Scheduler) -> R + 'static,
         R: 'static,
@@ -395,11 +398,7 @@ impl Simulation {
     }
 
     /// Schedule a timeout callback
-    pub fn timeout<F>(
-        &mut self,
-        delay: SimTime,
-        callback: F,
-    ) -> task::TaskHandle<()>
+    pub fn timeout<F>(&mut self, delay: SimTime, callback: F) -> task::TaskHandle<()>
     where
         F: FnOnce(&mut Scheduler) + 'static,
     {

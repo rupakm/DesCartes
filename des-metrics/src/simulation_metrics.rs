@@ -8,7 +8,7 @@ use crate::request_tracker::{RequestTracker, RequestTrackerStats};
 use des_core::SimTime;
 use hdrhistogram::Histogram as HdrHistogram;
 use metrics::{counter, gauge, histogram};
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 /// Key for identifying metrics with labels
@@ -20,7 +20,8 @@ struct MetricKey {
 
 impl MetricKey {
     fn new(name: &str, labels: &[(&str, &str)]) -> Self {
-        let labels_map = labels.iter()
+        let labels_map = labels
+            .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         Self {
@@ -28,7 +29,7 @@ impl MetricKey {
             labels: labels_map,
         }
     }
-    
+
     #[allow(dead_code)]
     fn simple(name: &str) -> Self {
         Self {
@@ -73,17 +74,17 @@ impl HistogramStats {
                 p99: 0.0,
             };
         }
-        
+
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let count = values.len();
         let sum: f64 = values.iter().sum();
         let mean = sum / count as f64;
-        
+
         let percentile = |p: f64| -> f64 {
             let index = ((count as f64 - 1.0) * p).round() as usize;
             values[index.min(count - 1)]
         };
-        
+
         Self {
             count,
             sum,
@@ -156,7 +157,7 @@ impl SimulationMetrics {
         // Store internally for retrieval
         let key = MetricKey::new(name, labels);
         *self.storage.counters.entry(key).or_insert(0) += 1;
-        
+
         // Also record in standard metrics for monitoring
         // Convert everything to owned strings to satisfy the metrics macros
         let name_owned = name.to_string();
@@ -166,17 +167,25 @@ impl SimulationMetrics {
                 let k1 = labels[0].0.to_string();
                 let v1 = labels[0].1.to_string();
                 counter!(name_owned, k1 => v1).increment(1);
-            },
+            }
             2 => {
                 let k1 = labels[0].0.to_string();
                 let v1 = labels[0].1.to_string();
                 let k2 = labels[1].0.to_string();
                 let v2 = labels[1].1.to_string();
                 counter!(name_owned, k1 => v1, k2 => v2).increment(1);
-            },
+            }
             _ => {
                 // For more complex cases, build a flattened key
-                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{k}_{v}")).collect::<Vec<_>>().join("_"));
+                let key = format!(
+                    "{}_{}",
+                    name,
+                    labels
+                        .iter()
+                        .map(|(k, v)| format!("{k}_{v}"))
+                        .collect::<Vec<_>>()
+                        .join("_")
+                );
                 counter!(key).increment(1);
             }
         }
@@ -187,7 +196,7 @@ impl SimulationMetrics {
         // Store internally for retrieval
         let key = MetricKey::new(name, labels);
         *self.storage.counters.entry(key).or_insert(0) += value;
-        
+
         // Also record in standard metrics
         let name_owned = name.to_string();
         match labels.len() {
@@ -196,16 +205,24 @@ impl SimulationMetrics {
                 let k1 = labels[0].0.to_string();
                 let v1 = labels[0].1.to_string();
                 counter!(name_owned, k1 => v1).increment(value);
-            },
+            }
             2 => {
                 let k1 = labels[0].0.to_string();
                 let v1 = labels[0].1.to_string();
                 let k2 = labels[1].0.to_string();
                 let v2 = labels[1].1.to_string();
                 counter!(name_owned, k1 => v1, k2 => v2).increment(value);
-            },
+            }
             _ => {
-                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{k}_{v}")).collect::<Vec<_>>().join("_"));
+                let key = format!(
+                    "{}_{}",
+                    name,
+                    labels
+                        .iter()
+                        .map(|(k, v)| format!("{k}_{v}"))
+                        .collect::<Vec<_>>()
+                        .join("_")
+                );
                 counter!(key).increment(value);
             }
         }
@@ -216,7 +233,7 @@ impl SimulationMetrics {
         // Store internally for retrieval
         let key = MetricKey::new(name, labels);
         self.storage.gauges.insert(key, value);
-        
+
         // Also record in standard metrics
         let name_owned = name.to_string();
         match labels.len() {
@@ -225,16 +242,24 @@ impl SimulationMetrics {
                 let k1 = labels[0].0.to_string();
                 let v1 = labels[0].1.to_string();
                 gauge!(name_owned, k1 => v1).set(value);
-            },
+            }
             2 => {
                 let k1 = labels[0].0.to_string();
                 let v1 = labels[0].1.to_string();
                 let k2 = labels[1].0.to_string();
                 let v2 = labels[1].1.to_string();
                 gauge!(name_owned, k1 => v1, k2 => v2).set(value);
-            },
+            }
             _ => {
-                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{k}_{v}")).collect::<Vec<_>>().join("_"));
+                let key = format!(
+                    "{}_{}",
+                    name,
+                    labels
+                        .iter()
+                        .map(|(k, v)| format!("{k}_{v}"))
+                        .collect::<Vec<_>>()
+                        .join("_")
+                );
                 gauge!(key).set(value);
             }
         }
@@ -245,7 +270,7 @@ impl SimulationMetrics {
         // Store internally for retrieval
         let key = MetricKey::new(name, labels);
         self.storage.histograms.entry(key).or_default().push(value);
-        
+
         // Also record in standard metrics
         let name_owned = name.to_string();
         match labels.len() {
@@ -254,16 +279,24 @@ impl SimulationMetrics {
                 let k1 = labels[0].0.to_string();
                 let v1 = labels[0].1.to_string();
                 histogram!(name_owned, k1 => v1).record(value);
-            },
+            }
             2 => {
                 let k1 = labels[0].0.to_string();
                 let v1 = labels[0].1.to_string();
                 let k2 = labels[1].0.to_string();
                 let v2 = labels[1].1.to_string();
                 histogram!(name_owned, k1 => v1, k2 => v2).record(value);
-            },
+            }
             _ => {
-                let key = format!("{}_{}", name, labels.iter().map(|(k, v)| format!("{k}_{v}")).collect::<Vec<_>>().join("_"));
+                let key = format!(
+                    "{}_{}",
+                    name,
+                    labels
+                        .iter()
+                        .map(|(k, v)| format!("{k}_{v}"))
+                        .collect::<Vec<_>>()
+                        .join("_")
+                );
                 histogram!(key).record(value);
             }
         }
@@ -281,9 +314,12 @@ impl SimulationMetrics {
         self.record_duration(name, latency, labels);
 
         // Also record in high-resolution histogram for detailed analysis
-        let histogram = self.latency_histograms.entry(name.to_string()).or_insert_with(|| {
-            HdrHistogram::new_with_bounds(1, 60_000_000, 3).unwrap() // 1μs to 60s with 3 sig figs
-        });
+        let histogram = self
+            .latency_histograms
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                HdrHistogram::new_with_bounds(1, 60_000_000, 3).unwrap() // 1μs to 60s with 3 sig figs
+            });
 
         let micros = latency.as_micros() as u64;
         if let Err(e) = histogram.record(micros) {
@@ -293,18 +329,16 @@ impl SimulationMetrics {
 
     /// Get high-resolution latency statistics for a specific metric
     pub fn get_latency_stats(&self, name: &str) -> Option<LatencyStats> {
-        self.latency_histograms.get(name).map(|hist| {
-            LatencyStats {
-                count: hist.len(),
-                min: Duration::from_micros(hist.min()),
-                max: Duration::from_micros(hist.max()),
-                mean: Duration::from_micros(hist.mean() as u64),
-                p50: Duration::from_micros(hist.value_at_quantile(0.5)),
-                p95: Duration::from_micros(hist.value_at_quantile(0.95)),
-                p99: Duration::from_micros(hist.value_at_quantile(0.99)),
-                p999: Duration::from_micros(hist.value_at_quantile(0.999)),
-                std_dev: Duration::from_micros(hist.stdev() as u64),
-            }
+        self.latency_histograms.get(name).map(|hist| LatencyStats {
+            count: hist.len(),
+            min: Duration::from_micros(hist.min()),
+            max: Duration::from_micros(hist.max()),
+            mean: Duration::from_micros(hist.mean() as u64),
+            p50: Duration::from_micros(hist.value_at_quantile(0.5)),
+            p95: Duration::from_micros(hist.value_at_quantile(0.95)),
+            p99: Duration::from_micros(hist.value_at_quantile(0.99)),
+            p999: Duration::from_micros(hist.value_at_quantile(0.999)),
+            std_dev: Duration::from_micros(hist.stdev() as u64),
         })
     }
 
@@ -355,11 +389,16 @@ impl SimulationMetrics {
     }
 
     /// Get histogram statistics by name and labels
-    pub fn get_histogram_stats(&self, name: &str, labels: &[(&str, &str)]) -> Option<HistogramStats> {
+    pub fn get_histogram_stats(
+        &self,
+        name: &str,
+        labels: &[(&str, &str)],
+    ) -> Option<HistogramStats> {
         let key = MetricKey::new(name, labels);
-        self.storage.histograms.get(&key).map(|values| {
-            HistogramStats::from_values(values.clone())
-        })
+        self.storage
+            .histograms
+            .get(&key)
+            .map(|values| HistogramStats::from_values(values.clone()))
     }
 
     /// Get histogram statistics by name only (no labels)
@@ -369,21 +408,27 @@ impl SimulationMetrics {
 
     /// List all counter metrics with their labels and values
     pub fn list_counters(&self) -> Vec<(String, BTreeMap<String, String>, u64)> {
-        self.storage.counters.iter()
+        self.storage
+            .counters
+            .iter()
             .map(|(key, value)| (key.name.clone(), key.labels.clone(), *value))
             .collect()
     }
 
     /// List all gauge metrics with their labels and values
     pub fn list_gauges(&self) -> Vec<(String, BTreeMap<String, String>, f64)> {
-        self.storage.gauges.iter()
+        self.storage
+            .gauges
+            .iter()
             .map(|(key, value)| (key.name.clone(), key.labels.clone(), *value))
             .collect()
     }
 
     /// List all histogram metric names
     pub fn list_histograms(&self) -> Vec<String> {
-        self.storage.histograms.keys()
+        self.storage
+            .histograms
+            .keys()
             .map(|key| key.name.clone())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
@@ -394,7 +439,10 @@ impl SimulationMetrics {
     pub fn get_metrics_snapshot(&self) -> MetricsSnapshot {
         let counters = self.list_counters();
         let gauges = self.list_gauges();
-        let histograms = self.storage.histograms.iter()
+        let histograms = self
+            .storage
+            .histograms
+            .iter()
             .map(|(key, values)| {
                 let stats = HistogramStats::from_values(values.clone());
                 (key.name.clone(), key.labels.clone(), stats)
@@ -445,7 +493,11 @@ impl SimulationMetrics {
     /// // ... collect metrics ...
     /// metrics.export_json("results/metrics.json", true).unwrap();
     /// ```
-    pub fn export_json(&self, path: impl AsRef<std::path::Path>, pretty: bool) -> Result<(), crate::error::MetricsError> {
+    pub fn export_json(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        pretty: bool,
+    ) -> Result<(), crate::error::MetricsError> {
         crate::export::export_json(self, path, pretty)
     }
 
@@ -470,7 +522,11 @@ impl SimulationMetrics {
     /// metrics.export_csv("results/metrics.csv", true).unwrap();
     /// // Creates: results/metrics_counters.csv, results/metrics_gauges.csv, etc.
     /// ```
-    pub fn export_csv(&self, path: impl AsRef<std::path::Path>, include_labels: bool) -> Result<(), crate::error::MetricsError> {
+    pub fn export_csv(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        include_labels: bool,
+    ) -> Result<(), crate::error::MetricsError> {
         crate::export::export_csv(self, path, include_labels)
     }
 }
@@ -519,7 +575,10 @@ impl std::fmt::Display for LatencyStats {
 pub fn setup_prometheus_metrics(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     // For now, just install a no-op recorder
     // TODO: Add proper Prometheus setup when metrics-prometheus API is clarified
-    tracing::info!("Metrics setup requested on port {} (placeholder implementation)", port);
+    tracing::info!(
+        "Metrics setup requested on port {} (placeholder implementation)",
+        port
+    );
     Ok(())
 }
 
@@ -530,7 +589,11 @@ pub fn setup_prometheus_metrics_with_config(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // For now, just install a no-op recorder
     // TODO: Add proper Prometheus setup when metrics-prometheus API is clarified
-    tracing::info!("Metrics setup requested on {} with prefix {:?} (placeholder implementation)", addr, prefix);
+    tracing::info!(
+        "Metrics setup requested on {} with prefix {:?} (placeholder implementation)",
+        addr,
+        prefix
+    );
     Ok(())
 }
 
@@ -546,28 +609,20 @@ pub mod helpers {
         latency: Duration,
     ) {
         let status = if success { "success" } else { "error" };
-        
+
         metrics.increment_counter(
             "requests_processed_total",
             &[("component", component), ("status", status)],
         );
-        
+
         if success {
-            metrics.record_duration(
-                "request_duration_ms",
-                latency,
-                &[("component", component)],
-            );
+            metrics.record_duration("request_duration_ms", latency, &[("component", component)]);
         }
     }
 
     /// Record queue depth changes
     pub fn record_queue_depth(metrics: &mut SimulationMetrics, component: &str, depth: usize) {
-        metrics.record_gauge(
-            "queue_depth",
-            depth as f64,
-            &[("component", component)],
-        );
+        metrics.record_gauge("queue_depth", depth as f64, &[("component", component)]);
     }
 
     /// Record server utilization
@@ -618,26 +673,40 @@ mod tests {
     #[test]
     fn test_simulation_metrics_basic() {
         let mut metrics = SimulationMetrics::new();
-        
+
         // Test counter
         metrics.increment_counter("test_counter", &[("component", "test")]);
         metrics.increment_counter_by("test_counter_by", 5, &[("component", "test")]);
-        
+
         // Test gauge
         metrics.record_gauge("test_gauge", 42.0, &[("component", "test")]);
-        
+
         // Test histogram
         metrics.record_histogram("test_histogram", 123.45, &[("component", "test")]);
-        
+
         // Test duration
-        metrics.record_duration("test_duration", Duration::from_millis(100), &[("component", "test")]);
-        
+        metrics.record_duration(
+            "test_duration",
+            Duration::from_millis(100),
+            &[("component", "test")],
+        );
+
         // Test retrieval
-        assert_eq!(metrics.get_counter("test_counter", &[("component", "test")]), Some(1));
-        assert_eq!(metrics.get_counter("test_counter_by", &[("component", "test")]), Some(5));
-        assert_eq!(metrics.get_gauge("test_gauge", &[("component", "test")]), Some(42.0));
-        
-        let histogram_stats = metrics.get_histogram_stats("test_histogram", &[("component", "test")]);
+        assert_eq!(
+            metrics.get_counter("test_counter", &[("component", "test")]),
+            Some(1)
+        );
+        assert_eq!(
+            metrics.get_counter("test_counter_by", &[("component", "test")]),
+            Some(5)
+        );
+        assert_eq!(
+            metrics.get_gauge("test_gauge", &[("component", "test")]),
+            Some(42.0)
+        );
+
+        let histogram_stats =
+            metrics.get_histogram_stats("test_histogram", &[("component", "test")]);
         assert!(histogram_stats.is_some());
         assert_eq!(histogram_stats.unwrap().count, 1);
     }
@@ -645,22 +714,25 @@ mod tests {
     #[test]
     fn test_metrics_retrieval() {
         let mut metrics = SimulationMetrics::new();
-        
+
         // Test simple retrieval (no labels)
         metrics.increment_counter("simple_counter", &[]);
         metrics.record_gauge("simple_gauge", std::f64::consts::PI, &[]);
-        
+
         assert_eq!(metrics.get_counter_simple("simple_counter"), Some(1));
-        assert_eq!(metrics.get_gauge_simple("simple_gauge"), Some(std::f64::consts::PI));
-        
+        assert_eq!(
+            metrics.get_gauge_simple("simple_gauge"),
+            Some(std::f64::consts::PI)
+        );
+
         // Test non-existent metrics
         assert_eq!(metrics.get_counter_simple("nonexistent"), None);
         assert_eq!(metrics.get_gauge_simple("nonexistent"), None);
-        
+
         // Test listing
         let counters = metrics.list_counters();
         assert!(!counters.is_empty());
-        
+
         let gauges = metrics.list_gauges();
         assert!(!gauges.is_empty());
     }
@@ -668,13 +740,13 @@ mod tests {
     #[test]
     fn test_latency_recording() {
         let mut metrics = SimulationMetrics::new();
-        
+
         // Record some latencies
         for i in 1..=100 {
             let latency = Duration::from_millis(i);
             metrics.record_latency("test_latency", latency, &[("component", "test")]);
         }
-        
+
         // Get stats
         let stats = metrics.get_latency_stats("test_latency").unwrap();
         assert_eq!(stats.count, 100);
@@ -688,11 +760,11 @@ mod tests {
     #[test]
     fn test_component_helpers() {
         let mut metrics = SimulationMetrics::new();
-        
+
         metrics.record_component_counter("server1", "requests", 10);
         metrics.record_component_gauge("server1", "queue_depth", 5.0);
         metrics.record_component_latency("server1", "latency", Duration::from_millis(50));
-        
+
         let stats = metrics.get_latency_stats("latency").unwrap();
         assert_eq!(stats.count, 1);
     }
@@ -700,16 +772,35 @@ mod tests {
     #[test]
     fn test_helper_functions() {
         let mut metrics = SimulationMetrics::new();
-        
-        helpers::record_request_processed(&mut metrics, "server1", true, Duration::from_millis(100));
+
+        helpers::record_request_processed(
+            &mut metrics,
+            "server1",
+            true,
+            Duration::from_millis(100),
+        );
         helpers::record_queue_depth(&mut metrics, "server1", 5);
         helpers::record_server_utilization(&mut metrics, "server1", 8, 10);
         helpers::record_throughput(&mut metrics, "server1", 150.5);
-        
+
         // Test that metrics were recorded
-        assert!(metrics.get_counter("requests_processed_total", &[("component", "server1"), ("status", "success")]).is_some());
-        assert_eq!(metrics.get_gauge("queue_depth", &[("component", "server1")]), Some(5.0));
-        assert_eq!(metrics.get_gauge("server_utilization", &[("component", "server1")]), Some(0.8));
-        assert_eq!(metrics.get_gauge("throughput_rps", &[("component", "server1")]), Some(150.5));
+        assert!(metrics
+            .get_counter(
+                "requests_processed_total",
+                &[("component", "server1"), ("status", "success")]
+            )
+            .is_some());
+        assert_eq!(
+            metrics.get_gauge("queue_depth", &[("component", "server1")]),
+            Some(5.0)
+        );
+        assert_eq!(
+            metrics.get_gauge("server_utilization", &[("component", "server1")]),
+            Some(0.8)
+        );
+        assert_eq!(
+            metrics.get_gauge("throughput_rps", &[("component", "server1")]),
+            Some(150.5)
+        );
     }
 }

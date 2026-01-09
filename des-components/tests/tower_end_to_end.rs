@@ -4,10 +4,8 @@
 //! following the approach from mmk_queueing_example. The clients use DES scheduling
 //! to send requests over time and FuturePoller to handle responses asynchronously.
 
-use des_components::tower::{
-    DesServiceBuilder, FuturePollerHandle, FuturePollerEvent, SimBody,
-};
-use des_core::{Component, Execute, Executor, Key, Scheduler, SimTime, Simulation, defer_wake};
+use des_components::tower::{DesServiceBuilder, FuturePollerEvent, FuturePollerHandle, SimBody};
+use des_core::{defer_wake, Component, Execute, Executor, Key, Scheduler, SimTime, Simulation};
 use http::{Method, Request};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -40,7 +38,11 @@ impl<S> SimpleRequestSender<S> {
 
 impl<S> Component for SimpleRequestSender<S>
 where
-    S: Service<Request<SimBody>, Response = http::Response<SimBody>, Error = des_components::tower::ServiceError> + 'static,
+    S: Service<
+            Request<SimBody>,
+            Response = http::Response<SimBody>,
+            Error = des_components::tower::ServiceError,
+        > + 'static,
     S::Future: 'static,
 {
     type Event = RequestSenderEvent;
@@ -55,8 +57,11 @@ where
             RequestSenderEvent::SendRequest => {
                 if !self.request_sent {
                     let current_time = scheduler.time().as_duration().as_millis();
-                    println!("📨 [{}ms] SimpleRequestSender: Processing SendRequest event", current_time);
-                    
+                    println!(
+                        "📨 [{}ms] SimpleRequestSender: Processing SendRequest event",
+                        current_time
+                    );
+
                     // Create a test request
                     let request = Request::builder()
                         .method(Method::POST)
@@ -69,12 +74,12 @@ where
                     // Check if service is ready
                     let waker = create_noop_waker();
                     let mut cx = Context::from_waker(&waker);
-                    
+
                     println!("   🔍 Checking if Tower service is ready...");
                     match self.service.poll_ready(&mut cx) {
                         Poll::Ready(Ok(())) => {
                             println!("   ✅ Service is ready, making call");
-                            
+
                             // Call service - this should NOT deadlock now with deferred scheduling!
                             let future = self.service.call(request);
                             println!("   🚀 Service.call() returned future (no deadlock!)");
@@ -115,8 +120,10 @@ where
                         }
                     }
                 } else {
-                    println!("📨 [{}ms] SimpleRequestSender: Request already sent, ignoring", 
-                            scheduler.time().as_duration().as_millis());
+                    println!(
+                        "📨 [{}ms] SimpleRequestSender: Request already sent, ignoring",
+                        scheduler.time().as_duration().as_millis()
+                    );
                 }
             }
         }
@@ -126,12 +133,12 @@ where
 // Helper function to create a no-op waker for testing
 fn create_noop_waker() -> std::task::Waker {
     use std::task::{RawWaker, RawWakerVTable};
-    
+
     fn noop(_: *const ()) {}
     fn clone(_: *const ()) -> RawWaker {
         RawWaker::new(std::ptr::null(), &VTABLE)
     }
-    
+
     const VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
     let raw_waker = RawWaker::new(std::ptr::null(), &VTABLE);
     unsafe { std::task::Waker::from_raw(raw_waker) }
@@ -171,16 +178,15 @@ fn test_simple_tower_service() {
     handle.set_key(poller_key);
 
     println!("🔧 Components created:");
-    println!("   - FuturePoller component added with key: {:?}", poller_key);
+    println!(
+        "   - FuturePoller component added with key: {:?}",
+        poller_key
+    );
 
     // Schedule Initialize event for the FuturePoller
     {
         let mut sim = simulation_arc.lock().unwrap();
-        sim.schedule(
-            SimTime::zero(),
-            poller_key,
-            FuturePollerEvent::Initialize,
-        );
+        sim.schedule(SimTime::zero(), poller_key, FuturePollerEvent::Initialize);
     }
     println!("   - FuturePoller Initialize event scheduled at 0ms");
 
@@ -190,7 +196,10 @@ fn test_simple_tower_service() {
         let mut sim = simulation_arc.lock().unwrap();
         sim.add_component(request_sender)
     };
-    println!("   - SimpleRequestSender component added with key: {:?}", sender_key);
+    println!(
+        "   - SimpleRequestSender component added with key: {:?}",
+        sender_key
+    );
 
     // Schedule the request to be sent at 5ms
     {
@@ -205,7 +214,11 @@ fn test_simple_tower_service() {
     println!();
 
     println!("🏃 Running simulation with Executor for 100ms...");
-    println!("   Initial state: pending={}, completed={}", handle.pending_count(), handle.completed_count());
+    println!(
+        "   Initial state: pending={}, completed={}",
+        handle.pending_count(),
+        handle.completed_count()
+    );
 
     // Use Executor instead of manual stepping
     {
@@ -219,12 +232,18 @@ fn test_simple_tower_service() {
     println!("   Completed futures: {}", handle.completed_count());
     {
         let sim = simulation_arc.lock().unwrap();
-        println!("   Simulation time: {}ms", sim.time().as_duration().as_millis());
+        println!(
+            "   Simulation time: {}ms",
+            sim.time().as_duration().as_millis()
+        );
     }
 
     // Verify that we completed at least one request
-    assert!(handle.completed_count() > 0, "Should have completed at least one request");
-    
+    assert!(
+        handle.completed_count() > 0,
+        "Should have completed at least one request"
+    );
+
     println!();
     println!("✅ Simple Tower service test completed successfully!");
     println!("   This test demonstrates:");
@@ -254,7 +273,12 @@ struct PeriodicRequestSender<S> {
 }
 
 impl<S> PeriodicRequestSender<S> {
-    fn new(service: S, future_poller: FuturePollerHandle, max_requests: u32, interval: Duration) -> Self {
+    fn new(
+        service: S,
+        future_poller: FuturePollerHandle,
+        max_requests: u32,
+        interval: Duration,
+    ) -> Self {
         Self {
             service,
             future_poller,
@@ -270,7 +294,11 @@ impl<S> PeriodicRequestSender<S> {
 
 impl<S> Component for PeriodicRequestSender<S>
 where
-    S: Service<Request<SimBody>, Response = http::Response<SimBody>, Error = des_components::tower::ServiceError> + 'static,
+    S: Service<
+            Request<SimBody>,
+            Response = http::Response<SimBody>,
+            Error = des_components::tower::ServiceError,
+        > + 'static,
     S::Future: 'static,
 {
     type Event = PeriodicRequestSenderEvent;
@@ -284,10 +312,14 @@ where
         match event {
             PeriodicRequestSenderEvent::SendRequest { request_id } => {
                 let current_time = scheduler.time().as_duration().as_millis();
-                println!("📨 [{}ms] PeriodicRequestSender: Sending request #{}", current_time, request_id);
-                
+                println!(
+                    "📨 [{}ms] PeriodicRequestSender: Sending request #{}",
+                    current_time, request_id
+                );
+
                 // Create a test request with unique content
-                let body_content = format!("Periodic request #{} at {}ms", request_id, current_time);
+                let body_content =
+                    format!("Periodic request #{} at {}ms", request_id, current_time);
                 let request = Request::builder()
                     .method(Method::POST)
                     .uri(format!("/api/periodic/{}", request_id))
@@ -297,7 +329,7 @@ where
                 // Check if service is ready
                 let waker = create_noop_waker();
                 let mut cx = Context::from_waker(&waker);
-                
+
                 match self.service.poll_ready(&mut cx) {
                     Poll::Ready(Ok(())) => {
                         // Call service
@@ -340,7 +372,10 @@ where
                         println!("   ❌ Service error for request #{}: {:?}", request_id, e);
                     }
                     Poll::Pending => {
-                        println!("   ⏳ Service not ready for request #{} (capacity limit reached)", request_id);
+                        println!(
+                            "   ⏳ Service not ready for request #{} (capacity limit reached)",
+                            request_id
+                        );
                     }
                 }
 
@@ -350,13 +385,15 @@ where
                     scheduler.schedule(
                         SimTime::from_duration(self.interval),
                         self_id,
-                        PeriodicRequestSenderEvent::SendRequest { 
-                            request_id: self.request_count + 1 
+                        PeriodicRequestSenderEvent::SendRequest {
+                            request_id: self.request_count + 1,
                         },
                     );
                 } else {
-                    println!("📊 [{}ms] PeriodicRequestSender: Finished sending all {} requests", 
-                            current_time, self.max_requests);
+                    println!(
+                        "📊 [{}ms] PeriodicRequestSender: Finished sending all {} requests",
+                        current_time, self.max_requests
+                    );
                 }
             }
         }
@@ -372,8 +409,8 @@ fn test_periodic_tower_service() {
 
     // Create a Tower service with higher capacity to handle multiple requests
     let service = DesServiceBuilder::new("periodic-server".to_string())
-        .thread_capacity(3)  // Allow 3 concurrent requests
-        .service_time(Duration::from_millis(30))  // 30ms processing time
+        .thread_capacity(3) // Allow 3 concurrent requests
+        .service_time(Duration::from_millis(30)) // 30ms processing time
         .build(&mut simulation)
         .expect("Failed to build service");
 
@@ -381,14 +418,17 @@ fn test_periodic_tower_service() {
     let simulation_arc = Arc::new(Mutex::new(simulation));
 
     // Calculate test parameters
-    let interval = Duration::from_millis(20);  // Send every 20ms
-    let simulation_duration = Duration::from_millis(1000);  // Run for 1 second
-    let max_requests = (simulation_duration.as_millis() / interval.as_millis()) as u32;  // 50 requests
+    let interval = Duration::from_millis(20); // Send every 20ms
+    let simulation_duration = Duration::from_millis(1000); // Run for 1 second
+    let max_requests = (simulation_duration.as_millis() / interval.as_millis()) as u32; // 50 requests
 
     println!("📋 Test Setup:");
     println!("   - Tower service: 3 threads, 30ms processing time");
     println!("   - Request interval: {}ms", interval.as_millis());
-    println!("   - Simulation duration: {}ms", simulation_duration.as_millis());
+    println!(
+        "   - Simulation duration: {}ms",
+        simulation_duration.as_millis()
+    );
     println!("   - Expected requests: {}", max_requests);
     println!("   - Using open-loop client pattern (requests independent of responses)");
     println!();
@@ -403,26 +443,29 @@ fn test_periodic_tower_service() {
     handle.set_key(poller_key);
 
     println!("🔧 Components created:");
-    println!("   - FuturePoller component added with key: {:?}", poller_key);
+    println!(
+        "   - FuturePoller component added with key: {:?}",
+        poller_key
+    );
 
     // Schedule Initialize event for the FuturePoller
     {
         let mut sim = simulation_arc.lock().unwrap();
-        sim.schedule(
-            SimTime::zero(),
-            poller_key,
-            FuturePollerEvent::Initialize,
-        );
+        sim.schedule(SimTime::zero(), poller_key, FuturePollerEvent::Initialize);
     }
     println!("   - FuturePoller Initialize event scheduled at 0ms");
 
     // Create a periodic request sender
-    let periodic_sender = PeriodicRequestSender::new(service, handle.clone(), max_requests, interval);
+    let periodic_sender =
+        PeriodicRequestSender::new(service, handle.clone(), max_requests, interval);
     let sender_key = {
         let mut sim = simulation_arc.lock().unwrap();
         sim.add_component(periodic_sender)
     };
-    println!("   - PeriodicRequestSender component added with key: {:?}", sender_key);
+    println!(
+        "   - PeriodicRequestSender component added with key: {:?}",
+        sender_key
+    );
 
     // Schedule the first request to be sent at 10ms
     {
@@ -436,8 +479,15 @@ fn test_periodic_tower_service() {
     println!("   - First SendRequest event scheduled at 10ms");
     println!();
 
-    println!("🏃 Running simulation with Executor for {}ms...", simulation_duration.as_millis());
-    println!("   Initial state: pending={}, completed={}", handle.pending_count(), handle.completed_count());
+    println!(
+        "🏃 Running simulation with Executor for {}ms...",
+        simulation_duration.as_millis()
+    );
+    println!(
+        "   Initial state: pending={}, completed={}",
+        handle.pending_count(),
+        handle.completed_count()
+    );
     println!();
 
     // Use Executor to run the simulation
@@ -452,14 +502,23 @@ fn test_periodic_tower_service() {
     println!("   Completed futures: {}", handle.completed_count());
     {
         let sim = simulation_arc.lock().unwrap();
-        println!("   Simulation time: {}ms", sim.time().as_duration().as_millis());
+        println!(
+            "   Simulation time: {}ms",
+            sim.time().as_duration().as_millis()
+        );
     }
 
     // Verify that we sent and received a reasonable number of requests
     // Note: Due to the open-loop pattern, some requests may still be in flight
-    assert!(handle.completed_count() > 0, "Should have completed at least some requests");
-    assert!(handle.completed_count() <= max_requests as u64, "Should not exceed expected request count");
-    
+    assert!(
+        handle.completed_count() > 0,
+        "Should have completed at least some requests"
+    );
+    assert!(
+        handle.completed_count() <= max_requests as u64,
+        "Should not exceed expected request count"
+    );
+
     println!();
     println!("✅ Periodic Tower service test completed successfully!");
     println!("   This test demonstrates:");
@@ -503,7 +562,7 @@ struct RequestState {
 
 impl<S> RetryClient<S> {
     fn new(
-        service: S, 
+        service: S,
         future_poller: FuturePollerHandle,
         timeout_duration: Duration,
         max_retries: u32,
@@ -527,7 +586,11 @@ impl<S> RetryClient<S> {
 
 impl<S> Component for RetryClient<S>
 where
-    S: Service<Request<SimBody>, Response = http::Response<SimBody>, Error = des_components::tower::ServiceError> + 'static,
+    S: Service<
+            Request<SimBody>,
+            Response = http::Response<SimBody>,
+            Error = des_components::tower::ServiceError,
+        > + 'static,
     S::Future: 'static,
 {
     type Event = RetryClientEvent;
@@ -541,23 +604,30 @@ where
         match event {
             RetryClientEvent::SendRequest { request_id } => {
                 let current_time = scheduler.time().as_duration().as_millis();
-                let attempt = self.active_requests
+                let attempt = self
+                    .active_requests
                     .get(request_id)
                     .map(|state| state.attempt + 1)
                     .unwrap_or(1);
 
                 if attempt == 1 {
-                    println!("📨 [{}ms] RetryClient: Sending request #{} (attempt {})", 
-                            current_time, request_id, attempt);
+                    println!(
+                        "📨 [{}ms] RetryClient: Sending request #{} (attempt {})",
+                        current_time, request_id, attempt
+                    );
                 } else {
-                    println!("🔄 [{}ms] RetryClient: Retrying request #{} (attempt {})", 
-                            current_time, request_id, attempt);
+                    println!(
+                        "🔄 [{}ms] RetryClient: Retrying request #{} (attempt {})",
+                        current_time, request_id, attempt
+                    );
                     self.retries += 1;
                 }
 
                 // Create request with attempt info
-                let body_content = format!("Retry test request #{} attempt {} at {}ms", 
-                                         request_id, attempt, current_time);
+                let body_content = format!(
+                    "Retry test request #{} attempt {} at {}ms",
+                    request_id, attempt, current_time
+                );
                 let request = Request::builder()
                     .method(Method::POST)
                     .uri(format!("/api/retry/{}/{}", request_id, attempt))
@@ -567,26 +637,32 @@ where
                 // Check if service is ready
                 let waker = create_noop_waker();
                 let mut cx = Context::from_waker(&waker);
-                
+
                 match self.service.poll_ready(&mut cx) {
                     Poll::Ready(Ok(())) => {
                         // Instead of calling the service, simulate a request that will timeout
                         // by not spawning any future - this will cause the timeout to fire
-                        println!("   🚀 Request #{} attempt {} sent (simulating slow/hanging request)", request_id, attempt);
-                        
+                        println!(
+                            "   🚀 Request #{} attempt {} sent (simulating slow/hanging request)",
+                            request_id, attempt
+                        );
+
                         // Update request state
-                        self.active_requests.insert(*request_id, RequestState {
-                            attempt,
-                            timeout_scheduled: true,
-                        });
+                        self.active_requests.insert(
+                            *request_id,
+                            RequestState {
+                                attempt,
+                                timeout_scheduled: true,
+                            },
+                        );
 
                         // Schedule timeout - this will definitely fire since no response will come
                         scheduler.schedule(
                             SimTime::from_duration(self.timeout_duration),
                             self_id,
-                            RetryClientEvent::RequestTimeout { 
-                                request_id: *request_id, 
-                                attempt 
+                            RetryClientEvent::RequestTimeout {
+                                request_id: *request_id,
+                                attempt,
                             },
                         );
 
@@ -596,33 +672,52 @@ where
                         println!("   ❌ Service error for request #{}: {:?}", request_id, e);
                     }
                     Poll::Pending => {
-                        println!("   ⏳ Service not ready for request #{} (capacity limit reached)", request_id);
+                        println!(
+                            "   ⏳ Service not ready for request #{} (capacity limit reached)",
+                            request_id
+                        );
                     }
                 }
             }
-            RetryClientEvent::RequestTimeout { request_id, attempt } => {
+            RetryClientEvent::RequestTimeout {
+                request_id,
+                attempt,
+            } => {
                 let current_time = scheduler.time().as_duration().as_millis();
-                
+
                 // Check if this timeout is for the current attempt
                 if let Some(state) = self.active_requests.get(request_id) {
                     if state.attempt == *attempt {
-                        println!("⏰ [{}ms] RetryClient: Request #{} attempt {} timed out after {}ms", 
-                                current_time, request_id, attempt, self.timeout_duration.as_millis());
+                        println!(
+                            "⏰ [{}ms] RetryClient: Request #{} attempt {} timed out after {}ms",
+                            current_time,
+                            request_id,
+                            attempt,
+                            self.timeout_duration.as_millis()
+                        );
                         self.timeouts += 1;
 
                         if *attempt < self.max_retries {
                             // Schedule retry
-                            println!("   🔄 Scheduling retry for request #{} (attempt {} -> {})", 
-                                    request_id, attempt, attempt + 1);
+                            println!(
+                                "   🔄 Scheduling retry for request #{} (attempt {} -> {})",
+                                request_id,
+                                attempt,
+                                attempt + 1
+                            );
                             scheduler.schedule(
                                 SimTime::from_duration(self.retry_delay),
                                 self_id,
-                                RetryClientEvent::SendRequest { request_id: *request_id },
+                                RetryClientEvent::SendRequest {
+                                    request_id: *request_id,
+                                },
                             );
                         } else {
                             // Max retries exceeded
-                            println!("   ❌ Request #{} failed after {} attempts (max retries exceeded)", 
-                                    request_id, attempt);
+                            println!(
+                                "   ❌ Request #{} failed after {} attempts (max retries exceeded)",
+                                request_id, attempt
+                            );
                             self.active_requests.remove(request_id);
                         }
                     } else {
@@ -630,8 +725,10 @@ where
                                 request_id, attempt, state.attempt);
                     }
                 } else {
-                    println!("   ⏰ Timeout for request #{} attempt {} but request no longer active", 
-                            request_id, attempt);
+                    println!(
+                        "   ⏰ Timeout for request #{} attempt {} but request no longer active",
+                        request_id, attempt
+                    );
                 }
             }
         }
@@ -647,8 +744,8 @@ fn test_retry_on_timeout() {
 
     // Create a server that will be overloaded to cause timeouts
     let service = DesServiceBuilder::new("limited-server".to_string())
-        .thread_capacity(1)  // Only 1 thread - will cause blocking
-        .service_time(Duration::from_millis(300))  // 300ms processing time
+        .thread_capacity(1) // Only 1 thread - will cause blocking
+        .service_time(Duration::from_millis(300)) // 300ms processing time
         .build(&mut simulation)
         .expect("Failed to build service");
 
@@ -656,17 +753,23 @@ fn test_retry_on_timeout() {
     let simulation_arc = Arc::new(Mutex::new(simulation));
 
     // Client timeout and retry configuration
-    let timeout_duration = Duration::from_millis(280);  // 150ms timeout (shorter than service time)
+    let timeout_duration = Duration::from_millis(280); // 150ms timeout (shorter than service time)
     let max_retries = 2;
     let retry_delay = Duration::from_millis(50);
-    let simulation_duration = Duration::from_millis(2000);  // 2 seconds
+    let simulation_duration = Duration::from_millis(2000); // 2 seconds
 
     println!("📋 Test Setup:");
     println!("   - Tower service: 1 thread, 300ms processing time");
-    println!("   - Client timeout: {}ms (shorter than service time)", timeout_duration.as_millis());
+    println!(
+        "   - Client timeout: {}ms (shorter than service time)",
+        timeout_duration.as_millis()
+    );
     println!("   - Max retries: {}", max_retries);
     println!("   - Retry delay: {}ms", retry_delay.as_millis());
-    println!("   - Simulation duration: {}ms", simulation_duration.as_millis());
+    println!(
+        "   - Simulation duration: {}ms",
+        simulation_duration.as_millis()
+    );
     println!("   - Expected behavior: Requests will timeout and retry");
     println!();
 
@@ -680,36 +783,38 @@ fn test_retry_on_timeout() {
     handle.set_key(poller_key);
 
     println!("🔧 Components created:");
-    println!("   - FuturePoller component added with key: {:?}", poller_key);
+    println!(
+        "   - FuturePoller component added with key: {:?}",
+        poller_key
+    );
 
     // Schedule Initialize event for the FuturePoller
     {
         let mut sim = simulation_arc.lock().unwrap();
-        sim.schedule(
-            SimTime::zero(),
-            poller_key,
-            FuturePollerEvent::Initialize,
-        );
+        sim.schedule(SimTime::zero(), poller_key, FuturePollerEvent::Initialize);
     }
     println!("   - FuturePoller Initialize event scheduled at 0ms");
 
     // Create retry client
     let retry_client = RetryClient::new(
-        service, 
-        handle.clone(), 
-        timeout_duration, 
-        max_retries, 
-        retry_delay
+        service,
+        handle.clone(),
+        timeout_duration,
+        max_retries,
+        retry_delay,
     );
     let client_key = {
         let mut sim = simulation_arc.lock().unwrap();
         sim.add_component(retry_client)
     };
-    println!("   - RetryClient component added with key: {:?}", client_key);
+    println!(
+        "   - RetryClient component added with key: {:?}",
+        client_key
+    );
 
     // Schedule a single test request to see timeout behavior clearly
     let test_requests = vec![
-        (10, 1),   // Request 1 at 10ms
+        (10, 1), // Request 1 at 10ms
     ];
 
     for (time_ms, request_id) in test_requests {
@@ -723,8 +828,15 @@ fn test_retry_on_timeout() {
     }
     println!();
 
-    println!("🏃 Running simulation with Executor for {}ms...", simulation_duration.as_millis());
-    println!("   Initial state: pending={}, completed={}", handle.pending_count(), handle.completed_count());
+    println!(
+        "🏃 Running simulation with Executor for {}ms...",
+        simulation_duration.as_millis()
+    );
+    println!(
+        "   Initial state: pending={}, completed={}",
+        handle.pending_count(),
+        handle.completed_count()
+    );
     println!();
 
     // Use Executor to run the simulation
@@ -739,13 +851,16 @@ fn test_retry_on_timeout() {
     println!("   Completed futures: {}", handle.completed_count());
     {
         let sim = simulation_arc.lock().unwrap();
-        println!("   Simulation time: {}ms", sim.time().as_duration().as_millis());
+        println!(
+            "   Simulation time: {}ms",
+            sim.time().as_duration().as_millis()
+        );
     }
 
     // The test should show timeout and retry behavior
     // With 200ms service time and 100ms timeout, requests should timeout and retry
     // Note: completed_count() is u64, so we just verify the test ran without panicking
-    
+
     println!();
     println!("✅ Retry on timeout test completed successfully!");
     println!("   This test demonstrates:");
@@ -756,7 +871,6 @@ fn test_retry_on_timeout() {
     println!("   - Proper handling of late responses");
     println!("   - Realistic timeout scenarios in DES");
 }
-
 
 // ============================================================================
 // Two-Tier Service Test: App -> DB with Async Calls
@@ -776,8 +890,8 @@ fn format_time(time: SimTime) -> String {
 #[derive(Debug)]
 enum AppServerEvent {
     /// Client request received - start initial processing
-    RequestReceived { 
-        request_id: u32, 
+    RequestReceived {
+        request_id: u32,
         client_key: Key<TwoTierClientEvent>,
         arrival_time: SimTime,
     },
@@ -788,8 +902,8 @@ enum AppServerEvent {
         arrival_time: SimTime,
     },
     /// DB response received - start post-processing
-    DbResponseReceived { 
-        request_id: u32, 
+    DbResponseReceived {
+        request_id: u32,
         client_key: Key<TwoTierClientEvent>,
         arrival_time: SimTime,
     },
@@ -817,7 +931,7 @@ struct AppServer<S> {
 impl<S> AppServer<S> {
     fn new(
         name: String,
-        db_service: S, 
+        db_service: S,
         future_poller: FuturePollerHandle,
         initial_processing_time: Duration,
         post_processing_mean: Duration,
@@ -845,7 +959,11 @@ impl<S> AppServer<S> {
 
 impl<S> Component for AppServer<S>
 where
-    S: Service<Request<SimBody>, Response = http::Response<SimBody>, Error = des_components::tower::ServiceError> + 'static,
+    S: Service<
+            Request<SimBody>,
+            Response = http::Response<SimBody>,
+            Error = des_components::tower::ServiceError,
+        > + 'static,
     S::Future: 'static,
 {
     type Event = AppServerEvent;
@@ -857,12 +975,24 @@ where
         scheduler: &mut Scheduler,
     ) {
         match event {
-            AppServerEvent::RequestReceived { request_id, client_key, arrival_time } => {
-                println!("[{}] [{}] 📥 Request #{} received from client", 
-                    format_time(scheduler.time()), self.name, request_id);
-                println!("[{}] [{}]    ⏳ Starting initial processing ({}ms)...", 
-                    format_time(scheduler.time()), self.name, self.initial_processing_time.as_millis());
-                
+            AppServerEvent::RequestReceived {
+                request_id,
+                client_key,
+                arrival_time,
+            } => {
+                println!(
+                    "[{}] [{}] 📥 Request #{} received from client",
+                    format_time(scheduler.time()),
+                    self.name,
+                    request_id
+                );
+                println!(
+                    "[{}] [{}]    ⏳ Starting initial processing ({}ms)...",
+                    format_time(scheduler.time()),
+                    self.name,
+                    self.initial_processing_time.as_millis()
+                );
+
                 // Schedule DB call after initial processing time
                 scheduler.schedule(
                     SimTime::from_duration(self.initial_processing_time),
@@ -874,68 +1004,106 @@ where
                     },
                 );
             }
-            
-            AppServerEvent::CallDbService { request_id, client_key, arrival_time } => {
-                println!("[{}] [{}]    ✅ Initial processing complete for request #{}", 
-                    format_time(scheduler.time()), self.name, request_id);
-                println!("[{}] [{}]    📤 Calling DB service...", 
-                    format_time(scheduler.time()), self.name);
-                
+
+            AppServerEvent::CallDbService {
+                request_id,
+                client_key,
+                arrival_time,
+            } => {
+                println!(
+                    "[{}] [{}]    ✅ Initial processing complete for request #{}",
+                    format_time(scheduler.time()),
+                    self.name,
+                    request_id
+                );
+                println!(
+                    "[{}] [{}]    📤 Calling DB service...",
+                    format_time(scheduler.time()),
+                    self.name
+                );
+
                 // Create request to DB
                 let db_request = Request::builder()
                     .method(Method::POST)
                     .uri(format!("/db/query/{}", request_id))
-                    .body(SimBody::new(format!("DB query for request {}", request_id).into_bytes()))
+                    .body(SimBody::new(
+                        format!("DB query for request {}", request_id).into_bytes(),
+                    ))
                     .unwrap();
 
                 // Check if DB service is ready
                 let waker = create_noop_waker();
                 let mut cx = Context::from_waker(&waker);
-                
+
                 match self.db_service.poll_ready(&mut cx) {
                     Poll::Ready(Ok(())) => {
                         // Call DB service
                         let future = self.db_service.call(db_request);
-                        
+
                         // Spawn future with callback that schedules continuation
                         let request_id_copy = *request_id;
                         let client_key_copy = *client_key;
                         let arrival_time_copy = *arrival_time;
-                        
+
                         self.future_poller.spawn(future, move |result| {
                             match result {
                                 Ok(_response) => {
                                     // DB call succeeded - schedule continuation via defer_wake
-                                    defer_wake(self_id, AppServerEvent::DbResponseReceived {
-                                        request_id: request_id_copy,
-                                        client_key: client_key_copy,
-                                        arrival_time: arrival_time_copy,
-                                    });
+                                    defer_wake(
+                                        self_id,
+                                        AppServerEvent::DbResponseReceived {
+                                            request_id: request_id_copy,
+                                            client_key: client_key_copy,
+                                            arrival_time: arrival_time_copy,
+                                        },
+                                    );
                                 }
                                 Err(e) => {
-                                    println!("   ❌ DB call failed for request {}: {:?}", request_id_copy, e);
+                                    println!(
+                                        "   ❌ DB call failed for request {}: {:?}",
+                                        request_id_copy, e
+                                    );
                                 }
                             }
                         });
                     }
                     Poll::Ready(Err(e)) => {
-                        println!("[{}] [{}]    ❌ DB service error: {:?}", 
-                            format_time(scheduler.time()), self.name, e);
+                        println!(
+                            "[{}] [{}]    ❌ DB service error: {:?}",
+                            format_time(scheduler.time()),
+                            self.name,
+                            e
+                        );
                     }
                     Poll::Pending => {
-                        println!("[{}] [{}]    ⏳ DB service not ready (capacity limit)", 
-                            format_time(scheduler.time()), self.name);
+                        println!(
+                            "[{}] [{}]    ⏳ DB service not ready (capacity limit)",
+                            format_time(scheduler.time()),
+                            self.name
+                        );
                     }
                 }
             }
-            
-            AppServerEvent::DbResponseReceived { request_id, client_key, arrival_time } => {
+
+            AppServerEvent::DbResponseReceived {
+                request_id,
+                client_key,
+                arrival_time,
+            } => {
                 let post_processing_time = self.sample_exponential();
-                println!("[{}] [{}]    📥 DB response received for request #{}", 
-                    format_time(scheduler.time()), self.name, request_id);
-                println!("[{}] [{}]    ⏳ Starting post-processing ({:.1}ms)...", 
-                    format_time(scheduler.time()), self.name, post_processing_time.as_secs_f64() * 1000.0);
-                
+                println!(
+                    "[{}] [{}]    📥 DB response received for request #{}",
+                    format_time(scheduler.time()),
+                    self.name,
+                    request_id
+                );
+                println!(
+                    "[{}] [{}]    ⏳ Starting post-processing ({:.1}ms)...",
+                    format_time(scheduler.time()),
+                    self.name,
+                    post_processing_time.as_secs_f64() * 1000.0
+                );
+
                 // Schedule response to client after post-processing
                 scheduler.schedule(
                     SimTime::from_duration(post_processing_time),
@@ -947,13 +1115,25 @@ where
                     },
                 );
             }
-            
-            AppServerEvent::SendResponseToClient { request_id, client_key, arrival_time } => {
-                println!("[{}] [{}]    ✅ Post-processing complete for request #{}", 
-                    format_time(scheduler.time()), self.name, request_id);
-                println!("[{}] [{}] 📤 Sending response to client for request #{}", 
-                    format_time(scheduler.time()), self.name, request_id);
-                
+
+            AppServerEvent::SendResponseToClient {
+                request_id,
+                client_key,
+                arrival_time,
+            } => {
+                println!(
+                    "[{}] [{}]    ✅ Post-processing complete for request #{}",
+                    format_time(scheduler.time()),
+                    self.name,
+                    request_id
+                );
+                println!(
+                    "[{}] [{}] 📤 Sending response to client for request #{}",
+                    format_time(scheduler.time()),
+                    self.name,
+                    request_id
+                );
+
                 // Send response to client
                 scheduler.schedule(
                     SimTime::zero(), // Immediate
@@ -974,7 +1154,10 @@ enum TwoTierClientEvent {
     /// Send a request to App server
     SendRequest { request_id: u32 },
     /// Response received from App server
-    ResponseReceived { request_id: u32, arrival_time: SimTime },
+    ResponseReceived {
+        request_id: u32,
+        arrival_time: SimTime,
+    },
 }
 
 /// Client that sends periodic requests and tracks latency
@@ -991,7 +1174,12 @@ struct TwoTierClient {
 }
 
 impl TwoTierClient {
-    fn new(name: String, app_server_key: Key<AppServerEvent>, interval: Duration, max_requests: u32) -> Self {
+    fn new(
+        name: String,
+        app_server_key: Key<AppServerEvent>,
+        interval: Duration,
+        max_requests: u32,
+    ) -> Self {
         Self {
             name,
             app_server_key,
@@ -1025,13 +1213,17 @@ impl Component for TwoTierClient {
         match event {
             TwoTierClientEvent::SendRequest { request_id } => {
                 let current_time = scheduler.time();
-                
-                println!("[{}] [{}] 🚀 Sending request #{} to App server", 
-                    format_time(current_time), self.name, request_id);
-                
+
+                println!(
+                    "[{}] [{}] 🚀 Sending request #{} to App server",
+                    format_time(current_time),
+                    self.name,
+                    request_id
+                );
+
                 // Record request time
                 self.request_times.insert(*request_id, current_time);
-                
+
                 // Send request to App server immediately
                 scheduler.schedule(
                     SimTime::zero(),
@@ -1055,13 +1247,21 @@ impl Component for TwoTierClient {
                     );
                 }
             }
-            TwoTierClientEvent::ResponseReceived { request_id, arrival_time } => {
+            TwoTierClientEvent::ResponseReceived {
+                request_id,
+                arrival_time,
+            } => {
                 let current_time = scheduler.time();
                 let latency = current_time - *arrival_time; // SimTime - SimTime = Duration
-                
-                println!("[{}] [{}] ✅ Response received for request #{} (latency: {:.1}ms)", 
-                    format_time(current_time), self.name, request_id, latency.as_secs_f64() * 1000.0);
-                
+
+                println!(
+                    "[{}] [{}] ✅ Response received for request #{} (latency: {:.1}ms)",
+                    format_time(current_time),
+                    self.name,
+                    request_id,
+                    latency.as_secs_f64() * 1000.0
+                );
+
                 self.latencies.push(latency);
             }
         }
@@ -1096,15 +1296,27 @@ fn test_two_tier_app_db_service() {
 
     println!("📋 Test Setup:");
     println!("   - App Server:");
-    println!("       • Initial processing: {}ms (before DB call)", initial_processing_time.as_millis());
-    println!("       • Post-processing: exponential (mean {}ms)", post_processing_mean.as_millis());
+    println!(
+        "       • Initial processing: {}ms (before DB call)",
+        initial_processing_time.as_millis()
+    );
+    println!(
+        "       • Post-processing: exponential (mean {}ms)",
+        post_processing_mean.as_millis()
+    );
     println!("   - DB Server:");
     println!("       • Service time: exponential (mean 100ms)");
     println!("       • Thread capacity: 10");
     println!("   - Client:");
-    println!("       • Request interval: {}ms", request_interval.as_millis());
+    println!(
+        "       • Request interval: {}ms",
+        request_interval.as_millis()
+    );
     println!("       • Total requests: {}", max_requests);
-    println!("   - Simulation duration: {}s", simulation_duration.as_secs());
+    println!(
+        "   - Simulation duration: {}s",
+        simulation_duration.as_secs()
+    );
     println!();
 
     // Create FuturePoller for async DB calls
@@ -1119,13 +1331,17 @@ fn test_two_tier_app_db_service() {
     // Schedule FuturePoller initialization
     {
         let mut sim = simulation_arc.lock().unwrap();
-        sim.schedule(SimTime::zero(), future_poller_key, FuturePollerEvent::Initialize);
+        sim.schedule(
+            SimTime::zero(),
+            future_poller_key,
+            FuturePollerEvent::Initialize,
+        );
     }
 
     // Create App server component
     let app_server = AppServer::new(
         "app-server".to_string(),
-        db_service, 
+        db_service,
         future_poller_handle.clone(),
         initial_processing_time,
         post_processing_mean,
@@ -1138,8 +1354,8 @@ fn test_two_tier_app_db_service() {
     // Create client
     let client = TwoTierClient::new(
         "client".to_string(),
-        app_server_key, 
-        request_interval, 
+        app_server_key,
+        request_interval,
         max_requests,
     );
     let client_key = {
@@ -1173,18 +1389,31 @@ fn test_two_tier_app_db_service() {
     let (completed_count, avg_latency, latencies) = {
         let mut sim = simulation_arc.lock().unwrap();
         let client: TwoTierClient = sim.remove_component(client_key).unwrap();
-        (client.latencies.len(), client.average_latency(), client.latencies.clone())
+        (
+            client.latencies.len(),
+            client.average_latency(),
+            client.latencies.clone(),
+        )
     };
 
     println!("📊 Final Results:");
-    println!("   Completed requests: {} / {}", completed_count, max_requests);
-    println!("   Pending futures: {}", future_poller_handle.pending_count());
-    println!("   Completed futures: {}", future_poller_handle.completed_count());
-    
+    println!(
+        "   Completed requests: {} / {}",
+        completed_count, max_requests
+    );
+    println!(
+        "   Pending futures: {}",
+        future_poller_handle.pending_count()
+    );
+    println!(
+        "   Completed futures: {}",
+        future_poller_handle.completed_count()
+    );
+
     if let Some(avg) = avg_latency {
         let avg_ms = avg.as_secs_f64() * 1000.0;
         println!("   Average latency: {:.2}ms", avg_ms);
-        
+
         // Calculate min/max
         if !latencies.is_empty() {
             let min_ms = latencies.iter().min().unwrap().as_secs_f64() * 1000.0;
@@ -1198,23 +1427,35 @@ fn test_two_tier_app_db_service() {
 
     {
         let sim = simulation_arc.lock().unwrap();
-        println!("   Final simulation time: {}ms", sim.time().as_duration().as_millis());
+        println!(
+            "   Final simulation time: {}ms",
+            sim.time().as_duration().as_millis()
+        );
     }
 
     // Assertions
-    assert!(completed_count > 0, "Should have completed at least some requests");
-    
+    assert!(
+        completed_count > 0,
+        "Should have completed at least some requests"
+    );
+
     // Expected latency: 10ms (initial) + ~100ms (DB, exponential mean) + ~20ms (post-DB) = ~130ms
     if let Some(avg) = avg_latency {
         let avg_ms = avg.as_secs_f64() * 1000.0;
         println!();
         println!("   Expected latency breakdown:");
-        println!("     - Initial App processing: {}ms", initial_processing_time.as_millis());
+        println!(
+            "     - Initial App processing: {}ms",
+            initial_processing_time.as_millis()
+        );
         println!("     - DB processing (mean): 100ms");
-        println!("     - Post-DB processing (mean): {}ms", post_processing_mean.as_millis());
+        println!(
+            "     - Post-DB processing (mean): {}ms",
+            post_processing_mean.as_millis()
+        );
         println!("     - Expected total (mean): ~130ms");
         println!("     - Actual average: {:.2}ms", avg_ms);
-        
+
         // Allow for variance - should be roughly in the 80-300ms range
         assert!(avg_ms > 50.0, "Average latency should be > 50ms");
         assert!(avg_ms < 500.0, "Average latency should be < 500ms");

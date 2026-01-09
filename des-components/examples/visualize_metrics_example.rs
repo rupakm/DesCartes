@@ -9,8 +9,8 @@
 
 use des_core::SimTime;
 use des_metrics::SimulationMetrics;
+use des_viz::charts::{latency, percentiles, throughput};
 use des_viz::report::generate_html_report;
-use des_viz::charts::{latency, throughput, percentiles};
 use std::time::Duration;
 
 fn main() {
@@ -62,40 +62,24 @@ fn main() {
     // Server 1: Lower latency service
     for i in 1..=100 {
         let latency_ms = 15.0 + (i as f64 * 0.3) + (i % 10) as f64 * 0.5;
-        metrics.record_histogram(
-            "response_time_ms",
-            latency_ms,
-            &[("component", "server1")],
-        );
+        metrics.record_histogram("response_time_ms", latency_ms, &[("component", "server1")]);
     }
 
     // Server 2: Higher latency service
     for i in 1..=100 {
         let latency_ms = 35.0 + (i as f64 * 0.5) + (i % 15) as f64;
-        metrics.record_histogram(
-            "response_time_ms",
-            latency_ms,
-            &[("component", "server2")],
-        );
+        metrics.record_histogram("response_time_ms", latency_ms, &[("component", "server2")]);
     }
 
     // API endpoint latencies
     for i in 1..=80 {
         let latency_ms = 8.0 + (i as f64 * 0.2) + (i % 5) as f64 * 0.3;
-        metrics.record_histogram(
-            "api_latency_ms",
-            latency_ms,
-            &[("endpoint", "/users")],
-        );
+        metrics.record_histogram("api_latency_ms", latency_ms, &[("endpoint", "/users")]);
     }
 
     for i in 1..=70 {
         let latency_ms = 12.0 + (i as f64 * 0.25) + (i % 8) as f64 * 0.4;
-        metrics.record_histogram(
-            "api_latency_ms",
-            latency_ms,
-            &[("endpoint", "/orders")],
-        );
+        metrics.record_histogram("api_latency_ms", latency_ms, &[("endpoint", "/orders")]);
     }
 
     // High-resolution latency tracking
@@ -104,10 +88,12 @@ fn main() {
         metrics.record_latency("service_latency", latency, &[]);
     }
 
-    println!("✓ Collected {} counters, {} gauges, {} histograms\n",
-             metrics.get_metrics_snapshot().counters.len(),
-             metrics.get_metrics_snapshot().gauges.len(),
-             metrics.get_metrics_snapshot().histograms.len());
+    println!(
+        "✓ Collected {} counters, {} gauges, {} histograms\n",
+        metrics.get_metrics_snapshot().counters.len(),
+        metrics.get_metrics_snapshot().gauges.len(),
+        metrics.get_metrics_snapshot().histograms.len()
+    );
 
     // Generate individual charts
     println!("Generating individual charts...");
@@ -153,7 +139,10 @@ fn main() {
         println!("  P50: {:.2}ms", latency_stats.p50.as_secs_f64() * 1000.0);
         println!("  P95: {:.2}ms", latency_stats.p95.as_secs_f64() * 1000.0);
         println!("  P99: {:.2}ms", latency_stats.p99.as_secs_f64() * 1000.0);
-        println!("  P99.9: {:.2}ms", latency_stats.p999.as_secs_f64() * 1000.0);
+        println!(
+            "  P99.9: {:.2}ms",
+            latency_stats.p999.as_secs_f64() * 1000.0
+        );
     }
 
     println!("\n=== Example Complete ===");

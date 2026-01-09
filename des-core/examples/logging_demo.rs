@@ -3,12 +3,9 @@
 //! This example shows how to use the logging system to debug and monitor
 //! discrete event simulations.
 
-use des_core::{
-    Component, Executor, Key, Simulation, SimTime,
-    init_detailed_simulation_logging,
-};
+use des_core::{init_detailed_simulation_logging, Component, Executor, Key, SimTime, Simulation};
 use std::time::Duration;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// A simple server component that processes requests
 #[derive(Debug)]
@@ -50,12 +47,14 @@ impl Component for Server {
                     request_id = request_id,
                     "Starting to process request"
                 );
-                
+
                 // Schedule completion after processing time
                 scheduler.schedule(
                     SimTime::from_duration(self.processing_time),
                     self_id,
-                    ServerEvent::RequestCompleted { request_id: *request_id },
+                    ServerEvent::RequestCompleted {
+                        request_id: *request_id,
+                    },
                 );
             }
             ServerEvent::RequestCompleted { request_id } => {
@@ -116,13 +115,13 @@ impl Component for Client {
             ClientEvent::SendRequest => {
                 if self.requests_sent < self.requests_to_send {
                     self.requests_sent += 1;
-                    
+
                     debug!(
                         client = %self.name,
                         request_id = self.requests_sent,
                         "Sending request to server"
                     );
-                    
+
                     // Send request to server
                     scheduler.schedule_now(
                         self.server_key,
@@ -130,7 +129,7 @@ impl Component for Client {
                             request_id: self.requests_sent,
                         },
                     );
-                    
+
                     // Schedule next request if more to send
                     if self.requests_sent < self.requests_to_send {
                         scheduler.schedule(
@@ -155,25 +154,25 @@ fn main() {
     // ============================================================================
     // LOGGING CONFIGURATION OPTIONS
     // ============================================================================
-    
+
     // Option 1: Detailed logging with pretty formatting (RECOMMENDED FOR DEBUGGING)
     // This shows TRACE, DEBUG, INFO, WARN, and ERROR messages with full context
     init_detailed_simulation_logging();
-    
+
     // Option 2: Set a specific log level (uncomment to try)
     // Available levels: "trace", "debug", "info", "warn", "error"
     // init_simulation_logging_with_level("info");    // Only INFO and above
     // init_simulation_logging_with_level("debug");   // DEBUG and above
     // init_simulation_logging_with_level("trace");   // Everything (very verbose)
-    
+
     // Option 3: Use environment variable for dynamic control
     // Set RUST_LOG=debug before running: RUST_LOG=debug cargo run --example logging_demo
     // This allows you to control logging without recompiling
-    
+
     // Option 4: Use default logging (info level)
     // use des_core::init_simulation_logging;
     // init_simulation_logging();
-    
+
     // ============================================================================
     // WHAT YOU'LL SEE IN THE TERMINAL:
     // - Timestamps for each log entry
@@ -184,48 +183,58 @@ fn main() {
     // - Structured fields (component_id, request_id, etc.)
     // - Span context (nested execution context)
     // ============================================================================
-    
+
     info!("Starting logging demonstration");
-    
+
     // Create simulation
     let mut sim = Simulation::default();
-    
+
     // Create server component
     let server = Server::new(
         "WebServer".to_string(),
         Duration::from_millis(50), // 50ms processing time
     );
     let server_key = sim.add_component(server);
-    
+
     // Create client component
     let client = Client::new(
         "WebClient".to_string(),
         server_key,
-        5, // Send 5 requests
+        5,                          // Send 5 requests
         Duration::from_millis(100), // Every 100ms
     );
     let client_key = sim.add_component(client);
-    
+
     // Start the client
     sim.schedule(SimTime::zero(), client_key, ClientEvent::SendRequest);
-    
+
     // Run simulation for 1 second
     info!("Starting simulation execution");
     sim.execute(Executor::timed(SimTime::from_secs(1)));
-    
+
     // Get final state
-    let final_server = sim.remove_component::<ServerEvent, Server>(server_key).unwrap();
-    let final_client = sim.remove_component::<ClientEvent, Client>(client_key).unwrap();
-    
+    let final_server = sim
+        .remove_component::<ServerEvent, Server>(server_key)
+        .unwrap();
+    let final_client = sim
+        .remove_component::<ClientEvent, Client>(client_key)
+        .unwrap();
+
     info!(
         server_requests_processed = final_server.requests_processed,
         client_requests_sent = final_client.requests_sent,
         final_time = ?sim.time(),
         "Simulation completed"
     );
-    
+
     println!("\n=== Simulation Summary ===");
-    println!("Server '{}' processed {} requests", final_server.name, final_server.requests_processed);
-    println!("Client '{}' sent {} requests", final_client.name, final_client.requests_sent);
+    println!(
+        "Server '{}' processed {} requests",
+        final_server.name, final_server.requests_processed
+    );
+    println!(
+        "Client '{}' sent {} requests",
+        final_client.name, final_client.requests_sent
+    );
     println!("Final simulation time: {:?}", sim.time());
 }

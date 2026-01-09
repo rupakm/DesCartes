@@ -3,8 +3,11 @@
 //! This demonstrates how components can communicate with each other
 //! by sending events between them.
 
-use des_components::{Server, ServerEvent, ClientEvent};
-use des_core::{Component, Execute, Executor, Key, Scheduler, Simulation, SimTime, RequestAttempt, RequestAttemptId, RequestId};
+use des_components::{ClientEvent, Server, ServerEvent};
+use des_core::{
+    Component, Execute, Executor, Key, RequestAttempt, RequestAttemptId, RequestId, Scheduler,
+    SimTime, Simulation,
+};
 use std::time::Duration;
 
 /// Client that actually sends requests to a specific server
@@ -72,7 +75,7 @@ impl Component for CommunicatingClient {
             ClientEvent::SendRequest => {
                 let request_id = self.next_request_id;
                 let attempt_id = self.next_attempt_id;
-                
+
                 println!(
                     "[{}] Sending request {} (attempt {}) to server at {:?}",
                     self.name,
@@ -80,7 +83,7 @@ impl Component for CommunicatingClient {
                     attempt_id,
                     scheduler.time()
                 );
-                
+
                 // Create a RequestAttempt
                 let attempt = RequestAttempt::new(
                     RequestAttemptId(attempt_id),
@@ -89,21 +92,21 @@ impl Component for CommunicatingClient {
                     scheduler.time(),
                     vec![], // Empty payload
                 );
-                
+
                 self.requests_sent += 1;
                 self.next_request_id += 1;
                 self.next_attempt_id += 1;
-                
+
                 // Send request attempt to the server
                 scheduler.schedule(
                     SimTime::from_duration(Duration::from_millis(1)),
                     self.server_id,
-                    ServerEvent::ProcessRequest { 
+                    ServerEvent::ProcessRequest {
                         attempt,
-                        client_id: self_id 
+                        client_id: self_id,
                     },
                 );
-                
+
                 // Schedule next request
                 self.schedule_next_request(self_id, scheduler);
             }
@@ -112,12 +115,16 @@ impl Component for CommunicatingClient {
                 if response.is_success() {
                     self.successful_responses += 1;
                 }
-                
+
                 println!(
                     "[{}] Received response #{}: {} at {:?}",
                     self.name,
                     self.responses_received,
-                    if response.is_success() { "SUCCESS" } else { "FAILURE" },
+                    if response.is_success() {
+                        "SUCCESS"
+                    } else {
+                        "FAILURE"
+                    },
                     scheduler.time()
                 );
             }
@@ -138,15 +145,17 @@ fn test_actual_client_server_communication() {
     let mut sim = Simulation::default();
 
     // Create server first
-    let server = Server::with_constant_service_time("api-server".to_string(), 2, Duration::from_millis(30));
+    let server =
+        Server::with_constant_service_time("api-server".to_string(), 2, Duration::from_millis(30));
     let server_id = sim.add_component(server);
 
     // Create client that knows about the server
     let client = CommunicatingClient::new(
-        "api-client".to_string(), 
-        server_id, 
-        Duration::from_millis(100)
-    ).with_max_requests(4);
+        "api-client".to_string(),
+        server_id,
+        Duration::from_millis(100),
+    )
+    .with_max_requests(4);
     let client_id = sim.add_component(client);
 
     // Start the client
@@ -164,22 +173,52 @@ fn test_actual_client_server_communication() {
     println!("\n=== Simulation Complete ===\n");
 
     // Check results
-    let client = sim.remove_component::<ClientEvent, CommunicatingClient>(client_id).unwrap();
-    let server = sim.remove_component::<ServerEvent, Server>(server_id).unwrap();
+    let client = sim
+        .remove_component::<ClientEvent, CommunicatingClient>(client_id)
+        .unwrap();
+    let server = sim
+        .remove_component::<ServerEvent, Server>(server_id)
+        .unwrap();
 
     println!("Final Results:");
-    println!("  Client '{}' sent {} requests", client.name, client.requests_sent);
-    println!("  Client '{}' received {} responses ({} successful)", 
-             client.name, client.responses_received, client.successful_responses);
-    println!("  Server '{}' processed {} requests", server.name, server.requests_processed);
-    println!("  Server final load: {}/{}", server.active_threads, server.thread_capacity);
+    println!(
+        "  Client '{}' sent {} requests",
+        client.name, client.requests_sent
+    );
+    println!(
+        "  Client '{}' received {} responses ({} successful)",
+        client.name, client.responses_received, client.successful_responses
+    );
+    println!(
+        "  Server '{}' processed {} requests",
+        server.name, server.requests_processed
+    );
+    println!(
+        "  Server final load: {}/{}",
+        server.active_threads, server.thread_capacity
+    );
 
     // Verify actual communication occurred
-    assert_eq!(client.requests_sent, 4, "Client should have sent 4 requests");
-    assert_eq!(client.responses_received, 4, "Client should have received 4 responses");
-    assert_eq!(server.requests_processed, 4, "Server should have processed 4 requests");
-    assert_eq!(client.successful_responses, 4, "All responses should be successful with this timing");
-    assert_eq!(server.active_threads, 0, "Server should have no pending requests");
+    assert_eq!(
+        client.requests_sent, 4,
+        "Client should have sent 4 requests"
+    );
+    assert_eq!(
+        client.responses_received, 4,
+        "Client should have received 4 responses"
+    );
+    assert_eq!(
+        server.requests_processed, 4,
+        "Server should have processed 4 requests"
+    );
+    assert_eq!(
+        client.successful_responses, 4,
+        "All responses should be successful with this timing"
+    );
+    assert_eq!(
+        server.active_threads, 0,
+        "Server should have no pending requests"
+    );
 
     println!("\n=== Test Passed ===\n");
 }
@@ -191,15 +230,20 @@ fn test_server_overload_with_communication() {
     let mut sim = Simulation::default();
 
     // Create server with capacity 1 and slow service time
-    let server = Server::with_constant_service_time("slow-server".to_string(), 1, Duration::from_millis(150));
+    let server = Server::with_constant_service_time(
+        "slow-server".to_string(),
+        1,
+        Duration::from_millis(150),
+    );
     let server_id = sim.add_component(server);
 
     // Create fast client
     let client = CommunicatingClient::new(
-        "fast-client".to_string(), 
-        server_id, 
-        Duration::from_millis(50)
-    ).with_max_requests(4);
+        "fast-client".to_string(),
+        server_id,
+        Duration::from_millis(50),
+    )
+    .with_max_requests(4);
     let client_id = sim.add_component(client);
 
     // Start the client
@@ -217,27 +261,52 @@ fn test_server_overload_with_communication() {
     println!("\n=== Simulation Complete ===\n");
 
     // Check results
-    let client = sim.remove_component::<ClientEvent, CommunicatingClient>(client_id).unwrap();
-    let server = sim.remove_component::<ServerEvent, Server>(server_id).unwrap();
+    let client = sim
+        .remove_component::<ClientEvent, CommunicatingClient>(client_id)
+        .unwrap();
+    let server = sim
+        .remove_component::<ServerEvent, Server>(server_id)
+        .unwrap();
 
     println!("Final Results:");
-    println!("  Client '{}' sent {} requests", client.name, client.requests_sent);
-    println!("  Client '{}' received {} responses ({} successful)", 
-             client.name, client.responses_received, client.successful_responses);
-    println!("  Server '{}' processed {} requests", server.name, server.requests_processed);
-    println!("  Server final load: {}/{}", server.active_threads, server.thread_capacity);
+    println!(
+        "  Client '{}' sent {} requests",
+        client.name, client.requests_sent
+    );
+    println!(
+        "  Client '{}' received {} responses ({} successful)",
+        client.name, client.responses_received, client.successful_responses
+    );
+    println!(
+        "  Server '{}' processed {} requests",
+        server.name, server.requests_processed
+    );
+    println!(
+        "  Server final load: {}/{}",
+        server.active_threads, server.thread_capacity
+    );
 
     // Verify overload behavior
-    assert_eq!(client.requests_sent, 4, "Client should have sent 4 requests");
-    assert_eq!(client.responses_received, 4, "Client should have received 4 responses");
-    
+    assert_eq!(
+        client.requests_sent, 4,
+        "Client should have sent 4 requests"
+    );
+    assert_eq!(
+        client.responses_received, 4,
+        "Client should have received 4 responses"
+    );
+
     // With fast requests (50ms interval) and slow service (150ms), some should be rejected
-    assert!(client.successful_responses < client.responses_received, 
-            "Some responses should be failures due to overload");
-    
+    assert!(
+        client.successful_responses < client.responses_received,
+        "Some responses should be failures due to overload"
+    );
+
     // Server should have processed fewer requests than total sent due to rejections
-    assert!(server.requests_processed <= client.requests_sent, 
-            "Server shouldn't process more than client sent");
+    assert!(
+        server.requests_processed <= client.requests_sent,
+        "Server shouldn't process more than client sent"
+    );
 
     println!("\n=== Test Passed ===\n");
 }

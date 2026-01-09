@@ -36,10 +36,13 @@
 //! actually finishes processing, regardless of whether the service was called from within
 //! or outside of event processing.
 
-use crate::{Server, ServerEvent, ClientEvent};
-use des_core::{Component, Key, Scheduler, SimTime, Simulation, RequestAttempt, RequestAttemptId, RequestId, Response};
+use crate::{ClientEvent, Server, ServerEvent};
+use des_core::dists::{ConstantServiceTime, ExponentialDistribution, ServiceTimeDistribution};
 use des_core::{defer_wake, in_scheduler_context, SchedulerHandle as CoreSchedulerHandle};
-use des_core::dists::{ServiceTimeDistribution, ConstantServiceTime, ExponentialDistribution};
+use des_core::{
+    Component, Key, RequestAttempt, RequestAttemptId, RequestId, Response, Scheduler, SimTime,
+    Simulation,
+};
 
 use http::Request;
 use pin_project::pin_project;
@@ -54,7 +57,7 @@ use tokio::sync::oneshot;
 use tower::Service;
 use tower_layer::Layer;
 
-use super::{ServiceError, SimBody, response_to_http, serialize_http_request};
+use super::{response_to_http, serialize_http_request, ServiceError, SimBody};
 
 // ============================================================================
 // Response Router - Pre-registered component for routing server responses
@@ -104,7 +107,12 @@ impl Component for ResponseRouter {
                 self.current_load.fetch_sub(1, Ordering::Relaxed);
 
                 // Route response to the correct oneshot channel
-                if let Some(tx) = self.pending_responses.lock().unwrap().remove(&response.attempt_id) {
+                if let Some(tx) = self
+                    .pending_responses
+                    .lock()
+                    .unwrap()
+                    .remove(&response.attempt_id)
+                {
                     let _ = tx.send(response.clone());
                 }
 
@@ -215,10 +223,13 @@ impl TowerSchedulerHandle {
         // Schedule the request to the server with the router as the client
         if in_scheduler_context() {
             // Inside event processing - use defer_wake to avoid deadlock
-            defer_wake(self.server_key, ServerEvent::ProcessRequest {
-                attempt,
-                client_id: self.router_key,
-            });
+            defer_wake(
+                self.server_key,
+                ServerEvent::ProcessRequest {
+                    attempt,
+                    client_id: self.router_key,
+                },
+            );
         } else {
             // Outside event processing - use the scheduler handle directly
             self.scheduler.schedule(
@@ -230,7 +241,7 @@ impl TowerSchedulerHandle {
                 },
             );
         }
-        
+
         Ok(())
     }
 
@@ -264,7 +275,7 @@ impl TowerSchedulerHandle {
             RequestAttempt::new(
                 attempt_id,
                 request_id,
-                1, // First attempt
+                1,                                      // First attempt
                 SimTime::from_duration(Duration::ZERO), // Will be set by scheduler
                 payload,
             )
@@ -314,7 +325,10 @@ impl<L> DesServiceBuilder<L> {
     }
 
     /// Set the service time distribution
-    pub fn service_time_distribution<D: ServiceTimeDistribution + 'static>(mut self, distribution: D) -> Self {
+    pub fn service_time_distribution<D: ServiceTimeDistribution + 'static>(
+        mut self,
+        distribution: D,
+    ) -> Self {
         self.service_time_distribution = Some(Box::new(distribution));
         self
     }
@@ -344,7 +358,8 @@ impl<L> DesServiceBuilder<L> {
     pub fn option_layer<T>(
         self,
         layer: Option<T>,
-    ) -> DesServiceBuilder<tower_layer::Stack<tower::util::Either<T, tower_layer::Identity>, L>> {
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::util::Either<T, tower_layer::Identity>, L>>
+    {
         match layer {
             Some(layer) => self.layer(tower::util::Either::Left(layer)),
             None => self.layer(tower::util::Either::Right(tower_layer::Identity::new())),
@@ -352,7 +367,10 @@ impl<L> DesServiceBuilder<L> {
     }
 
     /// Add a [`Layer`] built from a function that accepts a service and returns another service.
-    pub fn layer_fn<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower_layer::LayerFn<F>, L>> {
+    pub fn layer_fn<F>(
+        self,
+        f: F,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower_layer::LayerFn<F>, L>> {
         self.layer(tower_layer::layer_fn(f))
     }
 
@@ -368,12 +386,17 @@ impl<L> DesServiceBuilder<L> {
     pub fn concurrency_limit(
         self,
         max: usize,
-    ) -> DesServiceBuilder<tower_layer::Stack<super::limit::concurrency::DesConcurrencyLimitLayer, L>> {
-        self.layer(super::limit::concurrency::DesConcurrencyLimitLayer::new(max))
+    ) -> DesServiceBuilder<tower_layer::Stack<super::limit::concurrency::DesConcurrencyLimitLayer, L>>
+    {
+        self.layer(super::limit::concurrency::DesConcurrencyLimitLayer::new(
+            max,
+        ))
     }
 
     /// Drop requests when the next layer is unable to respond to requests.
-    pub fn load_shed(self) -> DesServiceBuilder<tower_layer::Stack<tower::load_shed::LoadShedLayer, L>> {
+    pub fn load_shed(
+        self,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::load_shed::LoadShedLayer, L>> {
         self.layer(tower::load_shed::LoadShedLayer::new())
     }
 
@@ -385,15 +408,19 @@ impl<L> DesServiceBuilder<L> {
         scheduler: CoreSchedulerHandle,
     ) -> DesServiceBuilder<tower_layer::Stack<super::limit::rate::DesRateLimitLayer, L>> {
         let rate = num as f64 / per.as_secs_f64();
-        self.layer(super::limit::rate::DesRateLimitLayer::new(rate, num as usize, scheduler))
+        self.layer(super::limit::rate::DesRateLimitLayer::new(
+            rate,
+            num as usize,
+            scheduler,
+        ))
     }
 
     /// Retry failed requests according to the given retry policy.
     pub fn retry<P>(
-        self, 
+        self,
         policy: P,
         scheduler: CoreSchedulerHandle,
-    ) -> DesServiceBuilder<tower_layer::Stack<super::retry::DesRetryLayer<P>, L>> 
+    ) -> DesServiceBuilder<tower_layer::Stack<super::retry::DesRetryLayer<P>, L>>
     where
         P: Clone,
     {
@@ -445,27 +472,42 @@ impl<L> DesServiceBuilder<L> {
     }
 
     /// Map one error type to another.
-    pub fn map_err<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapErrLayer<F>, L>> {
+    pub fn map_err<F>(
+        self,
+        f: F,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapErrLayer<F>, L>> {
         self.layer(tower::util::MapErrLayer::new(f))
     }
 
     /// Composes a function that transforms futures produced by the service.
-    pub fn map_future<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapFutureLayer<F>, L>> {
+    pub fn map_future<F>(
+        self,
+        f: F,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapFutureLayer<F>, L>> {
         self.layer(tower::util::MapFutureLayer::new(f))
     }
 
     /// Apply an asynchronous function after the service.
-    pub fn then<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::ThenLayer<F>, L>> {
+    pub fn then<F>(
+        self,
+        f: F,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::util::ThenLayer<F>, L>> {
         self.layer(tower::util::ThenLayer::new(f))
     }
 
     /// Executes a new future after this service's future resolves.
-    pub fn and_then<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::AndThenLayer<F>, L>> {
+    pub fn and_then<F>(
+        self,
+        f: F,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::util::AndThenLayer<F>, L>> {
         self.layer(tower::util::AndThenLayer::new(f))
     }
 
     /// Maps this service's result type to a different value.
-    pub fn map_result<F>(self, f: F) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapResultLayer<F>, L>> {
+    pub fn map_result<F>(
+        self,
+        f: F,
+    ) -> DesServiceBuilder<tower_layer::Stack<tower::util::MapResultLayer<F>, L>> {
         self.layer(tower::util::MapResultLayer::new(f))
     }
 
@@ -475,7 +517,8 @@ impl<L> DesServiceBuilder<L> {
         failure_threshold: usize,
         recovery_timeout: std::time::Duration,
         scheduler: CoreSchedulerHandle,
-    ) -> DesServiceBuilder<tower_layer::Stack<super::circuit_breaker::DesCircuitBreakerLayer, L>> {
+    ) -> DesServiceBuilder<tower_layer::Stack<super::circuit_breaker::DesCircuitBreakerLayer, L>>
+    {
         self.layer(super::circuit_breaker::DesCircuitBreakerLayer::new(
             failure_threshold,
             recovery_timeout,
@@ -487,7 +530,9 @@ impl<L> DesServiceBuilder<L> {
     pub fn global_concurrency_limit(
         self,
         state: std::sync::Arc<super::limit::global_concurrency::GlobalConcurrencyLimitState>,
-    ) -> DesServiceBuilder<tower_layer::Stack<super::limit::global_concurrency::DesGlobalConcurrencyLimitLayer, L>> {
+    ) -> DesServiceBuilder<
+        tower_layer::Stack<super::limit::global_concurrency::DesGlobalConcurrencyLimitLayer, L>,
+    > {
         self.layer(super::limit::global_concurrency::DesGlobalConcurrencyLimitLayer::new(state))
     }
 
@@ -557,15 +602,13 @@ impl<L> DesServiceBuilder<L> {
     /// 2. Creates and registers a `ResponseRouter` component to handle all responses
     /// 3. Creates the `TowerSchedulerHandle` with references to both components
     /// 4. Wraps the base service with any configured middleware layers
-    pub fn build(
-        self,
-        simulation: &mut Simulation,
-    ) -> Result<L::Service, ServiceError> 
+    pub fn build(self, simulation: &mut Simulation) -> Result<L::Service, ServiceError>
     where
         L: tower_layer::Layer<DesService>,
     {
         // Use the configured distribution or default to 100ms constant
-        let service_time_distribution = self.service_time_distribution
+        let service_time_distribution = self
+            .service_time_distribution
             .unwrap_or_else(|| Box::new(ConstantServiceTime::new(Duration::from_millis(100))));
 
         // Create shared state for response routing
@@ -584,8 +627,8 @@ impl<L> DesServiceBuilder<L> {
 
         // Create the DES server
         let server = Server::new(
-            self.server_name.clone(), 
-            self.thread_capacity, 
+            self.server_name.clone(),
+            self.thread_capacity,
             service_time_distribution,
         );
         let server_key = simulation.add_component(server);
@@ -614,7 +657,10 @@ impl<L: std::fmt::Debug> std::fmt::Debug for DesServiceBuilder<L> {
         f.debug_struct("DesServiceBuilder")
             .field("server_name", &self.server_name)
             .field("thread_capacity", &self.thread_capacity)
-            .field("has_service_time_distribution", &self.service_time_distribution.is_some())
+            .field(
+                "has_service_time_distribution",
+                &self.service_time_distribution.is_some(),
+            )
             .field("layer", &self.layer)
             .finish()
     }
@@ -712,9 +758,6 @@ impl Service<Request<SimBody>> for DesService {
 }
 
 /// Convert HTTP request to RequestAttempt
-fn http_to_request_attempt(
-    handle: &TowerSchedulerHandle,
-    req: Request<SimBody>,
-) -> RequestAttempt {
+fn http_to_request_attempt(handle: &TowerSchedulerHandle, req: Request<SimBody>) -> RequestAttempt {
     handle.create_request_attempt(&req)
 }

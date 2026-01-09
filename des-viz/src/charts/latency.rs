@@ -48,8 +48,7 @@ pub fn create_latency_chart_with_config(
     }
 
     let output_path = output_path.as_ref();
-    let root = BitMapBackend::new(output_path, (config.width, config.height))
-        .into_drawing_area();
+    let root = BitMapBackend::new(output_path, (config.width, config.height)).into_drawing_area();
 
     root.fill(&WHITE)
         .map_err(|e| VizError::RenderingError(format!("Failed to fill background: {e}")))?;
@@ -63,13 +62,7 @@ pub fn create_latency_chart_with_config(
             format!("{}:{}", name, format_labels(labels))
         };
 
-        chart_data.push((
-            label,
-            stats.mean,
-            stats.median,
-            stats.p95,
-            stats.p99,
-        ));
+        chart_data.push((label, stats.mean, stats.median, stats.p95, stats.p99));
     }
 
     // Calculate max value for y-axis
@@ -85,10 +78,7 @@ pub fn create_latency_chart_with_config(
         .margin(10)
         .x_label_area_size(100)
         .y_label_area_size(60)
-        .build_cartesian_2d(
-            0..chart_data.len(),
-            0.0..max_latency,
-        )
+        .build_cartesian_2d(0..chart_data.len(), 0.0..max_latency)
         .map_err(|e| VizError::RenderingError(format!("Failed to build chart: {e}")))?;
 
     chart

@@ -413,13 +413,7 @@ mod tests {
         let code = 500;
         let message = "Internal Server Error".to_string();
 
-        let response = Response::error(
-            attempt_id,
-            request_id,
-            completed_at,
-            code,
-            message.clone(),
-        );
+        let response = Response::error(attempt_id, request_id, completed_at, code, message.clone());
 
         assert_eq!(response.attempt_id, attempt_id);
         assert_eq!(response.request_id, request_id);

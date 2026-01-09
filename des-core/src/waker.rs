@@ -104,11 +104,11 @@ mod tests {
         // but we can test that the waker can be cloned without panicking)
         let key: Key<TestEvent> = Key::new_with_id(uuid::Uuid::now_v7());
         let waker = create_des_waker(key, TestEvent(42));
-        
+
         // Clone should work
         let waker2 = waker.clone();
         let waker3 = waker2.clone();
-        
+
         // Drop in various orders
         drop(waker);
         drop(waker3);
@@ -120,7 +120,7 @@ mod tests {
         let key: Key<TestEvent> = Key::new_with_id(uuid::Uuid::now_v7());
         let waker1 = create_des_waker(key, TestEvent(1));
         let waker2 = waker1.clone();
-        
+
         // Same waker should report will_wake
         assert!(waker1.will_wake(&waker2));
     }

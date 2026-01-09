@@ -4,7 +4,7 @@
 //! (FIFO, priority-based) and capacity management.
 
 use crate::error::QueueError;
-use des_core::{SimTime, RequestAttempt};
+use des_core::{RequestAttempt, SimTime};
 use serde::{Deserialize, Serialize};
 use std::collections::{BinaryHeap, VecDeque};
 use uuid::Uuid;
@@ -58,10 +58,10 @@ impl QueueItem {
 
     /// Create a new queue item with priority and client ID
     pub fn with_priority_and_client_id(
-        attempt: RequestAttempt, 
-        enqueued_at: SimTime, 
+        attempt: RequestAttempt,
+        enqueued_at: SimTime,
         priority: u32,
-        client_id: Uuid
+        client_id: Uuid,
     ) -> Self {
         Self {
             attempt,
@@ -232,8 +232,7 @@ impl FifoQueue {
     ///
     /// Returns `None` if the queue has unlimited capacity.
     pub fn utilization(&self) -> Option<f64> {
-        self.capacity
-            .map(|cap| self.len() as f64 / cap as f64)
+        self.capacity.map(|cap| self.len() as f64 / cap as f64)
     }
 }
 
@@ -404,8 +403,7 @@ mod tests {
         assert_eq!(item.priority, 0);
         assert_eq!(item.enqueued_at, SimTime::from_millis(100));
 
-        let item_with_priority =
-            QueueItem::with_priority(attempt, SimTime::from_millis(100), 5);
+        let item_with_priority = QueueItem::with_priority(attempt, SimTime::from_millis(100), 5);
         assert_eq!(item_with_priority.priority, 5);
     }
 
@@ -553,8 +551,7 @@ impl PriorityQueue {
     ///
     /// Returns `None` if the queue has unlimited capacity.
     pub fn utilization(&self) -> Option<f64> {
-        self.capacity
-            .map(|cap| self.len() as f64 / cap as f64)
+        self.capacity.map(|cap| self.len() as f64 / cap as f64)
     }
 }
 

@@ -34,8 +34,8 @@
 //! - Resources are cleaned up via `PinnedDrop` when futures are dropped
 
 use atomic_waker::AtomicWaker;
-use des_core::{SimTime, SchedulerHandle};
 use des_core::task::TimeoutTask;
+use des_core::{SchedulerHandle, SimTime};
 use http::Request;
 use pin_project::pin_project;
 use std::future::Future;
@@ -197,7 +197,7 @@ where
         // Schedule timeout on first poll if not already scheduled
         if !*this.timeout_scheduled {
             let timeout_state = this.timeout_state.clone();
-            
+
             // Create a timeout task that will expire the timeout state
             let timeout_task = TimeoutTask::new(move |_scheduler| {
                 // Only fire timeout if request hasn't completed yet
@@ -205,13 +205,13 @@ where
                     timeout_state.expire();
                 }
             });
-            
+
             // Schedule the timeout task using the scheduler handle
             this.scheduler.schedule_task(
                 SimTime::from_duration(this.timeout_state.timeout_duration),
                 timeout_task,
             );
-            
+
             *this.timeout_scheduled = true;
         }
 

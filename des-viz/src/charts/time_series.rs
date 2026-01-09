@@ -3,8 +3,8 @@
 //! This module provides functionality to create time-series line charts
 //! showing metrics evolution over time.
 
-use crate::error::VizError;
 use crate::charts::ChartConfig;
+use crate::error::VizError;
 use des_core::SimTime;
 use plotters::prelude::*;
 use std::path::Path;
@@ -58,7 +58,7 @@ impl TimeSeries {
 /// let config = ChartConfig::new("Latency Over Time")
 ///     .x_label("Time (s)")
 ///     .y_label("Latency (ms)");
-/// 
+///
 /// create_time_series_chart(&series, &config, "latency_chart.png").unwrap();
 /// ```
 pub fn create_time_series_chart(
@@ -67,7 +67,9 @@ pub fn create_time_series_chart(
     output_path: impl AsRef<Path>,
 ) -> Result<(), VizError> {
     if series.is_empty() {
-        return Err(VizError::InvalidData("No time series data provided".to_string()));
+        return Err(VizError::InvalidData(
+            "No time series data provided".to_string(),
+        ));
     }
 
     // Find the overall time and value ranges
@@ -99,18 +101,26 @@ pub fn create_time_series_chart(
         max_value = 1.0;
     } else if (max_value - min_value).abs() < f64::EPSILON {
         // If all values are the same, add some padding
-        let padding = if min_value.abs() < f64::EPSILON { 1.0 } else { min_value.abs() * 0.1 };
+        let padding = if min_value.abs() < f64::EPSILON {
+            1.0
+        } else {
+            min_value.abs() * 0.1
+        };
         min_value -= padding;
         max_value += padding;
     }
 
     // Convert time range to seconds for plotting
     let time_range_secs = max_time.duration_since(min_time).as_secs_f64();
-    let max_time_secs = if time_range_secs < f64::EPSILON { 1.0 } else { time_range_secs };
+    let max_time_secs = if time_range_secs < f64::EPSILON {
+        1.0
+    } else {
+        time_range_secs
+    };
 
     // Create the chart
-    let root = BitMapBackend::new(output_path.as_ref(), (config.width, config.height))
-        .into_drawing_area();
+    let root =
+        BitMapBackend::new(output_path.as_ref(), (config.width, config.height)).into_drawing_area();
     root.fill(&WHITE)?;
 
     let mut chart = ChartBuilder::on(&root)
@@ -134,7 +144,8 @@ pub fn create_time_series_chart(
         }
 
         // Convert data points to (time_secs, value) pairs
-        let plot_data: Vec<(f64, f64)> = ts.data
+        let plot_data: Vec<(f64, f64)> = ts
+            .data
             .iter()
             .map(|point| {
                 let time_secs = point.timestamp.duration_since(min_time).as_secs_f64();
@@ -175,16 +186,17 @@ pub fn create_mmk_time_series_chart(
     timeout_rate_series: &TimeSeries,
     output_path: impl AsRef<Path>,
 ) -> Result<(), VizError> {
-    let root = BitMapBackend::new(output_path.as_ref(), (1200, 900))
-        .into_drawing_area();
+    let root = BitMapBackend::new(output_path.as_ref(), (1200, 900)).into_drawing_area();
     root.fill(&WHITE)?;
 
     // Split into three vertical panels
     let areas = root.split_evenly((3, 1));
     if areas.len() < 3 {
-        return Err(VizError::InvalidData("Failed to create chart areas".to_string()));
+        return Err(VizError::InvalidData(
+            "Failed to create chart areas".to_string(),
+        ));
     }
-    
+
     let latency_area = &areas[0];
     let queue_area = &areas[1];
     let timeout_area = &areas[2];
@@ -192,12 +204,34 @@ pub fn create_mmk_time_series_chart(
     // Helper function to get time range
     let get_time_range = |series: &TimeSeries| -> (SimTime, SimTime, f64) {
         if series.data.is_empty() {
-            return (SimTime::zero(), SimTime::from_duration(std::time::Duration::from_secs(1)), 1.0);
+            return (
+                SimTime::zero(),
+                SimTime::from_duration(std::time::Duration::from_secs(1)),
+                1.0,
+            );
         }
-        let min_time = series.data.iter().map(|p| p.timestamp).min().unwrap_or(SimTime::zero());
-        let max_time = series.data.iter().map(|p| p.timestamp).max().unwrap_or(SimTime::from_duration(std::time::Duration::from_secs(1)));
+        let min_time = series
+            .data
+            .iter()
+            .map(|p| p.timestamp)
+            .min()
+            .unwrap_or(SimTime::zero());
+        let max_time = series
+            .data
+            .iter()
+            .map(|p| p.timestamp)
+            .max()
+            .unwrap_or(SimTime::from_duration(std::time::Duration::from_secs(1)));
         let time_range_secs = max_time.duration_since(min_time).as_secs_f64();
-        (min_time, max_time, if time_range_secs < f64::EPSILON { 1.0 } else { time_range_secs })
+        (
+            min_time,
+            max_time,
+            if time_range_secs < f64::EPSILON {
+                1.0
+            } else {
+                time_range_secs
+            },
+        )
     };
 
     // Helper function to get value range with padding
@@ -205,11 +239,23 @@ pub fn create_mmk_time_series_chart(
         if series.data.is_empty() {
             return (0.0, 1.0);
         }
-        let min_val = series.data.iter().map(|p| p.value).fold(f64::INFINITY, f64::min);
-        let max_val = series.data.iter().map(|p| p.value).fold(f64::NEG_INFINITY, f64::max);
-        
+        let min_val = series
+            .data
+            .iter()
+            .map(|p| p.value)
+            .fold(f64::INFINITY, f64::min);
+        let max_val = series
+            .data
+            .iter()
+            .map(|p| p.value)
+            .fold(f64::NEG_INFINITY, f64::max);
+
         if (max_val - min_val).abs() < f64::EPSILON {
-            let padding = if min_val.abs() < f64::EPSILON { 1.0 } else { min_val.abs() * 0.1 };
+            let padding = if min_val.abs() < f64::EPSILON {
+                1.0
+            } else {
+                min_val.abs() * 0.1
+            };
             (min_val - padding, max_val + padding)
         } else {
             (min_val, max_val)
@@ -236,7 +282,8 @@ pub fn create_mmk_time_series_chart(
             .draw()?;
 
         if !latency_series.data.is_empty() {
-            let plot_data: Vec<(f64, f64)> = latency_series.data
+            let plot_data: Vec<(f64, f64)> = latency_series
+                .data
                 .iter()
                 .map(|point| {
                     let time_secs = point.timestamp.duration_since(min_time).as_secs_f64();
@@ -268,7 +315,8 @@ pub fn create_mmk_time_series_chart(
             .draw()?;
 
         if !queue_size_series.data.is_empty() {
-            let plot_data: Vec<(f64, f64)> = queue_size_series.data
+            let plot_data: Vec<(f64, f64)> = queue_size_series
+                .data
                 .iter()
                 .map(|point| {
                     let time_secs = point.timestamp.duration_since(min_time).as_secs_f64();
@@ -300,7 +348,8 @@ pub fn create_mmk_time_series_chart(
             .draw()?;
 
         if !timeout_rate_series.data.is_empty() {
-            let plot_data: Vec<(f64, f64)> = timeout_rate_series.data
+            let plot_data: Vec<(f64, f64)> = timeout_rate_series
+                .data
                 .iter()
                 .map(|point| {
                     let time_secs = point.timestamp.duration_since(min_time).as_secs_f64();

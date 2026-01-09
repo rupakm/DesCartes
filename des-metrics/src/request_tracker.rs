@@ -4,7 +4,9 @@
 //! goodput, throughput, retry rates, timeout rates, and latency statistics.
 
 use crate::error::MetricsError;
-use des_core::{SimTime, Request, RequestAttempt, RequestId, RequestAttemptId, AttemptStatus, RequestStatus};
+use des_core::{
+    AttemptStatus, Request, RequestAttempt, RequestAttemptId, RequestId, RequestStatus, SimTime,
+};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -429,22 +431,36 @@ pub struct RequestTrackerStats {
 impl std::fmt::Display for RequestTrackerStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Request Tracker Statistics:")?;
-        writeln!(f, "  Active: {} requests, {} attempts", self.active_requests, self.active_attempts)?;
-        writeln!(f, "  Completed: {} requests, {} attempts", self.completed_requests, self.completed_attempts)?;
+        writeln!(
+            f,
+            "  Active: {} requests, {} attempts",
+            self.active_requests, self.active_attempts
+        )?;
+        writeln!(
+            f,
+            "  Completed: {} requests, {} attempts",
+            self.completed_requests, self.completed_attempts
+        )?;
         writeln!(f, "  Goodput: {:.2} req/s", self.goodput)?;
         writeln!(f, "  Throughput: {:.2} attempts/s", self.throughput)?;
         writeln!(f, "  Retry rate: {:.2} attempts/req", self.retry_rate)?;
         writeln!(f, "  Timeout rate: {:.1}%", self.timeout_rate * 100.0)?;
         writeln!(f, "  Error rate: {:.1}%", self.error_rate * 100.0)?;
         writeln!(f, "  Success rate: {:.1}%", self.success_rate * 100.0)?;
-        writeln!(f, "  Request latency: mean={:.2}ms, p95={:.2}ms, p99={:.2}ms", 
-                 self.request_latency.mean.as_secs_f64() * 1000.0,
-                 self.request_latency.p95.as_secs_f64() * 1000.0,
-                 self.request_latency.p99.as_secs_f64() * 1000.0)?;
-        write!(f, "  Attempt latency: mean={:.2}ms, p95={:.2}ms, p99={:.2}ms", 
-               self.attempt_latency.mean.as_secs_f64() * 1000.0,
-               self.attempt_latency.p95.as_secs_f64() * 1000.0,
-               self.attempt_latency.p99.as_secs_f64() * 1000.0)
+        writeln!(
+            f,
+            "  Request latency: mean={:.2}ms, p95={:.2}ms, p99={:.2}ms",
+            self.request_latency.mean.as_secs_f64() * 1000.0,
+            self.request_latency.p95.as_secs_f64() * 1000.0,
+            self.request_latency.p99.as_secs_f64() * 1000.0
+        )?;
+        write!(
+            f,
+            "  Attempt latency: mean={:.2}ms, p95={:.2}ms, p99={:.2}ms",
+            self.attempt_latency.mean.as_secs_f64() * 1000.0,
+            self.attempt_latency.p95.as_secs_f64() * 1000.0,
+            self.attempt_latency.p99.as_secs_f64() * 1000.0
+        )
     }
 }
 
@@ -455,11 +471,7 @@ mod tests {
     use std::time::Duration;
 
     fn create_test_request(id: u64, created_at: SimTime) -> Request {
-        Request::new(
-            RequestId(id),
-            created_at,
-            vec![1, 2, 3],
-        )
+        Request::new(RequestId(id), created_at, vec![1, 2, 3])
     }
 
     fn create_test_attempt(

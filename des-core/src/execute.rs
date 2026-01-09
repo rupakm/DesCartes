@@ -1,5 +1,5 @@
-use crate::{Simulation, SimTime};
-use tracing::{debug, info, trace, warn, instrument};
+use crate::{SimTime, Simulation};
+use tracing::{debug, info, instrument, trace, warn};
 
 /// Simulation execution trait.
 pub trait Execute {
@@ -103,7 +103,7 @@ where
 {
     debug!(?end_condition, "Starting simulation run");
     let start_time = sim.time();
-    
+
     let step_fn = |sim: &mut Simulation| {
         let result = sim.step();
         if result {
@@ -111,25 +111,25 @@ where
         }
         result
     };
-    
+
     match end_condition {
         EndCondition::Time(time) => {
             debug!(?time, "Executing until time limit");
             execute_until(sim, time, step_fn)
-        },
+        }
         EndCondition::NoEvents => {
             debug!("Executing until no events remain");
             execute_until_empty(sim, step_fn)
-        },
+        }
         EndCondition::Steps(steps) => {
             debug!(steps, "Executing for fixed number of steps");
             execute_steps(sim, steps, step_fn)
-        },
+        }
     }
-    
+
     let final_time = sim.time();
     let time_elapsed = final_time - start_time;
-    
+
     debug!(
         start_time = ?start_time,
         final_time = ?final_time,
@@ -210,9 +210,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
     use super::*;
     use crate::Component;
+    use std::time::Duration;
 
     struct TestComponent {
         counter: usize,
@@ -231,10 +231,14 @@ mod test {
             scheduler: &mut crate::Scheduler,
         ) {
             //let counter = state.get_mut(self.counter).unwrap();
-            
+
             self.counter += 1;
             if self.counter < 10 {
-                scheduler.schedule(SimTime::from_duration(Duration::from_secs(2)), self_id, TestEvent);
+                scheduler.schedule(
+                    SimTime::from_duration(Duration::from_secs(2)),
+                    self_id,
+                    TestEvent,
+                );
             }
         }
     }
@@ -267,10 +271,12 @@ mod test {
     fn test_steps() {
         let mut sim = Simulation::default();
         //let counter_key = sim.state.insert(0_usize);
-        let component = sim.add_component(TestComponent {
-            counter: 0,
-        });
-        sim.schedule(SimTime::from_duration(Duration::default()), component, TestEvent);
+        let component = sim.add_component(TestComponent { counter: 0 });
+        sim.schedule(
+            SimTime::from_duration(Duration::default()),
+            component,
+            TestEvent,
+        );
         Executor::steps(10).execute(&mut sim);
         let c: TestComponent = sim.remove_component(component).unwrap();
         assert_eq!(c.counter, 10);
@@ -279,10 +285,12 @@ mod test {
     #[test]
     fn test_steps_stops_before() {
         let mut sim = Simulation::default();
-        let component = sim.add_component(TestComponent {
-            counter: 0,
-        });
-        sim.schedule(SimTime::from_duration(Duration::default()), component, TestEvent);
+        let component = sim.add_component(TestComponent { counter: 0 });
+        sim.schedule(
+            SimTime::from_duration(Duration::default()),
+            component,
+            TestEvent,
+        );
         // After 10 steps there are no events, so it will not execute all 100
         Executor::steps(100).execute(&mut sim);
         let c: TestComponent = sim.remove_component(component).unwrap();
@@ -292,26 +300,36 @@ mod test {
     #[test]
     fn test_timed() {
         let mut sim = Simulation::default();
-        let component = sim.add_component(TestComponent {
-            counter: 0,
-        });
-        sim.schedule(SimTime::from_duration(Duration::default()), component, TestEvent);
+        let component = sim.add_component(TestComponent { counter: 0 });
+        sim.schedule(
+            SimTime::from_duration(Duration::default()),
+            component,
+            TestEvent,
+        );
         Executor::timed(SimTime::from_duration(Duration::from_secs(6))).execute(&mut sim);
         let c: TestComponent = sim.remove_component(component).unwrap();
         assert_eq!(c.counter, 4);
-        assert_eq!(sim.clock().time(), SimTime::from_duration(Duration::from_secs(6)));
+        assert_eq!(
+            sim.clock().time(),
+            SimTime::from_duration(Duration::from_secs(6))
+        );
     }
 
     #[test]
     fn test_timed_clock_stops_early() {
         let mut sim = Simulation::default();
-        let component = sim.add_component(TestComponent {
-            counter: 0,
-        });
-        sim.schedule(SimTime::from_duration(Duration::default()), component, TestEvent);
+        let component = sim.add_component(TestComponent { counter: 0 });
+        sim.schedule(
+            SimTime::from_duration(Duration::default()),
+            component,
+            TestEvent,
+        );
         Executor::timed(SimTime::from_duration(Duration::from_secs(5))).execute(&mut sim);
         let c: TestComponent = sim.remove_component(component).unwrap();
         assert_eq!(c.counter, 3);
-        assert_eq!(sim.clock().time(), SimTime::from_duration(Duration::from_secs(4)));
+        assert_eq!(
+            sim.clock().time(),
+            SimTime::from_duration(Duration::from_secs(4))
+        );
     }
 }

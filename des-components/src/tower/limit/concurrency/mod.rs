@@ -95,12 +95,9 @@ impl<S> DesConcurrencyLimit<S> {
         let current = self.current_concurrency.load(Ordering::Relaxed);
         if current < self.max_concurrency {
             // Try to increment the counter
-            self.current_concurrency.compare_exchange_weak(
-                current,
-                current + 1,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ).is_ok()
+            self.current_concurrency
+                .compare_exchange_weak(current, current + 1, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
         } else {
             false
         }
@@ -147,13 +144,13 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().project();
-        
+
         match this.inner.poll(cx) {
             Poll::Ready(result) => {
                 // Release the concurrency slot only if we acquired it
                 if *this.acquired {
                     this.concurrency_limiter.fetch_sub(1, Ordering::Relaxed);
-                    
+
                     // Wake up any waiting tasks
                     let waiters = {
                         let mut waiters = this.waiters.lock().unwrap();
@@ -162,11 +159,11 @@ where
                     for waker in waiters {
                         waker.wake();
                     }
-                    
+
                     // Mark as released so PinnedDrop doesn't double-release
                     *this.acquired = false;
                 }
-                
+
                 Poll::Ready(result)
             }
             Poll::Pending => Poll::Pending,
@@ -181,7 +178,7 @@ impl<F> PinnedDrop for DesConcurrencyLimitFuture<F> {
         // Only if we actually acquired it
         if self.acquired {
             self.concurrency_limiter.fetch_sub(1, Ordering::Relaxed);
-            
+
             // Wake up any waiting tasks
             let waiters = {
                 let mut waiters = self.waiters.lock().unwrap();
@@ -224,7 +221,7 @@ where
         // If poll_ready returned Ok(()), we should have a slot
         // Don't try to acquire again, just assume we have it
         let inner_future = self.inner.call(req);
-        
+
         DesConcurrencyLimitFuture::new(
             inner_future,
             self.current_concurrency.clone(),

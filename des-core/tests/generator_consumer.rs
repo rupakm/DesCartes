@@ -8,7 +8,7 @@
 //! Note: This demonstrates the event-driven nature of the DES framework.
 //! Components wake up in response to events and time advancement.
 
-use des_core::{Component, Execute, Executor, Simulation, SimTime};
+use des_core::{Component, Execute, Executor, SimTime, Simulation};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -48,11 +48,11 @@ impl Component for Generator {
         scheduler: &mut des_core::Scheduler,
     ) {
         let current_time = scheduler.time();
-        
+
         // Log the generator event
         self.log.lock().unwrap().generator_events.push(current_time);
         self.events_produced += 1;
-        
+
         // Schedule next event if we haven't reached the limit
         if self.events_produced < self.max_events {
             scheduler.schedule(
@@ -84,11 +84,11 @@ impl Component for Consumer {
         scheduler: &mut des_core::Scheduler,
     ) {
         let current_time = scheduler.time();
-        
+
         // Log the consumer hello
         self.log.lock().unwrap().consumer_hellos.push(current_time);
         self.hellos_produced += 1;
-        
+
         // Schedule next hello if we haven't reached the limit
         if self.hellos_produced < self.max_hellos {
             scheduler.schedule(
@@ -108,7 +108,10 @@ fn test_generator_consumer_pattern() {
     let log = Arc::new(Mutex::new(SimulationLog::new()));
     let end_time = SimTime::from_duration(Duration::from_secs(5));
 
-    println!("Setting up simulation for {} seconds\n", end_time.as_duration().as_secs());
+    println!(
+        "Setting up simulation for {} seconds\n",
+        end_time.as_duration().as_secs()
+    );
 
     // Create generator component
     let generator = Generator {
@@ -118,7 +121,7 @@ fn test_generator_consumer_pattern() {
     };
     let generator_id = sim.add_component(generator);
 
-    // Create consumer component  
+    // Create consumer component
     let consumer = Consumer {
         log: log.clone(),
         hellos_produced: 0,
@@ -128,12 +131,23 @@ fn test_generator_consumer_pattern() {
 
     // Schedule initial events
     println!("[Generator] Starting generator (events every 1 second)");
-    sim.schedule(SimTime::from_duration(Duration::from_secs(1)), generator_id, GeneratorEvent);
-    
-    println!("[Consumer] Starting consumer (hellos every 0.5 seconds)");
-    sim.schedule(SimTime::from_duration(Duration::from_millis(500)), consumer_id, ConsumerEvent);
+    sim.schedule(
+        SimTime::from_duration(Duration::from_secs(1)),
+        generator_id,
+        GeneratorEvent,
+    );
 
-    println!("\n[Simulation] Running for {} seconds...\n", end_time.as_duration().as_secs());
+    println!("[Consumer] Starting consumer (hellos every 0.5 seconds)");
+    sim.schedule(
+        SimTime::from_duration(Duration::from_millis(500)),
+        consumer_id,
+        ConsumerEvent,
+    );
+
+    println!(
+        "\n[Simulation] Running for {} seconds...\n",
+        end_time.as_duration().as_secs()
+    );
 
     // Run the simulation
     Executor::timed(end_time).execute(&mut sim);
@@ -142,10 +156,16 @@ fn test_generator_consumer_pattern() {
 
     // Verify results
     let final_log = log.lock().unwrap();
-    
+
     println!("Final simulation time: {:?}", sim.time());
-    println!("Generator events: {} (expected 5)", final_log.generator_events.len());
-    println!("Consumer hellos: {} (expected 10)", final_log.consumer_hellos.len());
+    println!(
+        "Generator events: {} (expected 5)",
+        final_log.generator_events.len()
+    );
+    println!(
+        "Consumer hellos: {} (expected 10)",
+        final_log.consumer_hellos.len()
+    );
 
     // Verify generator events
     assert_eq!(
@@ -167,9 +187,12 @@ fn test_generator_consumer_pattern() {
         println!("  Event {}: {:?}", i + 1, time);
         let expected_time = SimTime::from_duration(Duration::from_secs((i + 1) as u64));
         assert_eq!(
-            *time, expected_time,
+            *time,
+            expected_time,
             "Generator event {} should be at {:?}, got {:?}",
-            i + 1, expected_time, time
+            i + 1,
+            expected_time,
+            time
         );
     }
 
@@ -179,9 +202,12 @@ fn test_generator_consumer_pattern() {
         println!("  Hello {}: {:?}", i + 1, time);
         let expected_time = SimTime::from_duration(Duration::from_millis((i + 1) as u64 * 500));
         assert_eq!(
-            *time, expected_time,
+            *time,
+            expected_time,
             "Consumer hello {} should be at {:?}, got {:?}",
-            i + 1, expected_time, time
+            i + 1,
+            expected_time,
+            time
         );
     }
 
@@ -215,12 +241,23 @@ fn test_generator_consumer_interleaved() {
 
     // Schedule initial events
     println!("[Generator] Starting at 1s (then every 1s)");
-    sim.schedule(SimTime::from_duration(Duration::from_secs(1)), generator_id, GeneratorEvent);
-    
-    println!("[Consumer] Starting at 0.5s (then every 0.5s)");
-    sim.schedule(SimTime::from_duration(Duration::from_millis(500)), consumer_id, ConsumerEvent);
+    sim.schedule(
+        SimTime::from_duration(Duration::from_secs(1)),
+        generator_id,
+        GeneratorEvent,
+    );
 
-    println!("\n[Simulation] Running for {} seconds...\n", end_time.as_duration().as_secs());
+    println!("[Consumer] Starting at 0.5s (then every 0.5s)");
+    sim.schedule(
+        SimTime::from_duration(Duration::from_millis(500)),
+        consumer_id,
+        ConsumerEvent,
+    );
+
+    println!(
+        "\n[Simulation] Running for {} seconds...\n",
+        end_time.as_duration().as_secs()
+    );
 
     // Run the simulation
     Executor::timed(end_time).execute(&mut sim);
@@ -228,15 +265,29 @@ fn test_generator_consumer_interleaved() {
     println!("=== Simulation Complete ===\n");
 
     let final_log = log.lock().unwrap();
-    
+
     println!("Final Results:");
     println!("  Simulation time: {:?}", sim.time());
-    println!("  Generator events: {} (expected 3)", final_log.generator_events.len());
-    println!("  Consumer hellos: {} (expected 6)", final_log.consumer_hellos.len());
+    println!(
+        "  Generator events: {} (expected 3)",
+        final_log.generator_events.len()
+    );
+    println!(
+        "  Consumer hellos: {} (expected 6)",
+        final_log.consumer_hellos.len()
+    );
 
     // Verify counts
-    assert_eq!(final_log.generator_events.len(), 3, "Expected 3 generator events");
-    assert_eq!(final_log.consumer_hellos.len(), 6, "Expected 6 consumer hellos");
+    assert_eq!(
+        final_log.generator_events.len(),
+        3,
+        "Expected 3 generator events"
+    );
+    assert_eq!(
+        final_log.consumer_hellos.len(),
+        6,
+        "Expected 6 consumer hellos"
+    );
 
     // Verify interleaving: events should be ordered by time
     let mut all_events: Vec<(SimTime, &str)> = Vec::new();
@@ -255,21 +306,35 @@ fn test_generator_consumer_interleaved() {
 
     // Verify the expected interleaving pattern
     let expected_pattern = vec![
-        (SimTime::from_duration(Duration::from_millis(500)), "consumer"),
+        (
+            SimTime::from_duration(Duration::from_millis(500)),
+            "consumer",
+        ),
         (SimTime::from_duration(Duration::from_secs(1)), "generator"),
         (SimTime::from_duration(Duration::from_secs(1)), "consumer"),
-        (SimTime::from_duration(Duration::from_millis(1500)), "consumer"),
+        (
+            SimTime::from_duration(Duration::from_millis(1500)),
+            "consumer",
+        ),
         (SimTime::from_duration(Duration::from_secs(2)), "generator"),
         (SimTime::from_duration(Duration::from_secs(2)), "consumer"),
-        (SimTime::from_duration(Duration::from_millis(2500)), "consumer"),
+        (
+            SimTime::from_duration(Duration::from_millis(2500)),
+            "consumer",
+        ),
         (SimTime::from_duration(Duration::from_secs(3)), "generator"),
         (SimTime::from_duration(Duration::from_secs(3)), "consumer"),
     ];
 
-    assert_eq!(all_events.len(), expected_pattern.len(), "Event count mismatch");
-    
-    for (i, ((actual_time, actual_type), (expected_time, expected_type))) in 
-        all_events.iter().zip(expected_pattern.iter()).enumerate() {
+    assert_eq!(
+        all_events.len(),
+        expected_pattern.len(),
+        "Event count mismatch"
+    );
+
+    for (i, ((actual_time, actual_type), (expected_time, expected_type))) in
+        all_events.iter().zip(expected_pattern.iter()).enumerate()
+    {
         assert_eq!(
             actual_time, expected_time,
             "Event {i} time mismatch: expected {expected_time:?}, got {actual_time:?}",

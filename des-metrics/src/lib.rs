@@ -15,9 +15,15 @@ pub mod simulation_metrics;
 
 // Re-export key types
 pub use error::{LogError, MetricsError};
-pub use mmk_time_series::{TimeSeriesPoint, ExponentialMovingAverage, TimeSeriesCollector, MmkTimeSeriesMetrics};
-pub use request_tracker::{LatencyStats as RequestLatencyStats, RequestTracker, RequestTrackerStats};
-pub use simulation_metrics::{LatencyStats, SimulationMetrics, setup_prometheus_metrics, setup_prometheus_metrics_with_config};
+pub use mmk_time_series::{
+    ExponentialMovingAverage, MmkTimeSeriesMetrics, TimeSeriesCollector, TimeSeriesPoint,
+};
+pub use request_tracker::{
+    LatencyStats as RequestLatencyStats, RequestTracker, RequestTrackerStats,
+};
+pub use simulation_metrics::{
+    setup_prometheus_metrics, setup_prometheus_metrics_with_config, LatencyStats, SimulationMetrics,
+};
 
 // Re-export standard metrics for convenience
 pub use metrics::{counter, gauge, histogram};

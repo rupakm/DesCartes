@@ -4,9 +4,9 @@
 //! request failures with various backoff strategies including exponential backoff,
 //! token bucket-based retries, and success-based adaptive retries.
 
-use des_core::{SimTime, Response, RequestAttempt};
-use std::time::Duration;
+use des_core::{RequestAttempt, Response, SimTime};
 use rand::Rng;
+use std::time::Duration;
 
 /// Trait for retry policies that determine when and how to retry failed requests
 pub trait RetryPolicy: Clone + Send + Sync + 'static {
@@ -14,7 +14,11 @@ pub trait RetryPolicy: Clone + Send + Sync + 'static {
     ///
     /// Returns Some(delay) if the request should be retried after the specified delay,
     /// or None if no retry should be attempted.
-    fn should_retry(&mut self, attempt: &RequestAttempt, response: Option<&Response>) -> Option<Duration>;
+    fn should_retry(
+        &mut self,
+        attempt: &RequestAttempt,
+        response: Option<&Response>,
+    ) -> Option<Duration>;
 
     /// Reset the policy state for a new request
     fn reset(&mut self);
@@ -73,11 +77,11 @@ impl ExponentialBackoffPolicy {
 
     /// Calculate the delay for the current attempt
     fn calculate_delay(&self) -> Duration {
-        let delay_ms = self.base_delay.as_millis() as f64 
+        let delay_ms = self.base_delay.as_millis() as f64
             * self.multiplier.powi((self.current_attempt - 1) as i32);
-        
+
         let delay = Duration::from_millis(delay_ms as u64).min(self.max_delay);
-        
+
         if self.jitter {
             // Add ±25% jitter
             let mut rng = rand::thread_rng();
@@ -92,19 +96,23 @@ impl ExponentialBackoffPolicy {
     fn is_retryable(&self, response: Option<&Response>) -> bool {
         match response {
             Some(resp) => !resp.is_success(), // Retry on any error response
-            None => true, // Retry on timeout (no response)
+            None => true,                     // Retry on timeout (no response)
         }
     }
 }
 
 impl RetryPolicy for ExponentialBackoffPolicy {
-    fn should_retry(&mut self, _attempt: &RequestAttempt, response: Option<&Response>) -> Option<Duration> {
+    fn should_retry(
+        &mut self,
+        _attempt: &RequestAttempt,
+        response: Option<&Response>,
+    ) -> Option<Duration> {
         self.current_attempt += 1;
-        
+
         if self.current_attempt > self.max_attempts || !self.is_retryable(response) {
             return None;
         }
-        
+
         Some(self.calculate_delay())
     }
 
@@ -161,7 +169,7 @@ impl TokenBucketRetryPolicy {
         if let Some(last_refill) = self.last_refill {
             let elapsed = current_time.duration_since(last_refill);
             let tokens_to_add = (elapsed.as_secs_f64() * self.refill_rate) as u32;
-            
+
             if tokens_to_add > 0 {
                 self.current_tokens = (self.current_tokens + tokens_to_add).min(self.max_tokens);
                 self.last_refill = Some(current_time);
@@ -174,7 +182,7 @@ impl TokenBucketRetryPolicy {
     /// Try to consume a token for retry
     fn try_consume_token(&mut self, current_time: SimTime) -> bool {
         self.refill_tokens(current_time);
-        
+
         if self.current_tokens > 0 {
             self.current_tokens -= 1;
             true
@@ -185,9 +193,13 @@ impl TokenBucketRetryPolicy {
 }
 
 impl RetryPolicy for TokenBucketRetryPolicy {
-    fn should_retry(&mut self, attempt: &RequestAttempt, response: Option<&Response>) -> Option<Duration> {
+    fn should_retry(
+        &mut self,
+        attempt: &RequestAttempt,
+        response: Option<&Response>,
+    ) -> Option<Duration> {
         self.current_attempt += 1;
-        
+
         if self.current_attempt > self.max_attempts {
             return None;
         }
@@ -247,7 +259,7 @@ impl SuccessBasedRetryPolicy {
             base_delay,
             window_size,
             recent_outcomes: Vec::new(),
-            min_success_rate: 0.5, // 50% success rate threshold
+            min_success_rate: 0.5,   // 50% success rate threshold
             failure_multiplier: 3.0, // 3x delay when success rate is low
         }
     }
@@ -267,7 +279,7 @@ impl SuccessBasedRetryPolicy {
     /// Record the outcome of a request
     pub fn record_outcome(&mut self, success: bool) {
         self.recent_outcomes.push(success);
-        
+
         // Keep only the most recent outcomes within the window
         if self.recent_outcomes.len() > self.window_size {
             self.recent_outcomes.remove(0);
@@ -287,11 +299,11 @@ impl SuccessBasedRetryPolicy {
     /// Calculate delay based on success rate
     fn calculate_delay(&self) -> Duration {
         let success_rate = self.success_rate();
-        
+
         if success_rate < self.min_success_rate {
             // Low success rate, increase delay
             Duration::from_millis(
-                (self.base_delay.as_millis() as f64 * self.failure_multiplier) as u64
+                (self.base_delay.as_millis() as f64 * self.failure_multiplier) as u64,
             )
         } else {
             self.base_delay
@@ -300,9 +312,13 @@ impl SuccessBasedRetryPolicy {
 }
 
 impl RetryPolicy for SuccessBasedRetryPolicy {
-    fn should_retry(&mut self, _attempt: &RequestAttempt, response: Option<&Response>) -> Option<Duration> {
+    fn should_retry(
+        &mut self,
+        _attempt: &RequestAttempt,
+        response: Option<&Response>,
+    ) -> Option<Duration> {
         self.current_attempt += 1;
-        
+
         if self.current_attempt > self.max_attempts {
             return None;
         }
@@ -343,7 +359,11 @@ impl Default for NoRetryPolicy {
 }
 
 impl RetryPolicy for NoRetryPolicy {
-    fn should_retry(&mut self, _attempt: &RequestAttempt, _response: Option<&Response>) -> Option<Duration> {
+    fn should_retry(
+        &mut self,
+        _attempt: &RequestAttempt,
+        _response: Option<&Response>,
+    ) -> Option<Duration> {
         // Never retry
         None
     }
@@ -386,19 +406,23 @@ impl FixedRetryPolicy {
     fn is_retryable(&self, response: Option<&Response>) -> bool {
         match response {
             Some(resp) => !resp.is_success(), // Retry on any error response
-            None => true, // Retry on timeout (no response)
+            None => true,                     // Retry on timeout (no response)
         }
     }
 }
 
 impl RetryPolicy for FixedRetryPolicy {
-    fn should_retry(&mut self, _attempt: &RequestAttempt, response: Option<&Response>) -> Option<Duration> {
+    fn should_retry(
+        &mut self,
+        _attempt: &RequestAttempt,
+        response: Option<&Response>,
+    ) -> Option<Duration> {
         self.current_attempt += 1;
-        
+
         if self.current_attempt > self.max_attempts || !self.is_retryable(response) {
             return None;
         }
-        
+
         Some(self.retry_delay)
     }
 
@@ -414,7 +438,7 @@ impl RetryPolicy for FixedRetryPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use des_core::{RequestId, RequestAttemptId};
+    use des_core::{RequestAttemptId, RequestId};
 
     fn create_test_attempt() -> RequestAttempt {
         RequestAttempt::new(

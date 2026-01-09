@@ -39,8 +39,8 @@
 //! - After recovery timeout, circuit transitions to half-open for probing
 //! - A successful probe closes the circuit; a failed probe reopens it
 
-use des_core::{SimTime, SchedulerHandle};
 use des_core::task::TimeoutTask;
+use des_core::{SchedulerHandle, SimTime};
 use http::Request;
 use pin_project::pin_project;
 use std::future::Future;
@@ -193,7 +193,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
-        
+
         // Check for immediate error first
         if let Some(error) = this.immediate_error.take() {
             return Poll::Ready(Err(error));
@@ -217,7 +217,7 @@ where
                             if new_count >= *this.failure_threshold {
                                 // Transition to Open state and schedule recovery task
                                 *state = CircuitBreakerState::Open;
-                                
+
                                 // Schedule a timeout task to transition to HalfOpen
                                 let state_clone = this.state.clone();
                                 let recovery_task = TimeoutTask::new(move |_scheduler| {
@@ -227,20 +227,22 @@ where
                                         *state = CircuitBreakerState::HalfOpen;
                                     }
                                 });
-                                
+
                                 this.scheduler.schedule_task(
                                     SimTime::from_duration(*this.recovery_timeout),
                                     recovery_task,
                                 );
                             } else {
                                 // Stay closed but increment failure count
-                                *state = CircuitBreakerState::Closed { failure_count: new_count };
+                                *state = CircuitBreakerState::Closed {
+                                    failure_count: new_count,
+                                };
                             }
                         }
                         CircuitBreakerState::HalfOpen => {
                             // Transition back to open on failure in half-open state
                             *state = CircuitBreakerState::Open;
-                            
+
                             // Schedule another recovery task
                             let state_clone = this.state.clone();
                             let recovery_task = TimeoutTask::new(move |_scheduler| {
@@ -250,7 +252,7 @@ where
                                     *state = CircuitBreakerState::HalfOpen;
                                 }
                             });
-                            
+
                             this.scheduler.schedule_task(
                                 SimTime::from_duration(*this.recovery_timeout),
                                 recovery_task,

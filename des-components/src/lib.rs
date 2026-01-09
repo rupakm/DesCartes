@@ -9,36 +9,44 @@ pub mod builder;
 pub mod error;
 pub mod retry_policy;
 
-pub mod simple_client;
 pub mod server;
+pub mod simple_client;
 pub mod tower;
 
 // Export distribution patterns from des-core
 pub use des_core::dists::{
-    ArrivalPattern, ServiceTimeDistribution, RequestContext, ClientInfo,
-    ConstantArrivalPattern, ConstantServiceTime, ExponentialDistribution, UniformDistribution,
-    RequestSizeBasedServiceTime, EndpointBasedServiceTime, CompositeServiceTime,
-    RequestPredicate, MethodPredicate, UriPrefixPredicate, UriExactPredicate,
-    BodySizePredicate, HeaderPredicate, AndPredicate, OrPredicate,
+    AndPredicate, ArrivalPattern, BodySizePredicate, ClientInfo, CompositeServiceTime,
+    ConstantArrivalPattern, ConstantServiceTime, EndpointBasedServiceTime, ExponentialDistribution,
+    HeaderPredicate, MethodPredicate, OrPredicate, RequestContext, RequestPredicate,
+    RequestSizeBasedServiceTime, ServiceTimeDistribution, UniformDistribution, UriExactPredicate,
+    UriPrefixPredicate,
 };
 
-pub use simple_client::{SimpleClient, ClientEvent};
-pub use retry_policy::{RetryPolicy, ExponentialBackoffPolicy, TokenBucketRetryPolicy, SuccessBasedRetryPolicy, NoRetryPolicy, FixedRetryPolicy};
+pub use retry_policy::{
+    ExponentialBackoffPolicy, FixedRetryPolicy, NoRetryPolicy, RetryPolicy,
+    SuccessBasedRetryPolicy, TokenBucketRetryPolicy,
+};
 pub use server::{Server, ServerEvent};
+pub use simple_client::{ClientEvent, SimpleClient};
+pub use tower::retry::{
+    exponential_backoff_layer, DesRetryLayer, DesRetryPolicy, ExponentialBackoff,
+};
+pub use tower::{
+    DesCircuitBreaker, DesConcurrencyLimit, DesGlobalConcurrencyLimit, DesHedge,
+    DesLoadBalanceStrategy, DesLoadBalancer, DesRateLimit, DesTimeout,
+};
 pub use tower::{DesService, DesServiceBuilder, SchedulerHandle, ServiceError, SimBody};
-pub use tower::{DesTimeout, DesLoadBalancer, DesCircuitBreaker, DesLoadBalanceStrategy, DesRateLimit, DesConcurrencyLimit, DesGlobalConcurrencyLimit, DesHedge};
-pub use tower::retry::{DesRetryLayer, DesRetryPolicy, exponential_backoff_layer, ExponentialBackoff};
 
 pub use builder::{
-    BuilderState, IntoOption, Set, Unset, Validate, ValidationError, ValidationResult,
-    validate_non_empty, validate_non_negative, validate_positive, validate_range,
+    validate_non_empty, validate_non_negative, validate_positive, validate_range, BuilderState,
+    IntoOption, Set, Unset, Validate, ValidationError, ValidationResult,
 };
-pub use error::{ComponentError, QueueError, ThrottleError, RequestError};
+pub use error::{ComponentError, QueueError, RequestError, ThrottleError};
 
 pub mod queue;
 pub use queue::{FifoQueue, PriorityQueue, Queue, QueueItem};
 
-pub use des_core::{Request, RequestAttempt, RequestId, RequestAttemptId, RequestStatus, AttemptStatus, Response, ResponseStatus};
-
-
-
+pub use des_core::{
+    AttemptStatus, Request, RequestAttempt, RequestAttemptId, RequestId, RequestStatus, Response,
+    ResponseStatus,
+};

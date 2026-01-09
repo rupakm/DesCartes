@@ -53,20 +53,19 @@
 //! # }
 //! ```
 
-use des_core::{SimTime, SchedulerHandle, RequestAttemptId, RequestId};
 use des_core::task::TimeoutTask;
+use des_core::{RequestAttemptId, RequestId, SchedulerHandle, SimTime};
+use http;
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
-use tower::{Layer, Service};
 use tower::retry::Policy;
-use http;
+use tower::{Layer, Service};
 
 use super::{ServiceError, SimBody};
-
 
 /// Retry-specific metadata that tracks attempt information
 #[derive(Debug, Clone)]
@@ -244,7 +243,7 @@ where
     ) -> Self {
         // Check if this request already has retry metadata (nested retries)
         let retry_metadata = metadata::get_retry_metadata(&request).cloned();
-        
+
         Self {
             policy,
             service,
@@ -286,28 +285,26 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
             let this = self.as_mut().project();
-            
+
             match this.state {
-                RetryState::Calling(future) => {
-                    match Pin::new(future).poll(cx) {
-                        Poll::Ready(Ok(response)) => {
-                            *this.state = RetryState::Done;
-                            return Poll::Ready(Ok(response));
-                        }
-                        Poll::Ready(Err(error)) => {
-                            let error_clone = error.clone();
-                            *this.state = RetryState::Checking { error: error_clone };
-                            continue;
-                        }
-                        Poll::Pending => return Poll::Pending,
+                RetryState::Calling(future) => match Pin::new(future).poll(cx) {
+                    Poll::Ready(Ok(response)) => {
+                        *this.state = RetryState::Done;
+                        return Poll::Ready(Ok(response));
                     }
-                }
+                    Poll::Ready(Err(error)) => {
+                        let error_clone = error.clone();
+                        *this.state = RetryState::Checking { error: error_clone };
+                        continue;
+                    }
+                    Poll::Pending => return Poll::Pending,
+                },
                 RetryState::Checking { error } => {
                     // Check if policy allows retry
                     let error_clone = error.clone();
                     let mut result = Err(error_clone);
                     let should_retry = this.policy.retry(this.current_request, &mut result);
-                    
+
                     match should_retry {
                         Some(_delay_future) => {
                             // Policy says we should retry
@@ -325,21 +322,24 @@ where
                         }
                     }
                 }
-                RetryState::Retrying { waker, delay_scheduled } => {
+                RetryState::Retrying {
+                    waker,
+                    delay_scheduled,
+                } => {
                     if !*delay_scheduled {
                         // Schedule the retry delay using DES timing
                         let delay_waker = cx.waker().clone();
                         let timeout_task = TimeoutTask::new(move |_scheduler| {
                             delay_waker.wake();
                         });
-                        
+
                         // Use a fixed delay for now - in a real implementation,
                         // we'd get this from the backoff policy
                         this.scheduler.schedule_task(
                             SimTime::from_duration(Duration::from_millis(100)),
                             timeout_task,
                         );
-                        
+
                         *delay_scheduled = true;
                         *waker = Some(cx.waker().clone());
                         return Poll::Pending;
@@ -347,7 +347,7 @@ where
                         // Delay has completed, need to create retry request
                         // Create retry request with updated metadata
                         let retry_request = self.as_mut().create_retry_request();
-                        
+
                         // Get a new projection
                         let this = self.as_mut().project();
                         let retry_future = this.service.call(retry_request.clone());
@@ -407,11 +407,14 @@ impl DesRetryPolicy {
     }
 }
 
-impl Policy<http::Request<SimBody>, http::Response<SimBody>, ServiceError> for DesRetryPolicy
-{
+impl Policy<http::Request<SimBody>, http::Response<SimBody>, ServiceError> for DesRetryPolicy {
     type Future = std::future::Ready<()>;
 
-    fn retry(&mut self, _req: &mut http::Request<SimBody>, result: &mut Result<http::Response<SimBody>, ServiceError>) -> Option<Self::Future> {
+    fn retry(
+        &mut self,
+        _req: &mut http::Request<SimBody>,
+        result: &mut Result<http::Response<SimBody>, ServiceError>,
+    ) -> Option<Self::Future> {
         if self.current_attempts >= self.max_retries {
             return None;
         }
@@ -429,7 +432,7 @@ impl Policy<http::Request<SimBody>, http::Response<SimBody>, ServiceError> for D
                 ServiceError::CircuitBreakerInvalidState => true,
                 ServiceError::RateLimiterInvalidState => true,
                 ServiceError::HttpResponseBuilder { .. } => false,
-            }
+            },
         };
 
         if should_retry {
@@ -462,9 +465,11 @@ mod tests {
     #[test]
     fn test_des_retry_policy_creation() {
         let mut policy = DesRetryPolicy::new(3);
-        
+
         // Test that policy allows retries for retryable errors
-        let retryable_error = ServiceError::Timeout { duration: Duration::from_millis(100) };
+        let retryable_error = ServiceError::Timeout {
+            duration: Duration::from_millis(100),
+        };
         let mut result: Result<http::Response<SimBody>, ServiceError> = Err(retryable_error);
         let mut request = http::Request::builder()
             .method("GET")
@@ -473,7 +478,7 @@ mod tests {
             .unwrap();
         let should_retry = policy.retry(&mut request, &mut result);
         assert!(should_retry.is_some());
-        
+
         // Test that policy rejects non-retryable errors
         let non_retryable_error = ServiceError::Cancelled;
         let mut result: Result<http::Response<SimBody>, ServiceError> = Err(non_retryable_error);
@@ -490,22 +495,19 @@ mod tests {
     fn test_exponential_backoff_layer_creation() {
         let mut simulation = des_core::Simulation::default();
         let scheduler = simulation.scheduler_handle();
-        
-        let retry_layer = exponential_backoff_layer(
-            3,
-            scheduler,
-        );
-        
+
+        let retry_layer = exponential_backoff_layer(3, scheduler);
+
         // Create a base service
         let base_service = DesServiceBuilder::new("retry-test".to_string())
             .thread_capacity(1)
             .service_time(Duration::from_millis(50))
             .build(&mut simulation)
             .unwrap();
-        
+
         // Apply retry layer
         let _retry_service = retry_layer.layer(base_service);
-        
+
         // Test passes if no panics occur
     }
 }

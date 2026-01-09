@@ -3,28 +3,27 @@
 //! This example shows how the Task interface is used internally by Tower layers
 //! for timeout handling, circuit breaker recovery, and other operations.
 //!
-//! Note: This example requires tokio runtime features. 
+//! Note: This example requires tokio runtime features.
 //! For a simpler example without async, see task_usage.rs
 //!
 //! Run with: cargo run --package des-components --example tower_with_tasks
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Tower Integration with Task Interface ===\n");
-    
-    // Since we don't have tokio runtime features enabled, 
+
+    // Since we don't have tokio runtime features enabled,
     // we'll demonstrate the concepts without async execution
     demonstrate_task_patterns();
-    
-    println!("\n=== Tower Task Integration Concepts Demonstrated ===");    
+
+    println!("\n=== Tower Task Integration Concepts Demonstrated ===");
     Ok(())
 }
 
 // Helper function to demonstrate Task usage patterns
 fn demonstrate_task_patterns() {
-    
     println!("Task Patterns Used in Tower Layers:");
     println!();
-    
+
     println!("1. TimeoutTask in DesTimeoutLayer:");
     println!("   The timeout layer creates a TimeoutTask when a request starts:");
     println!("   ```rust");
@@ -36,7 +35,7 @@ fn demonstrate_task_patterns() {
     println!("   scheduler.schedule_task(timeout_deadline, timeout_task);");
     println!("   ```");
     println!();
-    
+
     println!("2. TimeoutTask in Circuit Breaker Recovery:");
     println!("   When the circuit breaker opens, it schedules recovery:");
     println!("   ```rust");
@@ -49,7 +48,7 @@ fn demonstrate_task_patterns() {
     println!("   scheduler.schedule_task(recovery_time, recovery_task);");
     println!("   ```");
     println!();
-    
+
     println!("3. PeriodicTask for Rate Limiting:");
     println!("   ```rust");
     println!("   let refill_task = PeriodicTask::new(move |_scheduler| {{");
@@ -59,7 +58,7 @@ fn demonstrate_task_patterns() {
     println!("   }}, refill_interval);");
     println!("   ```");
     println!();
-    
+
     println!("Key Task implementations in des-components:");
     println!("• TowerResponseTask - handles Tower service responses");
     println!("• TimeoutTask - used in timeout layer and circuit breaker");

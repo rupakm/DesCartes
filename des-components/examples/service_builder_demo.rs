@@ -39,8 +39,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .circuit_breaker(3, Duration::from_secs(10), scheduler.clone())
         // Add retry with exponential backoff
         .retry(
-            des_components::retry_policy::ExponentialBackoffPolicy::new(3, Duration::from_millis(100)),
-            scheduler.clone()
+            des_components::retry_policy::ExponentialBackoffPolicy::new(
+                3,
+                Duration::from_millis(100),
+            ),
+            scheduler.clone(),
         )
         .build(&mut simulation)?;
     println!("   ✓ Created layered service with concurrency limit, rate limit, timeout, circuit breaker, and retry");
@@ -50,7 +53,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _optional_service = DesServiceBuilder::new("optional-server".to_string())
         .thread_capacity(5)
         .service_time(Duration::from_millis(75))
-        .option_layer(Some(des_components::tower::DesConcurrencyLimitLayer::new(2)))
+        .option_layer(Some(des_components::tower::DesConcurrencyLimitLayer::new(
+            2,
+        )))
         .build(&mut simulation)?;
     println!("   ✓ Created service with optional concurrency limit layer");
 
@@ -68,7 +73,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Demonstrate global concurrency limiting
     println!("\n5. Global Concurrency Limiting:");
-    let global_state = des_components::tower::limit::global_concurrency::GlobalConcurrencyLimitState::new(5);
+    let global_state =
+        des_components::tower::limit::global_concurrency::GlobalConcurrencyLimitState::new(5);
     let _global_service = DesServiceBuilder::new("global-server".to_string())
         .thread_capacity(10)
         .service_time(Duration::from_millis(60))
@@ -109,19 +115,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .body(SimBody::from_static("test request"))?;
 
     println!("   → Sending test request...");
-    
+
     // Check if service is ready
     let waker = create_noop_waker();
     let mut cx = std::task::Context::from_waker(&waker);
-    
+
     match test_service.poll_ready(&mut cx) {
         std::task::Poll::Ready(Ok(())) => {
             println!("   ✓ Service is ready to accept requests");
-            
+
             // Make the request
             let _response_future = test_service.call(request);
             println!("   ✓ Request submitted successfully");
-            
+
             // Run simulation to process the request
             for _ in 0..50 {
                 if !simulation.step() {
@@ -149,12 +155,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 // Helper function to create a no-op waker for testing
 fn create_noop_waker() -> std::task::Waker {
     use std::task::{RawWaker, RawWakerVTable};
-    
+
     fn noop(_: *const ()) {}
     fn clone(_: *const ()) -> RawWaker {
         RawWaker::new(std::ptr::null(), &VTABLE)
     }
-    
+
     const VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
     let raw_waker = RawWaker::new(std::ptr::null(), &VTABLE);
     unsafe { std::task::Waker::from_raw(raw_waker) }

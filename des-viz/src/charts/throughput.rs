@@ -48,8 +48,7 @@ pub fn create_throughput_chart_with_config(
     }
 
     let output_path = output_path.as_ref();
-    let root = BitMapBackend::new(output_path, (config.width, config.height))
-        .into_drawing_area();
+    let root = BitMapBackend::new(output_path, (config.width, config.height)).into_drawing_area();
 
     root.fill(&WHITE)
         .map_err(|e| VizError::RenderingError(format!("Failed to fill background: {e}")))?;
@@ -73,12 +72,7 @@ pub fn create_throughput_chart_with_config(
         chart_data.truncate(20);
     }
 
-    let max_value = chart_data
-        .iter()
-        .map(|(_, v)| *v)
-        .max()
-        .unwrap_or(1) as f64
-        * 1.1; // Add 10% padding
+    let max_value = chart_data.iter().map(|(_, v)| *v).max().unwrap_or(1) as f64 * 1.1; // Add 10% padding
 
     // Build chart
     let mut chart = ChartBuilder::on(&root)
@@ -86,10 +80,7 @@ pub fn create_throughput_chart_with_config(
         .margin(10)
         .x_label_area_size(150)
         .y_label_area_size(80)
-        .build_cartesian_2d(
-            0..chart_data.len(),
-            0.0..max_value,
-        )
+        .build_cartesian_2d(0..chart_data.len(), 0.0..max_value)
         .map_err(|e| VizError::RenderingError(format!("Failed to build chart: {e}")))?;
 
     chart
@@ -109,17 +100,9 @@ pub fn create_throughput_chart_with_config(
 
     // Draw bars
     chart
-        .draw_series(
-            chart_data
-                .iter()
-                .enumerate()
-                .map(|(idx, (_, value))| {
-                    Rectangle::new(
-                        [(idx, 0.0), (idx, *value as f64)],
-                        BLUE.filled(),
-                    )
-                }),
-        )
+        .draw_series(chart_data.iter().enumerate().map(|(idx, (_, value))| {
+            Rectangle::new([(idx, 0.0), (idx, *value as f64)], BLUE.filled())
+        }))
         .map_err(|e| VizError::RenderingError(format!("Failed to draw bars: {e}")))?;
 
     root.present()

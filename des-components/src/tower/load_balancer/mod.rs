@@ -106,9 +106,7 @@ impl<S: Clone> Clone for DesLoadBalancer<S> {
             strategy: self.strategy.clone(),
             current_index: AtomicUsize::new(self.current_index.load(Ordering::Relaxed)),
             // Clone the RNG state for deterministic behavior across clones
-            rng: Arc::new(Mutex::new(
-                self.rng.lock().unwrap().clone()
-            )),
+            rng: Arc::new(Mutex::new(self.rng.lock().unwrap().clone())),
         }
     }
 }

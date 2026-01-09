@@ -107,12 +107,9 @@ impl GlobalConcurrencyLimitState {
         let current = self.current_concurrency.load(Ordering::Relaxed);
         if current < self.max_concurrency {
             // Try to increment the counter
-            self.current_concurrency.compare_exchange_weak(
-                current,
-                current + 1,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ).is_ok()
+            self.current_concurrency
+                .compare_exchange_weak(current, current + 1, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
         } else {
             false
         }
@@ -121,7 +118,7 @@ impl GlobalConcurrencyLimitState {
     /// Release a concurrency slot and wake up waiters
     fn release(&self) {
         self.current_concurrency.fetch_sub(1, Ordering::Relaxed);
-        
+
         // Wake up any waiting tasks
         let waiters = {
             let mut waiters = self.waiters.lock().unwrap();
@@ -185,7 +182,11 @@ pub struct DesGlobalConcurrencyLimitFuture<F> {
 
 impl<F> DesGlobalConcurrencyLimitFuture<F> {
     fn new(inner: F, state: Arc<GlobalConcurrencyLimitState>, acquired: bool) -> Self {
-        Self { inner, state, acquired }
+        Self {
+            inner,
+            state,
+            acquired,
+        }
     }
 }
 
@@ -197,7 +198,7 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().project();
-        
+
         match this.inner.poll(cx) {
             Poll::Ready(result) => {
                 // Release the concurrency slot only if we acquired it
@@ -254,7 +255,7 @@ where
         // If poll_ready returned Ok(()), we should have a slot
         // Don't try to acquire again, just assume we have it
         let inner_future = self.inner.call(req);
-        
+
         DesGlobalConcurrencyLimitFuture::new(inner_future, self.state.clone(), true)
     }
 }

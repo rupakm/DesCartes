@@ -167,7 +167,7 @@ macro_rules! builder_setter {
             }
         }
     };
-    
+
     // Optional field setter (no state transition)
     (
         $(#[$meta:meta])*

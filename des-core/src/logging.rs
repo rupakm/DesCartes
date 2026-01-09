@@ -62,11 +62,10 @@
 //! working examples of how to use the logging system effectively.
 //!
 
-
-use crate::{SimTime, EventId};
+use crate::{EventId, SimTime};
 use std::collections::HashMap;
 use tracing::{debug, error, info, trace, warn, Span};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, filter::EnvFilter};
+use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Initialize logging for the simulation with sensible defaults
 ///
@@ -88,7 +87,7 @@ pub fn init_simulation_logging() {
 /// # Example
 /// ```rust
 /// use des_core::logging::init_simulation_logging_with_level;
-/// 
+///
 /// // Enable detailed debugging
 /// // Note: This may fail in doc tests if subscriber is already set
 /// let _ = std::panic::catch_unwind(|| {
@@ -96,22 +95,24 @@ pub fn init_simulation_logging() {
 /// });
 /// ```
 pub fn init_simulation_logging_with_level(level: &str) {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            // Default filter with more detailed logging for DES modules
-            format!(
-                "{}={},des_core::scheduler=debug,des_core::async_runtime=debug,des_components=info",
-                env!("CARGO_PKG_NAME"), level
-            ).into()
-        });
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        // Default filter with more detailed logging for DES modules
+        format!(
+            "{}={},des_core::scheduler=debug,des_core::async_runtime=debug,des_components=info",
+            env!("CARGO_PKG_NAME"),
+            level
+        )
+        .into()
+    });
 
     let result = tracing_subscriber::registry()
-        .with(fmt::layer()
-            .with_target(true)
-            .with_thread_ids(true)
-            .with_level(true)
-            .with_file(true)
-            .with_line_number(true)
+        .with(
+            fmt::layer()
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_level(true)
+                .with_file(true)
+                .with_line_number(true),
         )
         .with(filter)
         .try_init();
@@ -127,20 +128,20 @@ pub fn init_simulation_logging_with_level(level: &str) {
 
 /// Initialize logging with custom configuration for advanced debugging
 pub fn init_detailed_simulation_logging() {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            // Very detailed logging for debugging
-            "trace,des_core=trace,des_components=debug,des_metrics=debug".into()
-        });
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        // Very detailed logging for debugging
+        "trace,des_core=trace,des_components=debug,des_metrics=debug".into()
+    });
 
     let result = tracing_subscriber::registry()
-        .with(fmt::layer()
-            .with_target(true)
-            .with_thread_ids(true)
-            .with_level(true)
-            .with_file(true)
-            .with_line_number(true)
-            .pretty() // Pretty-printed output for easier reading
+        .with(
+            fmt::layer()
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_level(true)
+                .with_file(true)
+                .with_line_number(true)
+                .pretty(), // Pretty-printed output for easier reading
         )
         .with(filter)
         .try_init();
@@ -161,10 +162,7 @@ pub fn simulation_span(name: &str) -> Span {
 
 /// Create a span for tracking component execution
 pub fn component_span(component_name: &str, component_id: &str) -> Span {
-    tracing::debug_span!("component", 
-        name = component_name, 
-        id = component_id
-    )
+    tracing::debug_span!("component", name = component_name, id = component_id)
 }
 
 /// Create a span for tracking event processing
@@ -178,10 +176,7 @@ pub fn event_span(event_id: EventId, event_type: &str, time: SimTime) -> Span {
 
 /// Create a span for tracking task execution
 pub fn task_span(task_name: &str, task_id: &str) -> Span {
-    tracing::debug_span!("task",
-        name = task_name,
-        id = task_id
-    )
+    tracing::debug_span!("task", name = task_name, id = task_id)
 }
 
 /// Logging utilities for common simulation events
@@ -196,10 +191,7 @@ pub mod events {
                 end_time = ?end,
                 "Simulation started"
             ),
-            None => info!(
-                simulation = name,
-                "Simulation started (unbounded)"
-            ),
+            None => info!(simulation = name, "Simulation started (unbounded)"),
         }
     }
 
@@ -255,11 +247,7 @@ pub mod events {
 
     /// Log task spawning
     pub fn task_spawned(task_name: &str, task_id: &str) {
-        debug!(
-            task_name = task_name,
-            task_id = task_id,
-            "Task spawned"
-        );
+        debug!(task_name = task_name, task_id = task_id, "Task spawned");
     }
 
     /// Log task completion
@@ -273,7 +261,11 @@ pub mod events {
     }
 
     /// Log scheduler state
-    pub fn scheduler_state(current_time: SimTime, pending_events: usize, next_event_time: Option<SimTime>) {
+    pub fn scheduler_state(
+        current_time: SimTime,
+        pending_events: usize,
+        next_event_time: Option<SimTime>,
+    ) {
         trace!(
             current_time = ?current_time,
             pending_events = pending_events,
@@ -415,7 +407,7 @@ mod tests {
         let _ = std::panic::catch_unwind(|| {
             init_simulation_logging_with_level("debug");
         });
-        
+
         // Test logging at different levels
         info!("Test info message");
         debug!("Test debug message");
@@ -433,7 +425,12 @@ mod tests {
     #[test]
     fn test_event_logging() {
         events::simulation_started("test_sim", Some(SimTime::from_secs(10)));
-        events::event_scheduled(EventId(1), "TestEvent", SimTime::from_millis(100), "test_component");
+        events::event_scheduled(
+            EventId(1),
+            "TestEvent",
+            SimTime::from_millis(100),
+            "test_component",
+        );
         events::event_processing_started(EventId(1), "TestEvent", SimTime::from_millis(100));
         events::event_processing_completed(EventId(1), 1000);
         events::simulation_completed("test_sim", SimTime::from_secs(5), 100);
@@ -444,7 +441,7 @@ mod tests {
         diagnostics::potential_deadlock_detected("test_component", "No events scheduled");
         diagnostics::excessive_queue_growth(10000, 1000);
         diagnostics::slow_event_processing("SlowEvent", 500.0, 100.0);
-        
+
         let mut context = HashMap::new();
         context.insert("request_id".to_string(), "123".to_string());
         diagnostics::component_error("test_component", "Processing failed", &context);
@@ -456,7 +453,7 @@ mod tests {
         sim_debug!("Test debug macro");
         sim_warn!("Test warning macro");
         sim_error!("Test error macro");
-        
+
         let time = SimTime::from_millis(100);
         sim_log_with_time!(info, time, "Test with time context");
     }

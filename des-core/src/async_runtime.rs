@@ -45,7 +45,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tracing::{debug, trace, warn, instrument};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::scheduler::Scheduler;
 use crate::waker::create_des_waker;
@@ -69,7 +69,12 @@ pub fn current_sim_time() -> Option<SimTime> {
     CURRENT_TIME.with(|t| *t.borrow())
 }
 
-fn set_poll_context(time: SimTime, scheduler: &mut Scheduler, runtime_key: Key<RuntimeEvent>, task_id: TaskId) {
+fn set_poll_context(
+    time: SimTime,
+    scheduler: &mut Scheduler,
+    runtime_key: Key<RuntimeEvent>,
+    task_id: TaskId,
+) {
     CURRENT_TIME.with(|t| *t.borrow_mut() = Some(time));
     CURRENT_SCHEDULER.with(|s| *s.borrow_mut() = Some(scheduler as *mut Scheduler));
     CURRENT_RUNTIME_KEY.with(|k| *k.borrow_mut() = Some(runtime_key));
@@ -88,12 +93,16 @@ fn schedule_wake_at(delay: SimTime) {
     CURRENT_SCHEDULER.with(|sched| {
         CURRENT_RUNTIME_KEY.with(|key| {
             CURRENT_TASK_ID.with(|task| {
-                if let (Some(sched_ptr), Some(runtime_key), Some(task_id)) = 
-                    (*sched.borrow(), *key.borrow(), *task.borrow()) 
+                if let (Some(sched_ptr), Some(runtime_key), Some(task_id)) =
+                    (*sched.borrow(), *key.borrow(), *task.borrow())
                 {
                     if !sched_ptr.is_null() {
                         unsafe {
-                            (*sched_ptr).schedule(delay, runtime_key, RuntimeEvent::Wake { task_id });
+                            (*sched_ptr).schedule(
+                                delay,
+                                runtime_key,
+                                RuntimeEvent::Wake { task_id },
+                            );
                         }
                     }
                 }
@@ -165,9 +174,12 @@ impl DesRuntime {
         let task_id = TaskId(self.next_task_id);
         self.next_task_id += 1;
 
-        self.tasks.insert(task_id, Task {
-            future: Box::pin(future),
-        });
+        self.tasks.insert(
+            task_id,
+            Task {
+                future: Box::pin(future),
+            },
+        );
         self.ready_queue.push_back(task_id);
 
         tracing::Span::current().record("task_id", tracing::field::debug(&task_id));
@@ -234,7 +246,11 @@ impl DesRuntime {
             }
         }
 
-        debug!(completed, remaining = self.tasks.len(), "Poll cycle complete");
+        debug!(
+            completed,
+            remaining = self.tasks.len(),
+            "Poll cycle complete"
+        );
     }
 
     /// Wake a specific task.
@@ -345,7 +361,6 @@ impl Future for SimSleep {
         }
     }
 }
-
 
 /// Sleep for a duration in simulation time.
 ///

@@ -46,13 +46,16 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
-use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering as AtomicOrdering}};
-use uuid::Uuid;
+use std::sync::{
+    atomic::{AtomicU64, Ordering as AtomicOrdering},
+    Arc, Mutex,
+};
 use tracing::{debug, trace};
+use uuid::Uuid;
 
-use crate::{Key, SimTime};
+use crate::task::{ClosureTask, Task, TaskExecution, TaskHandle, TaskId, TaskWrapper, TimeoutTask};
 use crate::types::EventId;
-use crate::task::{Task, TaskId, TaskHandle, TaskExecution, TaskWrapper, ClosureTask, TimeoutTask};
+use crate::{Key, SimTime};
 
 thread_local! {
     /// Thread-local pointer to the current scheduler during event processing.
@@ -60,10 +63,10 @@ thread_local! {
 }
 
 /// Defer an event to be scheduled at the current simulation time.
-/// 
+///
 /// This function is designed to be called from wakers during event processing.
 /// It uses thread-local storage to access the scheduler without locks.
-/// 
+///
 /// If called outside of event processing, the event will be silently dropped.
 pub fn defer_wake<E: fmt::Debug + 'static>(component: Key<E>, event: E) {
     CURRENT_SCHEDULER.with(|sched| {
@@ -123,7 +126,7 @@ impl DeferredWake {
             }),
         }
     }
-    
+
     fn execute(self, scheduler: &mut Scheduler) {
         (self.schedule_fn)(scheduler);
     }
@@ -204,7 +207,7 @@ impl ComponentEventEntry {
     pub(crate) fn downcast<E: fmt::Debug + 'static>(&self) -> Option<EventEntryTyped<'_, E>> {
         self.inner.downcast_ref::<E>().map(|event| EventEntryTyped {
             id: self.event_id,
-            time: self.time, 
+            time: self.time,
             component_key: Key::new_with_id(self.component),
             component_idx: self.component,
             event,
@@ -223,10 +226,7 @@ impl TaskEventEntry {
         // Note: id parameter kept for API compatibility but not stored
         // as it's not currently used
         let _ = id;
-        TaskEventEntry {
-            time,
-            task_id,
-        }
+        TaskEventEntry { time, task_id }
     }
 }
 
@@ -259,7 +259,6 @@ pub struct EventEntryTyped<'e, E: fmt::Debug> {
     pub component_idx: Uuid,
     pub event: &'e E,
 }
-
 
 type Clock = Arc<AtomicU64>;
 
@@ -343,22 +342,13 @@ impl SchedulerHandle {
     }
 
     /// Schedule an event to be executed at `time` from now for `component`.
-    pub fn schedule<E: fmt::Debug + 'static>(
-        &self,
-        time: SimTime,
-        component: Key<E>,
-        event: E,
-    ) {
+    pub fn schedule<E: fmt::Debug + 'static>(&self, time: SimTime, component: Key<E>, event: E) {
         let mut scheduler = self.scheduler.lock().unwrap();
         scheduler.schedule(time, component, event);
     }
 
     /// Schedule an event to be executed immediately for `component`.
-    pub fn schedule_now<E: fmt::Debug + 'static>(
-        &self,
-        component: Key<E>,
-        event: E,
-    ) {
+    pub fn schedule_now<E: fmt::Debug + 'static>(&self, component: Key<E>, event: E) {
         self.schedule(SimTime::zero(), component, event);
     }
 
@@ -383,21 +373,13 @@ impl SchedulerHandle {
     }
 
     /// Schedule a task to run at a specific time
-    pub fn schedule_task<T: Task>(
-        &self,
-        delay: SimTime,
-        task: T,
-    ) -> TaskHandle<T::Output> {
+    pub fn schedule_task<T: Task>(&self, delay: SimTime, task: T) -> TaskHandle<T::Output> {
         let mut scheduler = self.scheduler.lock().unwrap();
         scheduler.schedule_task(delay, task)
     }
 
     /// Schedule a timeout callback
-    pub fn timeout<F>(
-        &self,
-        delay: SimTime,
-        callback: F,
-    ) -> TaskHandle<()>
+    pub fn timeout<F>(&self, delay: SimTime, callback: F) -> TaskHandle<()>
     where
         F: FnOnce(&mut Scheduler) + 'static,
     {
@@ -445,7 +427,7 @@ impl Scheduler {
         self.next_event_id += 1;
         let absolute_time = self.time() + time;
         let event_id = EventId(self.next_event_id);
-        
+
         // Log event scheduling
         trace!(
             event_id = ?event_id,
@@ -455,10 +437,10 @@ impl Scheduler {
             component_id = ?component.id(),
             "Event scheduled"
         );
-        
+
         let component_entry = ComponentEventEntry::new(event_id, absolute_time, component, event);
         self.events.push(EventEntry::Component(component_entry));
-        
+
         // Log scheduler state periodically
         if self.next_event_id % 1000 == 0 {
             debug!(
@@ -497,22 +479,19 @@ impl Scheduler {
     /// Removes and returns the next scheduled event or `None` if none are left.
     pub fn pop(&mut self) -> Option<EventEntry> {
         self.events.pop().inspect(|event| {
-            self.clock.store(simtime_to_nanos(event.time()), AtomicOrdering::Relaxed);
+            self.clock
+                .store(simtime_to_nanos(event.time()), AtomicOrdering::Relaxed);
         })
     }
 
     // Task scheduling methods
 
     /// Schedule a task to run at a specific time
-    pub fn schedule_task<T: Task>(
-        &mut self,
-        delay: SimTime,
-        task: T,
-    ) -> TaskHandle<T::Output> {
+    pub fn schedule_task<T: Task>(&mut self, delay: SimTime, task: T) -> TaskHandle<T::Output> {
         let task_id = TaskId::new();
         let wrapper = TaskWrapper::new(task, task_id);
         let time = self.time() + delay;
-        
+
         self.schedule_task_at(time, task_id, Box::new(wrapper));
         TaskHandle::new(task_id)
     }
@@ -525,23 +504,15 @@ impl Scheduler {
         task: Box<dyn TaskExecution>,
     ) {
         self.pending_tasks.insert(task_id, task);
-        
+
         // Create a special event entry for task execution
         self.next_event_id += 1;
-        let event = TaskEventEntry::new(
-            EventId(self.next_event_id),
-            time,
-            task_id,
-        );
+        let event = TaskEventEntry::new(EventId(self.next_event_id), time, task_id);
         self.events.push(EventEntry::Task(event));
     }
 
     /// Schedule a closure as a task
-    pub fn schedule_closure<F, R>(
-        &mut self,
-        delay: SimTime,
-        closure: F,
-    ) -> TaskHandle<R>
+    pub fn schedule_closure<F, R>(&mut self, delay: SimTime, closure: F) -> TaskHandle<R>
     where
         F: FnOnce(&mut Scheduler) -> R + 'static,
         R: 'static,
@@ -551,11 +522,7 @@ impl Scheduler {
     }
 
     /// Schedule a timeout callback
-    pub fn timeout<F>(
-        &mut self,
-        delay: SimTime,
-        callback: F,
-    ) -> TaskHandle<()>
+    pub fn timeout<F>(&mut self, delay: SimTime, callback: F) -> TaskHandle<()>
     where
         F: FnOnce(&mut Scheduler) + 'static,
     {
@@ -591,13 +558,18 @@ impl Scheduler {
 
     /// Add a deferred wake event to be scheduled after the current event completes.
     /// This is called by `defer_wake()` via thread-local storage.
-    pub(crate) fn add_deferred_wake<E: fmt::Debug + 'static>(&mut self, component: Key<E>, event: E) {
+    pub(crate) fn add_deferred_wake<E: fmt::Debug + 'static>(
+        &mut self,
+        component: Key<E>,
+        event: E,
+    ) {
         trace!(
             component_id = ?component.id(),
             event_type = std::any::type_name::<E>(),
             "Deferred wake added"
         );
-        self.deferred_wakes.push(DeferredWake::new(component, event));
+        self.deferred_wakes
+            .push(DeferredWake::new(component, event));
     }
 
     /// Process all deferred wakes, scheduling them at the current time.
@@ -606,14 +578,14 @@ impl Scheduler {
         if self.deferred_wakes.is_empty() {
             return;
         }
-        
+
         let wakes: Vec<_> = self.deferred_wakes.drain(..).collect();
         trace!(
             count = wakes.len(),
             current_time = ?self.time(),
             "Processing deferred wakes"
         );
-        
+
         for wake in wakes {
             wake.execute(self);
         }
@@ -659,7 +631,7 @@ mod test {
             component: Uuid::now_v7(),
             inner: Box::new(String::from("inner")),
         };
-        
+
         let entry1 = EventEntry::Component(ComponentEventEntry {
             event_id: EventId(0),
             time: SimTime::from_duration(Duration::from_secs(1)),
@@ -670,7 +642,7 @@ mod test {
             ..make_component_entry()
         });
         assert_eq!(entry1, entry2);
-        
+
         let entry3 = EventEntry::Component(ComponentEventEntry {
             event_id: EventId(0),
             time: SimTime::from_duration(Duration::from_secs(0)),
@@ -682,7 +654,7 @@ mod test {
             ..make_component_entry()
         });
         assert_eq!(entry3.cmp(&entry4), Ordering::Greater);
-        
+
         let entry5 = EventEntry::Component(ComponentEventEntry {
             event_id: EventId(1),
             time: SimTime::from_duration(Duration::from_secs(2)),
@@ -704,18 +676,35 @@ mod test {
     #[test]
     fn test_scheduler() {
         let mut scheduler = Scheduler::default();
-        assert_eq!(scheduler.time(), SimTime::from_duration(Duration::new(0, 0)));
-        assert_eq!(scheduler.clock().time(), SimTime::from_duration(Duration::new(0, 0)));
+        assert_eq!(
+            scheduler.time(),
+            SimTime::from_duration(Duration::new(0, 0))
+        );
+        assert_eq!(
+            scheduler.clock().time(),
+            SimTime::from_duration(Duration::new(0, 0))
+        );
         assert!(scheduler.events.is_empty());
 
         let component_a = Key::<EventA>::new_with_id(Uuid::now_v7());
         let component_b = Key::<EventB>::new_with_id(Uuid::now_v7());
 
-        scheduler.schedule(SimTime::from_duration(Duration::from_secs(1)), component_a, EventA);
+        scheduler.schedule(
+            SimTime::from_duration(Duration::from_secs(1)),
+            component_a,
+            EventA,
+        );
         scheduler.schedule_now(component_b, EventB);
-        scheduler.schedule(SimTime::from_duration(Duration::from_secs(2)), component_b, EventB);
+        scheduler.schedule(
+            SimTime::from_duration(Duration::from_secs(2)),
+            component_b,
+            EventB,
+        );
 
-        assert_eq!(scheduler.time(), SimTime::from_duration(Duration::from_secs(0)));
+        assert_eq!(
+            scheduler.time(),
+            SimTime::from_duration(Duration::from_secs(0))
+        );
 
         let entry = scheduler.pop().unwrap();
         let entry = entry.downcast::<EventB>().unwrap();
@@ -724,7 +713,10 @@ mod test {
         assert_eq!(entry.component_key.id, component_b.id);
         assert_eq!(entry.event, &EventB);
 
-        assert_eq!(scheduler.time(), SimTime::from_duration(Duration::from_secs(0)));
+        assert_eq!(
+            scheduler.time(),
+            SimTime::from_duration(Duration::from_secs(0))
+        );
 
         let entry = scheduler.pop().unwrap();
         let entry = entry.downcast::<EventA>().unwrap();
@@ -733,8 +725,14 @@ mod test {
         assert_eq!(entry.component_key.id, component_a.id);
         assert_eq!(entry.event, &EventA);
 
-        assert_eq!(scheduler.time(), SimTime::from_duration(Duration::from_secs(1)));
-        assert_eq!(scheduler.clock().time(), SimTime::from_duration(Duration::from_secs(1)));
+        assert_eq!(
+            scheduler.time(),
+            SimTime::from_duration(Duration::from_secs(1))
+        );
+        assert_eq!(
+            scheduler.clock().time(),
+            SimTime::from_duration(Duration::from_secs(1))
+        );
 
         let entry = scheduler.pop().unwrap();
         let entry = entry.downcast::<EventB>().unwrap();
@@ -743,7 +741,10 @@ mod test {
         assert_eq!(entry.component_key.id, component_b.id);
         assert_eq!(entry.event, &EventB);
 
-        assert_eq!(scheduler.time(), SimTime::from_duration(Duration::from_secs(2)));
+        assert_eq!(
+            scheduler.time(),
+            SimTime::from_duration(Duration::from_secs(2))
+        );
 
         assert!(scheduler.pop().is_none());
     }

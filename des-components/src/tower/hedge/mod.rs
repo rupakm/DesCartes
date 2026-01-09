@@ -139,7 +139,7 @@ where
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         let primary_future = self.inner.call(req);
-        
+
         DesHedgeFuture {
             primary: primary_future,
             hedge_scheduled: false,
@@ -158,11 +158,11 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        
+
         // For now, just poll the primary request
         // In a full implementation, you'd schedule and poll hedge requests
         *this.hedge_scheduled = true; // Mark as scheduled to avoid warnings
-        
+
         this.primary.poll(cx)
     }
 }

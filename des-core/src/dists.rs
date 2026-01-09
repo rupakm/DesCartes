@@ -123,16 +123,16 @@ impl PoissonArrivals {
     /// Panics if rate is not positive.
     pub fn new(rate: f64) -> Self {
         assert!(rate > 0.0, "Rate must be positive");
-        
+
         let exp_dist = rand_distr::Exp::new(rate).expect("Rate must be positive");
-        
+
         Self {
             rate,
             rng: rand::SeedableRng::from_entropy(),
             exp_dist,
         }
     }
-    
+
     /// Get the rate parameter
     pub fn rate(&self) -> f64 {
         self.rate
@@ -142,10 +142,10 @@ impl PoissonArrivals {
 impl ArrivalPattern for PoissonArrivals {
     fn next_arrival_time(&mut self) -> Duration {
         use rand::Rng;
-        
+
         // Sample from exponential distribution to get inter-arrival time in seconds
         let inter_arrival_seconds: f64 = self.rng.sample(self.exp_dist);
-        
+
         // Convert to Duration (nanoseconds)
         Duration::from_secs_f64(inter_arrival_seconds)
     }
@@ -203,14 +203,15 @@ impl BurstyArrivals {
     ) -> Self {
         assert!(burst_rate > 0.0, "Burst rate must be positive");
         assert!(quiet_rate >= 0.0, "Quiet rate must be non-negative");
-        
-        let burst_dist = Some(rand_distr::Exp::new(burst_rate).expect("Burst rate must be positive"));
+
+        let burst_dist =
+            Some(rand_distr::Exp::new(burst_rate).expect("Burst rate must be positive"));
         let quiet_dist = if quiet_rate > 0.0 {
             Some(rand_distr::Exp::new(quiet_rate).expect("Quiet rate must be positive"))
         } else {
             None
         };
-        
+
         Self {
             burst_duration,
             quiet_duration,
@@ -221,12 +222,12 @@ impl BurstyArrivals {
             quiet_dist,
         }
     }
-    
+
     /// Get the current phase
     pub fn current_phase(&self) -> BurstPhase {
         self.current_phase
     }
-    
+
     /// Get the time remaining in the current phase
     pub fn phase_remaining(&self) -> Duration {
         self.phase_remaining
@@ -236,7 +237,7 @@ impl BurstyArrivals {
 impl ArrivalPattern for BurstyArrivals {
     fn next_arrival_time(&mut self) -> Duration {
         use rand::Rng;
-        
+
         // Determine the inter-arrival time based on current phase
         let inter_arrival = match self.current_phase {
             BurstPhase::Burst => {
@@ -258,12 +259,12 @@ impl ArrivalPattern for BurstyArrivals {
                 }
             }
         };
-        
+
         // Update phase timing
         if inter_arrival >= self.phase_remaining {
             // Phase will end before next arrival
             let remaining_time = inter_arrival - self.phase_remaining;
-            
+
             // Switch phases
             match self.current_phase {
                 BurstPhase::Burst => {
@@ -275,7 +276,7 @@ impl ArrivalPattern for BurstyArrivals {
                     self.phase_remaining = self.burst_duration;
                 }
             }
-            
+
             // Recursively calculate next arrival in new phase
             if remaining_time > Duration::ZERO {
                 self.phase_remaining = self.phase_remaining.saturating_sub(remaining_time);
@@ -353,21 +354,21 @@ impl ExponentialDistribution {
     /// Panics if rate is not positive.
     pub fn new(rate: f64) -> Self {
         assert!(rate > 0.0, "Rate must be positive");
-        
+
         let exp_dist = rand_distr::Exp::new(rate).expect("Rate must be positive");
-        
+
         Self {
             rate,
             rng: rand::SeedableRng::from_entropy(),
             exp_dist,
         }
     }
-    
+
     /// Get the rate parameter
     pub fn rate(&self) -> f64 {
         self.rate
     }
-    
+
     /// Get the mean service time (1/rate)
     pub fn mean_service_time(&self) -> Duration {
         Duration::from_secs_f64(1.0 / self.rate)
@@ -377,10 +378,10 @@ impl ExponentialDistribution {
 impl ServiceTimeDistribution for ExponentialDistribution {
     fn sample(&mut self) -> Duration {
         use rand::Rng;
-        
+
         // Sample from exponential distribution to get service time in seconds
         let service_time_seconds: f64 = self.rng.sample(self.exp_dist);
-        
+
         // Convert to Duration
         Duration::from_secs_f64(service_time_seconds)
     }
@@ -428,11 +429,11 @@ impl UniformDistribution {
             min_duration < max_duration,
             "Minimum duration must be less than maximum duration"
         );
-        
+
         let min_secs = min_duration.as_secs_f64();
         let max_secs = max_duration.as_secs_f64();
         let uniform_dist = rand_distr::Uniform::new(min_secs, max_secs);
-        
+
         Self {
             min_duration,
             max_duration,
@@ -440,17 +441,17 @@ impl UniformDistribution {
             uniform_dist,
         }
     }
-    
+
     /// Get the minimum service time
     pub fn min_duration(&self) -> Duration {
         self.min_duration
     }
-    
+
     /// Get the maximum service time
     pub fn max_duration(&self) -> Duration {
         self.max_duration
     }
-    
+
     /// Get the mean service time
     pub fn mean_service_time(&self) -> Duration {
         let mean_secs = (self.min_duration.as_secs_f64() + self.max_duration.as_secs_f64()) / 2.0;
@@ -461,10 +462,10 @@ impl UniformDistribution {
 impl ServiceTimeDistribution for UniformDistribution {
     fn sample(&mut self) -> Duration {
         use rand::Rng;
-        
+
         // Sample from uniform distribution to get service time in seconds
         let service_time_seconds: f64 = self.rng.sample(self.uniform_dist);
-        
+
         // Convert to Duration
         Duration::from_secs_f64(service_time_seconds)
     }
@@ -508,26 +509,32 @@ mod tests {
     #[test]
     fn test_poisson_arrivals_generates_positive_times() {
         let mut pattern = PoissonArrivals::new(10.0); // 10 arrivals per second
-        
+
         // Generate several inter-arrival times
         for _ in 0..10 {
             let time = pattern.next_arrival_time();
-            assert!(time > Duration::ZERO, "Inter-arrival time should be positive");
+            assert!(
+                time > Duration::ZERO,
+                "Inter-arrival time should be positive"
+            );
             // With rate 10, average inter-arrival time should be 0.1 seconds
             // Allow reasonable range for randomness
-            assert!(time < Duration::from_secs(1), "Inter-arrival time should be reasonable");
+            assert!(
+                time < Duration::from_secs(1),
+                "Inter-arrival time should be reasonable"
+            );
         }
     }
 
     #[test]
     fn test_bursty_arrivals_creation() {
         let pattern = BurstyArrivals::new(
-            Duration::from_secs(1),  // burst duration
-            Duration::from_secs(2),  // quiet duration
-            10.0,                    // burst rate
-            1.0,                     // quiet rate
+            Duration::from_secs(1), // burst duration
+            Duration::from_secs(2), // quiet duration
+            10.0,                   // burst rate
+            1.0,                    // quiet rate
         );
-        
+
         assert_eq!(pattern.current_phase(), BurstPhase::Burst);
         assert_eq!(pattern.phase_remaining(), Duration::from_secs(1));
     }
@@ -538,7 +545,7 @@ mod tests {
         BurstyArrivals::new(
             Duration::from_secs(1),
             Duration::from_secs(2),
-            0.0,  // invalid
+            0.0, // invalid
             1.0,
         );
     }
@@ -550,35 +557,38 @@ mod tests {
             Duration::from_secs(1),
             Duration::from_secs(2),
             10.0,
-            -1.0,  // invalid
+            -1.0, // invalid
         );
     }
 
     #[test]
     fn test_bursty_arrivals_generates_positive_times() {
         let mut pattern = BurstyArrivals::new(
-            Duration::from_millis(100),  // short burst
-            Duration::from_millis(200),  // short quiet
-            100.0,                       // high burst rate
-            0.0,                         // no quiet arrivals
+            Duration::from_millis(100), // short burst
+            Duration::from_millis(200), // short quiet
+            100.0,                      // high burst rate
+            0.0,                        // no quiet arrivals
         );
-        
+
         // Generate several inter-arrival times
         for _ in 0..5 {
             let time = pattern.next_arrival_time();
-            assert!(time > Duration::ZERO, "Inter-arrival time should be positive");
+            assert!(
+                time > Duration::ZERO,
+                "Inter-arrival time should be positive"
+            );
         }
     }
 
     #[test]
     fn test_bursty_arrivals_with_zero_quiet_rate() {
         let mut pattern = BurstyArrivals::new(
-            Duration::from_millis(10),   // very short burst
-            Duration::from_millis(100),  // longer quiet
-            1000.0,                      // very high burst rate
-            0.0,                         // no quiet arrivals
+            Duration::from_millis(10),  // very short burst
+            Duration::from_millis(100), // longer quiet
+            1000.0,                     // very high burst rate
+            0.0,                        // no quiet arrivals
         );
-        
+
         // During quiet phase, should return the remaining quiet time
         // This is a bit tricky to test deterministically due to randomness
         let time = pattern.next_arrival_time();
@@ -612,14 +622,17 @@ mod tests {
     #[test]
     fn test_exponential_distribution_sampling() {
         let mut dist = ExponentialDistribution::new(10.0); // 10 services per second
-        
+
         // Generate several service times
         for _ in 0..10 {
             let time = dist.sample();
             assert!(time > Duration::ZERO, "Service time should be positive");
             // With rate 10, average service time should be 0.1 seconds
             // Allow reasonable range for randomness
-            assert!(time < Duration::from_secs(1), "Service time should be reasonable");
+            assert!(
+                time < Duration::from_secs(1),
+                "Service time should be reasonable"
+            );
         }
     }
 
@@ -628,7 +641,7 @@ mod tests {
         let min = Duration::from_millis(50);
         let max = Duration::from_millis(150);
         let dist = UniformDistribution::new(min, max);
-        
+
         assert_eq!(dist.min_duration(), min);
         assert_eq!(dist.max_duration(), max);
         assert_eq!(dist.mean_service_time(), Duration::from_millis(100));
@@ -654,7 +667,7 @@ mod tests {
         let min = Duration::from_millis(50);
         let max = Duration::from_millis(150);
         let mut dist = UniformDistribution::new(min, max);
-        
+
         // Generate several service times
         for _ in 0..20 {
             let time = dist.sample();
@@ -668,20 +681,20 @@ mod tests {
         let min = Duration::from_millis(100);
         let max = Duration::from_millis(200);
         let mut dist = UniformDistribution::new(min, max);
-        
+
         let mut samples = Vec::new();
         for _ in 0..100 {
             samples.push(dist.sample());
         }
-        
+
         // Check that we get values across the range
         let min_sample = samples.iter().min().unwrap();
         let max_sample = samples.iter().max().unwrap();
-        
+
         // Should be reasonably close to the bounds (within 20% of range)
         let range = max.as_millis() - min.as_millis();
         let tolerance = range / 5; // 20% tolerance
-        
+
         assert!(min_sample.as_millis() <= min.as_millis() + tolerance);
         assert!(max_sample.as_millis() >= max.as_millis() - tolerance);
     }
@@ -775,7 +788,11 @@ impl EndpointBasedServiceTime {
     ///
     /// * `endpoint` - URI path to match (e.g., "/api/users")
     /// * `distribution` - Service time distribution for this endpoint
-    pub fn add_endpoint(&mut self, endpoint: String, distribution: Box<dyn ServiceTimeDistribution>) {
+    pub fn add_endpoint(
+        &mut self,
+        endpoint: String,
+        distribution: Box<dyn ServiceTimeDistribution>,
+    ) {
         self.endpoint_distributions.insert(endpoint, distribution);
     }
 }
@@ -840,7 +857,11 @@ impl CompositeServiceTime {
     ///
     /// * `condition` - Predicate to match requests
     /// * `distribution` - Distribution to use for matching requests
-    pub fn add_rule(&mut self, condition: Box<dyn RequestPredicate>, distribution: Box<dyn ServiceTimeDistribution>) {
+    pub fn add_rule(
+        &mut self,
+        condition: Box<dyn RequestPredicate>,
+        distribution: Box<dyn ServiceTimeDistribution>,
+    ) {
         self.rules.push(ServiceTimeRule {
             condition,
             distribution,
@@ -916,7 +937,9 @@ pub struct HeaderPredicate {
 
 impl RequestPredicate for HeaderPredicate {
     fn matches(&self, request: &RequestContext) -> bool {
-        request.headers.get(&self.header_name)
+        request
+            .headers
+            .get(&self.header_name)
             .map(|value| value == &self.header_value)
             .unwrap_or(false)
     }

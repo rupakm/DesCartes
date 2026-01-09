@@ -38,7 +38,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use des_core::{Component, Key, Scheduler, create_des_waker, defer_wake};
+use des_core::{create_des_waker, defer_wake, Component, Key, Scheduler};
 use http::Response;
 
 use super::{ServiceError, SimBody};
@@ -161,7 +161,7 @@ impl FuturePollerHandle {
         C: FnOnce(Result<Response<SimBody>, ServiceError>) + 'static,
     {
         let mut state = self.state.lock().unwrap();
-        
+
         let id = FutureId(state.next_id);
         state.next_id += 1;
 
@@ -297,7 +297,7 @@ impl Component for FuturePoller {
         _scheduler: &mut Scheduler,
     ) {
         let mut state = self.state.lock().unwrap();
-        
+
         // Store self_key on first event
         if state.self_key.is_none() {
             state.self_key = Some(self_id);
@@ -395,7 +395,7 @@ mod tests {
         // Test that the waker correctly schedules poll events.
         // This test verifies that when a future becomes ready during simulation,
         // the waker properly schedules a poll event using the unified waker.
-        
+
         let mut simulation = Simulation::default();
 
         // Create handle

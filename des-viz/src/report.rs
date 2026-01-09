@@ -50,10 +50,7 @@ pub fn generate_html_report(
 }
 
 /// Build HTML content for the report
-fn build_html_content(
-    snapshot: &MetricsSnapshot,
-    charts_dir: &Path,
-) -> Result<String, VizError> {
+fn build_html_content(snapshot: &MetricsSnapshot, charts_dir: &Path) -> Result<String, VizError> {
     let mut html = String::new();
 
     // HTML header
@@ -165,10 +162,12 @@ fn build_html_content(
     ));
 
     // Summary section
-    html.push_str(r#"    <div class="summary">
+    html.push_str(
+        r#"    <div class="summary">
         <h2>Summary</h2>
         <div class="summary-grid">
-"#);
+"#,
+    );
 
     html.push_str(&format!(
         r#"            <div class="summary-item">
@@ -196,8 +195,10 @@ fn build_html_content(
     );
 
     // Charts section
-    html.push_str(r#"    <h2>Visualizations</h2>
-"#);
+    html.push_str(
+        r#"    <h2>Visualizations</h2>
+"#,
+    );
 
     // Embed charts if they exist
     let chart_files = [

@@ -34,11 +34,13 @@
 //! # }
 //! ```
 
-pub mod rate;
 pub mod concurrency;
 pub mod global_concurrency;
+pub mod rate;
 
 // Re-export the main types for convenience
-pub use rate::{DesRateLimit, DesRateLimitLayer};
 pub use concurrency::{DesConcurrencyLimit, DesConcurrencyLimitLayer};
-pub use global_concurrency::{DesGlobalConcurrencyLimit, DesGlobalConcurrencyLimitLayer, GlobalConcurrencyLimitState};
+pub use global_concurrency::{
+    DesGlobalConcurrencyLimit, DesGlobalConcurrencyLimitLayer, GlobalConcurrencyLimitState,
+};
+pub use rate::{DesRateLimit, DesRateLimitLayer};

@@ -74,7 +74,7 @@ pub struct TimeSeriesCollector {
 
 impl TimeSeriesCollector {
     /// Create a new time-series collector
-    /// 
+    ///
     /// # Arguments
     /// * `aggregation_window` - Duration for aggregating raw data points
     /// * `ema_alpha` - Smoothing factor for exponential moving average (0 < alpha <= 1)
@@ -93,7 +93,8 @@ impl TimeSeriesCollector {
     /// Add a data point to the time series
     pub fn add_point(&mut self, timestamp: SimTime, value: f64) {
         // Add to raw data
-        self.raw_data.push_back(TimeSeriesPoint { timestamp, value });
+        self.raw_data
+            .push_back(TimeSeriesPoint { timestamp, value });
 
         // Check if we need to aggregate
         let should_aggregate = match self.last_aggregation {
@@ -172,7 +173,7 @@ pub struct MmkTimeSeriesMetrics {
 
 impl MmkTimeSeriesMetrics {
     /// Create a new M/M/k time-series metrics collector
-    /// 
+    ///
     /// # Arguments
     /// * `aggregation_window` - Duration for aggregating data points (e.g., 100ms)
     /// * `ema_alpha` - Smoothing factor for exponential moving average (e.g., 0.1)
@@ -198,7 +199,8 @@ impl MmkTimeSeriesMetrics {
 
     /// Record a timeout event (1.0 for timeout, 0.0 for no timeout)
     pub fn record_timeout(&mut self, timestamp: SimTime, is_timeout: bool) {
-        self.timeout_rate.add_point(timestamp, if is_timeout { 1.0 } else { 0.0 });
+        self.timeout_rate
+            .add_point(timestamp, if is_timeout { 1.0 } else { 0.0 });
     }
 
     /// Record throughput measurement
@@ -228,15 +230,15 @@ mod tests {
     #[test]
     fn test_exponential_moving_average() {
         let mut ema = ExponentialMovingAverage::new(0.1);
-        
+
         assert_eq!(ema.value(), None);
-        
+
         let v1 = ema.update(10.0);
         assert_eq!(v1, 10.0);
-        
+
         let v2 = ema.update(20.0);
         assert!((v2 - 11.0).abs() < 0.001); // 0.1 * 20 + 0.9 * 10 = 11
-        
+
         let v3 = ema.update(30.0);
         assert!((v3 - 12.9).abs() < 0.001); // 0.1 * 30 + 0.9 * 11 = 12.9
     }
@@ -244,17 +246,17 @@ mod tests {
     #[test]
     fn test_time_series_collector() {
         let mut collector = TimeSeriesCollector::new(Duration::from_millis(100), 0.2);
-        
+
         // Add some points within the same window
         collector.add_point(SimTime::from_duration(Duration::from_millis(10)), 5.0);
         collector.add_point(SimTime::from_duration(Duration::from_millis(20)), 15.0);
-        
+
         // Should not have aggregated yet
         assert_eq!(collector.get_aggregated_data().len(), 0);
-        
+
         // Add a point that triggers aggregation
         collector.add_point(SimTime::from_duration(Duration::from_millis(150)), 25.0);
-        
+
         // Should have one aggregated point
         assert_eq!(collector.get_aggregated_data().len(), 1);
         let point = &collector.get_aggregated_data()[0];

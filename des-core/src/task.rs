@@ -12,8 +12,8 @@ use crate::{Scheduler, SimTime};
 use std::any::Any;
 use std::fmt;
 use std::marker::PhantomData;
+use tracing::{debug, info, instrument, trace, warn};
 use uuid::Uuid;
-use tracing::{debug, info, trace, warn, instrument};
 
 /// Unique identifier for tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -73,7 +73,7 @@ pub trait Task: 'static {
 pub(crate) trait TaskExecution {
     /// Execute the task and return type-erased result
     fn execute(self: Box<Self>, scheduler: &mut Scheduler) -> Box<dyn Any>;
-    
+
     /// Get the task ID
     #[allow(dead_code)]
     fn task_id(&self) -> TaskId;
@@ -208,15 +208,12 @@ where
     ))]
     fn execute(mut self, scheduler: &mut Scheduler) -> Self::Output {
         self.current_attempt += 1;
-        
+
         debug!("Executing retry task");
-        
+
         match (self.operation)(scheduler) {
             Ok(result) => {
-                info!(
-                    attempt = self.current_attempt,
-                    "Retry task succeeded"
-                );
+                info!(attempt = self.current_attempt, "Retry task succeeded");
                 Ok(result)
             }
             Err(error) => {
@@ -235,7 +232,7 @@ where
                         next_delay = ?delay,
                         "Retry task failed - scheduling retry"
                     );
-                    
+
                     let task_id = TaskId::new();
                     let wrapper = TaskWrapper::new(self, task_id);
                     scheduler.schedule_task_at(
@@ -243,7 +240,7 @@ where
                         task_id,
                         Box::new(wrapper),
                     );
-                    
+
                     // Return a placeholder error - the real result will come from the retry
                     // This is a limitation of the current design - we can't easily return
                     // a "pending" state. For now, we'll just continue the retry chain.
@@ -298,7 +295,7 @@ where
     ))]
     fn execute(mut self, scheduler: &mut Scheduler) -> Self::Output {
         debug!("Executing periodic task");
-        
+
         // Execute the callback
         (self.callback)(scheduler);
 
@@ -318,12 +315,8 @@ where
         let task_id = TaskId::new();
         let interval = self.interval;
         let wrapper = TaskWrapper::new(self, task_id);
-        scheduler.schedule_task_at(
-            scheduler.time() + interval,
-            task_id,
-            Box::new(wrapper),
-        );
-        
+        scheduler.schedule_task_at(scheduler.time() + interval, task_id, Box::new(wrapper));
+
         debug!(
             next_execution_time = ?(scheduler.time() + interval),
             "Scheduled next periodic task execution"
@@ -334,7 +327,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Simulation};
+    use crate::Simulation;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -343,7 +336,7 @@ mod tests {
         let id1 = TaskId::new();
         let id2 = TaskId::new();
         assert_ne!(id1, id2);
-        
+
         let id3 = TaskId::default();
         assert_ne!(id1, id3);
     }
@@ -359,7 +352,7 @@ mod tests {
     fn test_closure_task() {
         let executed = Arc::new(Mutex::new(false));
         let executed_clone = executed.clone();
-        
+
         let task = ClosureTask::new(move |_scheduler| {
             *executed_clone.lock().unwrap() = true;
             42
@@ -367,7 +360,7 @@ mod tests {
 
         let mut scheduler = Scheduler::default();
         let result = task.execute(&mut scheduler);
-        
+
         assert_eq!(result, 42);
         assert!(*executed.lock().unwrap());
     }
@@ -376,14 +369,14 @@ mod tests {
     fn test_timeout_task() {
         let executed = Arc::new(Mutex::new(false));
         let executed_clone = executed.clone();
-        
+
         let task = TimeoutTask::new(move |_scheduler| {
             *executed_clone.lock().unwrap() = true;
         });
 
         let mut scheduler = Scheduler::default();
         task.execute(&mut scheduler);
-        
+
         assert!(*executed.lock().unwrap());
     }
 
@@ -391,7 +384,7 @@ mod tests {
     fn test_periodic_task_with_count() {
         let counter = Arc::new(Mutex::new(0));
         let counter_clone = counter.clone();
-        
+
         let task = PeriodicTask::with_count(
             move |_scheduler| {
                 *counter_clone.lock().unwrap() += 1;
@@ -401,13 +394,13 @@ mod tests {
         );
 
         let mut scheduler = Scheduler::default();
-        
+
         // Execute the task - it should schedule itself for the next execution
         task.execute(&mut scheduler);
-        
+
         // The first execution should have happened
         assert_eq!(*counter.lock().unwrap(), 1);
-        
+
         // There should be a scheduled event for the next execution
         assert!(scheduler.peek().is_some());
     }
@@ -416,7 +409,7 @@ mod tests {
     fn test_retry_task_success() {
         let attempt_count = Arc::new(Mutex::new(0));
         let attempt_count_clone = attempt_count.clone();
-        
+
         let task = RetryTask::new(
             move |_scheduler| {
                 let mut count = attempt_count_clone.lock().unwrap();
@@ -433,11 +426,11 @@ mod tests {
 
         let mut scheduler = Scheduler::default();
         let result = task.execute(&mut scheduler);
-        
+
         // First attempt should fail
         assert!(result.is_err());
         assert_eq!(*attempt_count.lock().unwrap(), 1);
-        
+
         // Should have scheduled a retry
         assert!(scheduler.peek().is_some());
     }
@@ -446,7 +439,7 @@ mod tests {
     fn test_retry_task_max_attempts() {
         let attempt_count = Arc::new(Mutex::new(0));
         let attempt_count_clone = attempt_count.clone();
-        
+
         let task = RetryTask::new(
             move |_scheduler| -> Result<i32, &'static str> {
                 let mut count = attempt_count_clone.lock().unwrap();
@@ -459,7 +452,7 @@ mod tests {
 
         let mut scheduler = Scheduler::default();
         let result: Result<i32, &'static str> = task.execute(&mut scheduler);
-        
+
         // Should fail after first attempt
         assert!(result.is_err());
         assert_eq!(*attempt_count.lock().unwrap(), 1);

@@ -10,7 +10,7 @@ pub enum VizError {
 
     #[error("Invalid plot configuration: {0}")]
     InvalidConfiguration(String),
-    
+
     #[error("Invalid data: {0}")]
     InvalidData(String),
 
@@ -22,13 +22,13 @@ pub enum VizError {
 
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
-    
+
     #[error("Plotting error: {0}")]
     PlottingError(String),
 }
 
 // Implement From for plotters errors
-impl<T> From<plotters::drawing::DrawingAreaErrorKind<T>> for VizError 
+impl<T> From<plotters::drawing::DrawingAreaErrorKind<T>> for VizError
 where
     T: std::error::Error + Send + Sync + 'static,
 {

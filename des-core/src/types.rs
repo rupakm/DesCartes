@@ -12,8 +12,3 @@ impl fmt::Display for EventId {
         write!(f, "Event({})", self.0)
     }
 }
-
-
-
-
-

@@ -4,8 +4,8 @@
 //! using the plotters library.
 
 pub mod latency;
-pub mod throughput;
 pub mod percentiles;
+pub mod throughput;
 pub mod time_series;
 
 use crate::error::VizError;
@@ -88,7 +88,10 @@ impl ChartConfig {
 /// let snapshot = metrics.get_metrics_snapshot();
 /// generate_all_charts(&snapshot, "output/charts").unwrap();
 /// ```
-pub fn generate_all_charts(snapshot: &MetricsSnapshot, output_dir: impl AsRef<Path>) -> Result<(), VizError> {
+pub fn generate_all_charts(
+    snapshot: &MetricsSnapshot,
+    output_dir: impl AsRef<Path>,
+) -> Result<(), VizError> {
     let output_dir = output_dir.as_ref();
     std::fs::create_dir_all(output_dir)?;
 

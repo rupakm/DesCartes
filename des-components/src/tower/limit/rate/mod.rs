@@ -42,7 +42,7 @@
 //! # }
 //! ```
 
-use des_core::{SimTime, SchedulerHandle};
+use des_core::{SchedulerHandle, SimTime};
 use http::Request;
 use pin_project::pin_project;
 use std::future::Future;
@@ -58,7 +58,7 @@ use crate::tower::{ServiceError, SimBody};
 /// This is the Layer implementation that creates rate-limited services.
 #[derive(Clone)]
 pub struct DesRateLimitLayer {
-    rate: f64, // requests per second
+    rate: f64,    // requests per second
     burst: usize, // burst capacity
     scheduler: SchedulerHandle,
 }
@@ -86,7 +86,7 @@ impl<S> Layer<S> for DesRateLimitLayer {
 #[derive(Clone)]
 pub struct DesRateLimit<S> {
     inner: S,
-    rate: f64, // requests per second
+    rate: f64,    // requests per second
     burst: usize, // burst capacity
     tokens: Arc<Mutex<f64>>,
     last_refill: Arc<Mutex<SimTime>>,
@@ -94,12 +94,7 @@ pub struct DesRateLimit<S> {
 }
 
 impl<S> DesRateLimit<S> {
-    pub fn new(
-        inner: S,
-        rate: f64,
-        burst: usize,
-        scheduler: SchedulerHandle,
-    ) -> Self {
+    pub fn new(inner: S, rate: f64, burst: usize, scheduler: SchedulerHandle) -> Self {
         Self {
             inner,
             rate,
@@ -112,17 +107,17 @@ impl<S> DesRateLimit<S> {
 
     fn try_acquire_token(&self) -> bool {
         let current_time = self.scheduler.time();
-        
+
         let mut tokens = self.tokens.lock().unwrap();
         let mut last_refill = self.last_refill.lock().unwrap();
-        
+
         // Calculate tokens to add based on elapsed time
         let elapsed = current_time.duration_since(*last_refill);
         let tokens_to_add = elapsed.as_secs_f64() * self.rate;
-        
+
         *tokens = (*tokens + tokens_to_add).min(self.burst as f64);
         *last_refill = current_time;
-        
+
         if *tokens >= 1.0 {
             *tokens -= 1.0;
             true
@@ -176,7 +171,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
-        
+
         // Check for immediate error first
         if let Some(error) = this.immediate_error.take() {
             return Poll::Ready(Err(error));

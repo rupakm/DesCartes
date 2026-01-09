@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::ops::{Add, Sub, Mul};
+use std::ops::{Add, Mul, Sub};
 use std::time::Duration;
 
 /// Simulation time with nanosecond precision
@@ -117,16 +117,16 @@ impl Default for SimTime {
 
 impl From<f64> for SimTime {
     /// Convert from seconds (as f64) to SimTime
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # use des_core::SimTime;
     /// let time = SimTime::from(1.5); // 1.5 seconds
     /// assert_eq!(time.as_nanos(), 1_500_000_000);
     /// ```
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if the input is negative, infinite, or NaN.
     fn from(secs: f64) -> Self {
         if !secs.is_finite() {
@@ -135,13 +135,13 @@ impl From<f64> for SimTime {
         if secs < 0.0 {
             panic!("SimTime cannot be negative: {secs}");
         }
-        
+
         // Check for potential overflow when converting to nanoseconds
         const MAX_SECS: f64 = (u64::MAX as f64) / 1_000_000_000.0;
         if secs > MAX_SECS {
             panic!("SimTime value too large: {secs} seconds (max: {MAX_SECS} seconds)");
         }
-        
+
         SimTime::from_nanos((secs * 1_000_000_000.0) as u64)
     }
 }

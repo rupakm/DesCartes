@@ -44,11 +44,7 @@ fn main() {
     // Histogram metrics - simulate response times
     for i in 1..=100 {
         let latency_ms = 10.0 + (i as f64 * 0.5) + (i % 10) as f64;
-        metrics.record_histogram(
-            "response_time_ms",
-            latency_ms,
-            &[("component", "server1")],
-        );
+        metrics.record_histogram("response_time_ms", latency_ms, &[("component", "server1")]);
     }
 
     // High-resolution latency tracking
@@ -60,11 +56,7 @@ fn main() {
     // Component-specific metrics using helpers
     metrics.record_component_counter("server1", "requests_processed", 100);
     metrics.record_component_gauge("server1", "memory_usage_mb", 512.0);
-    metrics.record_component_latency(
-        "server1",
-        "processing_latency",
-        Duration::from_millis(25),
-    );
+    metrics.record_component_latency("server1", "processing_latency", Duration::from_millis(25));
 
     println!("✓ Collected metrics from simulated workload\n");
 
@@ -105,7 +97,10 @@ fn main() {
         println!("  P50: {:.2}ms", latency_stats.p50.as_secs_f64() * 1000.0);
         println!("  P95: {:.2}ms", latency_stats.p95.as_secs_f64() * 1000.0);
         println!("  P99: {:.2}ms", latency_stats.p99.as_secs_f64() * 1000.0);
-        println!("  P99.9: {:.2}ms", latency_stats.p999.as_secs_f64() * 1000.0);
+        println!(
+            "  P99.9: {:.2}ms",
+            latency_stats.p999.as_secs_f64() * 1000.0
+        );
     }
 
     println!("\n=== Example Complete ===");

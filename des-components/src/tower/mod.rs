@@ -170,24 +170,29 @@ use std::task::{Context, Poll};
 use thiserror::Error;
 
 // Re-export all the layers and services
+pub mod circuit_breaker;
+pub mod future_poller;
+pub mod hedge;
+pub mod limit;
+pub mod load_balancer;
+pub mod retry;
 pub mod service;
 pub mod timeout;
-pub mod load_balancer;
-pub mod circuit_breaker;
-pub mod limit;
-pub mod hedge;
-pub mod retry;
-pub mod future_poller;
 
-pub use service::{DesService, DesServiceBuilder, TowerSchedulerHandle};
-pub use des_core::SchedulerHandle;
-pub use timeout::{DesTimeout, DesTimeoutLayer};
-pub use load_balancer::{DesLoadBalancer, DesLoadBalanceStrategy, DesLoadBalancerLayer};
 pub use circuit_breaker::{DesCircuitBreaker, DesCircuitBreakerLayer};
-pub use limit::{DesRateLimit, DesRateLimitLayer, DesConcurrencyLimit, DesConcurrencyLimitLayer, DesGlobalConcurrencyLimit, DesGlobalConcurrencyLimitLayer};
+pub use des_core::SchedulerHandle;
+pub use future_poller::{FutureId, FuturePoller, FuturePollerEvent, FuturePollerHandle};
 pub use hedge::{DesHedge, DesHedgeLayer};
-pub use retry::{DesRetry, DesRetryLayer, DesRetryPolicy, exponential_backoff_layer, ExponentialBackoff};
-pub use future_poller::{FuturePoller, FuturePollerHandle, FuturePollerEvent, FutureId};
+pub use limit::{
+    DesConcurrencyLimit, DesConcurrencyLimitLayer, DesGlobalConcurrencyLimit,
+    DesGlobalConcurrencyLimitLayer, DesRateLimit, DesRateLimitLayer,
+};
+pub use load_balancer::{DesLoadBalanceStrategy, DesLoadBalancer, DesLoadBalancerLayer};
+pub use retry::{
+    exponential_backoff_layer, DesRetry, DesRetryLayer, DesRetryPolicy, ExponentialBackoff,
+};
+pub use service::{DesService, DesServiceBuilder, TowerSchedulerHandle};
+pub use timeout::{DesTimeout, DesTimeoutLayer};
 
 /// Errors that can occur in the DES Tower integration
 #[derive(Debug, Error, Clone)]
@@ -224,9 +229,7 @@ impl SimBody {
     }
 
     pub fn empty() -> Self {
-        Self {
-            data: Bytes::new(),
-        }
+        Self { data: Bytes::new() }
     }
 
     pub fn from_static(data: &'static str) -> Self {
@@ -263,7 +266,7 @@ pub(crate) fn response_to_http(
     response: des_core::Response,
 ) -> Result<HttpResponse<SimBody>, ServiceError> {
     use des_core::ResponseStatus;
-    
+
     match response.status {
         ResponseStatus::Ok => {
             let body = if response.payload.is_empty() {
@@ -275,16 +278,20 @@ pub(crate) fn response_to_http(
             HttpResponse::builder()
                 .status(StatusCode::OK)
                 .body(body)
-                .map_err(|e| ServiceError::HttpResponseBuilder { message: e.to_string() })
+                .map_err(|e| ServiceError::HttpResponseBuilder {
+                    message: e.to_string(),
+                })
         }
         ResponseStatus::Error { code, message } => {
-            let status = StatusCode::from_u16(code as u16)
-                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            let status =
+                StatusCode::from_u16(code as u16).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
             HttpResponse::builder()
                 .status(status)
                 .body(SimBody::new(message))
-                .map_err(|e| ServiceError::HttpResponseBuilder { message: e.to_string() })
+                .map_err(|e| ServiceError::HttpResponseBuilder {
+                    message: e.to_string(),
+                })
         }
     }
 }
@@ -313,21 +320,21 @@ mod tests {
     use super::*;
     use des_core::Simulation;
     use http::{Method, Request};
-    use std::task::{Context, Poll, Waker};
     use std::future::Future;
     use std::pin::Pin;
+    use std::task::{Context, Poll, Waker};
     use std::time::Duration;
     use tower::Service;
 
     // Helper to create a no-op waker for testing
     fn noop_waker() -> Waker {
         use std::task::{RawWaker, RawWakerVTable};
-        
+
         fn noop(_: *const ()) {}
         fn clone(_: *const ()) -> RawWaker {
             RawWaker::new(std::ptr::null(), &VTABLE)
         }
-        
+
         const VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
         let raw_waker = RawWaker::new(std::ptr::null(), &VTABLE);
         unsafe { Waker::from_raw(raw_waker) }
@@ -440,7 +447,7 @@ mod tests {
         }
 
         println!("Rate limit test - Successes: {successes}, Rate limited: {rate_limited}");
-        
+
         // Should allow burst capacity (3) and rate limit the rest (2)
         assert!(successes <= 3, "Should not exceed burst capacity");
         assert!(rate_limited >= 2, "Should rate limit excess requests");
@@ -464,8 +471,11 @@ mod tests {
         let mut cx = Context::from_waker(&waker);
 
         // First request should be ready
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
-        
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
+
         let req1 = Request::builder()
             .method(Method::GET)
             .uri("/test1")
@@ -474,22 +484,28 @@ mod tests {
         let future1 = concurrency_service.call(req1);
 
         // Second request should be blocked
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Pending));
-        
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Pending
+        ));
+
         // Complete the first request
         for _ in 0..100 {
             if !simulation.step() {
                 break;
             }
         }
-        
+
         // Check if first request completed
         let mut future1 = future1;
         let result = Pin::new(&mut future1).poll(&mut cx);
         assert!(matches!(result, Poll::Ready(Ok(_))));
-        
+
         // Now service should be ready again
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
     }
 
     #[test]
@@ -510,7 +526,10 @@ mod tests {
         let mut cx = Context::from_waker(&waker);
 
         // Test backpressure: first 2 should be ready, 3rd should not
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
         let req1 = Request::builder()
             .method(Method::GET)
             .uri("/test1")
@@ -518,7 +537,10 @@ mod tests {
             .unwrap();
         let future1 = concurrency_service.call(req1);
 
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
         let req2 = Request::builder()
             .method(Method::GET)
             .uri("/test2")
@@ -527,7 +549,10 @@ mod tests {
         let future2 = concurrency_service.call(req2);
 
         // Third request should be blocked by concurrency limit
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Pending));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Pending
+        ));
 
         // Run simulation partially to start processing
         for _ in 0..10 {
@@ -537,7 +562,10 @@ mod tests {
         }
 
         // Still should be blocked since requests are still processing
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Pending));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Pending
+        ));
 
         // Complete the simulation
         for _ in 0..300 {
@@ -557,7 +585,10 @@ mod tests {
         assert_eq!(completed, 2, "Both requests should have completed");
 
         // Now should be ready again after slots are released
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
     }
 
     #[test]
@@ -580,8 +611,11 @@ mod tests {
         // Process requests one by one to test sequential behavior
         for i in 0..3 {
             // Each request should be ready
-            assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
-            
+            assert!(matches!(
+                concurrency_service.poll_ready(&mut cx),
+                Poll::Ready(Ok(()))
+            ));
+
             let req = Request::builder()
                 .method(Method::GET)
                 .uri(format!("/sequential/{i}"))
@@ -590,21 +624,30 @@ mod tests {
             let mut future = concurrency_service.call(req);
 
             // After calling, service should not be ready for next request
-            assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Pending));
-            
+            assert!(matches!(
+                concurrency_service.poll_ready(&mut cx),
+                Poll::Pending
+            ));
+
             // Run simulation to complete this request
             for _ in 0..100 {
                 if !simulation.step() {
                     break;
                 }
             }
-            
+
             // Poll the future to completion to release the slot
-            assert!(matches!(Pin::new(&mut future).poll(&mut cx), Poll::Ready(Ok(_))));
+            assert!(matches!(
+                Pin::new(&mut future).poll(&mut cx),
+                Poll::Ready(Ok(_))
+            ));
         }
 
         // After all requests are processed, service should be ready again
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
     }
 
     #[test]
@@ -612,7 +655,8 @@ mod tests {
         let mut simulation = Simulation::default();
 
         // Create shared global concurrency state with limit of 2
-        let global_state = crate::tower::limit::global_concurrency::GlobalConcurrencyLimitState::new(2);
+        let global_state =
+            crate::tower::limit::global_concurrency::GlobalConcurrencyLimitState::new(2);
 
         // Create two services sharing the same global limit
         let service1 = DesServiceBuilder::new("global-service-1".to_string())
@@ -634,9 +678,12 @@ mod tests {
         let mut cx = Context::from_waker(&waker);
 
         // Test that global limit is enforced across services
-        
+
         // Service 1 should be able to take first slot
-        assert!(matches!(global_service1.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            global_service1.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
         let req1 = Request::builder()
             .method(Method::GET)
             .uri("/global-1")
@@ -645,7 +692,10 @@ mod tests {
         let future1 = global_service1.call(req1);
 
         // Service 2 should be able to take second slot
-        assert!(matches!(global_service2.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            global_service2.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
         let req2 = Request::builder()
             .method(Method::GET)
             .uri("/global-2")
@@ -677,13 +727,19 @@ mod tests {
             }
         }
         assert_eq!(completed, 2, "Both requests should have completed");
-        
+
         // Global state should be back to 0 after futures are polled
         assert_eq!(global_state.current_concurrency(), 0);
 
         // After completion, services should be ready again (this will acquire new slots)
-        assert!(matches!(global_service1.poll_ready(&mut cx), Poll::Ready(Ok(()))));
-        assert!(matches!(global_service2.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            global_service1.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
+        assert!(matches!(
+            global_service2.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
     }
 
     #[test]
@@ -691,7 +747,8 @@ mod tests {
         let mut simulation = Simulation::default();
 
         // Create shared global state with limit of 1 to test fairness
-        let global_state = crate::tower::limit::global_concurrency::GlobalConcurrencyLimitState::new(1);
+        let global_state =
+            crate::tower::limit::global_concurrency::GlobalConcurrencyLimitState::new(1);
 
         // Create three services sharing the same global limit
         let service1 = DesServiceBuilder::new("fair-service-1".to_string())
@@ -724,7 +781,10 @@ mod tests {
         // Process requests sequentially across services
         for round in 0..3 {
             // Service 1 gets a turn
-            assert!(matches!(global_service1.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+            assert!(matches!(
+                global_service1.poll_ready(&mut cx),
+                Poll::Ready(Ok(()))
+            ));
             let req = Request::builder()
                 .method(Method::GET)
                 .uri(format!("/fair-1-{round}"))
@@ -750,7 +810,11 @@ mod tests {
         }
 
         assert_eq!(completed_requests, 3, "All requests should complete fairly");
-        assert_eq!(global_state.current_concurrency(), 0, "Global state should be clean");
+        assert_eq!(
+            global_state.current_concurrency(),
+            0,
+            "Global state should be clean"
+        );
     }
 
     #[test]
@@ -771,44 +835,72 @@ mod tests {
         let mut cx = Context::from_waker(&waker);
 
         // Test precise concurrency tracking
-        
+
         // Initially should be 0 concurrent requests
         assert_eq!(concurrency_service.current_concurrency(), 0);
         assert_eq!(concurrency_service.max_concurrency(), 3);
 
         // Acquire first slot
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
         let req1 = Request::builder()
             .method(Method::GET)
             .uri("/precise-1")
             .body(SimBody::empty())
             .unwrap();
         let future1 = concurrency_service.call(req1);
-        assert_eq!(concurrency_service.current_concurrency(), 1, "Should have 1 active request");
+        assert_eq!(
+            concurrency_service.current_concurrency(),
+            1,
+            "Should have 1 active request"
+        );
 
         // Acquire second slot
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
         let req2 = Request::builder()
             .method(Method::GET)
             .uri("/precise-2")
             .body(SimBody::empty())
             .unwrap();
         let future2 = concurrency_service.call(req2);
-        assert_eq!(concurrency_service.current_concurrency(), 2, "Should have 2 active requests");
+        assert_eq!(
+            concurrency_service.current_concurrency(),
+            2,
+            "Should have 2 active requests"
+        );
 
         // Acquire third slot
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
         let req3 = Request::builder()
             .method(Method::GET)
             .uri("/precise-3")
             .body(SimBody::empty())
             .unwrap();
         let future3 = concurrency_service.call(req3);
-        assert_eq!(concurrency_service.current_concurrency(), 3, "Should have 3 active requests (at capacity)");
+        assert_eq!(
+            concurrency_service.current_concurrency(),
+            3,
+            "Should have 3 active requests (at capacity)"
+        );
 
         // Fourth request should be blocked
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Pending));
-        assert_eq!(concurrency_service.current_concurrency(), 3, "Should still be at capacity");
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Pending
+        ));
+        assert_eq!(
+            concurrency_service.current_concurrency(),
+            3,
+            "Should still be at capacity"
+        );
 
         // Run simulation to complete first request
         for _ in 0..150 {
@@ -819,18 +911,32 @@ mod tests {
 
         // Poll first future to completion to release its slot
         let mut future1 = future1;
-        assert!(matches!(Pin::new(&mut future1).poll(&mut cx), Poll::Ready(Ok(_))));
-        assert_eq!(concurrency_service.current_concurrency(), 2, "Should have 2 active requests after completion");
+        assert!(matches!(
+            Pin::new(&mut future1).poll(&mut cx),
+            Poll::Ready(Ok(_))
+        ));
+        assert_eq!(
+            concurrency_service.current_concurrency(),
+            2,
+            "Should have 2 active requests after completion"
+        );
 
         // Now fourth request should be able to proceed
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
         let req4 = Request::builder()
             .method(Method::GET)
             .uri("/precise-4")
             .body(SimBody::empty())
             .unwrap();
         let future4 = concurrency_service.call(req4);
-        assert_eq!(concurrency_service.current_concurrency(), 3, "Should be back at capacity with new request");
+        assert_eq!(
+            concurrency_service.current_concurrency(),
+            3,
+            "Should be back at capacity with new request"
+        );
 
         // Complete remaining requests
         for _ in 0..200 {
@@ -848,10 +954,17 @@ mod tests {
             }
         }
         assert_eq!(completed, 3, "All remaining requests should complete");
-        assert_eq!(concurrency_service.current_concurrency(), 0, "Should have 0 active requests after all complete");
+        assert_eq!(
+            concurrency_service.current_concurrency(),
+            0,
+            "Should have 0 active requests after all complete"
+        );
 
         // Service should be ready for new requests
-        assert!(matches!(concurrency_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            concurrency_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
     }
 
     #[test]
@@ -868,7 +981,7 @@ mod tests {
 
         // Use Layer trait for composable middleware
         use tower::ServiceBuilder;
-        
+
         let mut service = ServiceBuilder::new()
             // Add rate limiting layer (5 requests per second, burst of 10)
             .layer(DesRateLimitLayer::new(5.0, 10, scheduler))
@@ -881,7 +994,7 @@ mod tests {
 
         // Test that the composed service works
         assert!(matches!(service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
-        
+
         let req = Request::builder()
             .method(Method::GET)
             .uri("/composed")
@@ -925,17 +1038,18 @@ mod tests {
 
         // Wrap with timeout layer (very long timeout - 1000ms)
         use tower::Layer;
-        let mut timeout_service = DesTimeoutLayer::new(
-            Duration::from_millis(1000),
-            scheduler,
-        ).layer(base_service);
+        let mut timeout_service =
+            DesTimeoutLayer::new(Duration::from_millis(1000), scheduler).layer(base_service);
 
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
 
         // Service should be ready
-        assert!(matches!(timeout_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
-        
+        assert!(matches!(
+            timeout_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
+
         let req = Request::builder()
             .method(Method::GET)
             .uri("/timeout-success")
@@ -945,7 +1059,10 @@ mod tests {
 
         // Poll once to start the request and register waker
         let result1 = Pin::new(&mut future).poll(&mut cx);
-        assert!(matches!(result1, Poll::Pending), "Request should be pending initially");
+        assert!(
+            matches!(result1, Poll::Pending),
+            "Request should be pending initially"
+        );
 
         // Run simulation to complete the request
         // The timeout is scheduled for 1000ms, request completes in ~2ms
@@ -974,7 +1091,7 @@ mod tests {
                         break;
                     }
                 }
-                
+
                 let result2 = Pin::new(&mut future).poll(&mut cx);
                 match result2 {
                     Poll::Ready(Ok(_)) => {
@@ -1005,17 +1122,18 @@ mod tests {
 
         // Wrap with timeout layer (short timeout - 50ms)
         use tower::Layer;
-        let mut timeout_service = DesTimeoutLayer::new(
-            Duration::from_millis(50),
-            scheduler,
-        ).layer(base_service);
+        let mut timeout_service =
+            DesTimeoutLayer::new(Duration::from_millis(50), scheduler).layer(base_service);
 
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
 
         // Service should be ready
-        assert!(matches!(timeout_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
-        
+        assert!(matches!(
+            timeout_service.poll_ready(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
+
         let req = Request::builder()
             .method(Method::GET)
             .uri("/timeout-test")
@@ -1025,22 +1143,26 @@ mod tests {
 
         // Poll once to start the request and register waker
         let result1 = Pin::new(&mut future).poll(&mut cx);
-        assert!(matches!(result1, Poll::Pending), "Request should be pending initially");
+        assert!(
+            matches!(result1, Poll::Pending),
+            "Request should be pending initially"
+        );
 
         // Run simulation to completion - timeout should fire before request completes
         let mut timeout_detected = false;
-        
+
         // Run simulation until timeout or request completion
         for _ in 0..1000 {
             // Run one simulation step
             if !simulation.step() {
                 break;
             }
-            
+
             // Check current simulation time
             let current_time = simulation.time();
-            let should_poll = current_time >= des_core::SimTime::from_duration(Duration::from_millis(50));
-            
+            let should_poll =
+                current_time >= des_core::SimTime::from_duration(Duration::from_millis(50));
+
             // Poll future if we've passed timeout threshold
             if should_poll {
                 let result = Pin::new(&mut future).poll(&mut cx);
@@ -1097,25 +1219,26 @@ mod tests {
 
         // Wrap with timeout layer
         use tower::Layer;
-        let mut timeout_service = DesTimeoutLayer::new(
-            Duration::from_millis(100),
-            scheduler,
-        ).layer(base_service);
+        let mut timeout_service =
+            DesTimeoutLayer::new(Duration::from_millis(100), scheduler).layer(base_service);
 
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
 
         // Create and drop multiple futures to test cleanup
         for _ in 0..5 {
-            assert!(matches!(timeout_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
-            
+            assert!(matches!(
+                timeout_service.poll_ready(&mut cx),
+                Poll::Ready(Ok(()))
+            ));
+
             let req = Request::builder()
                 .method(Method::GET)
                 .uri("/cleanup-test")
                 .body(SimBody::empty())
                 .unwrap();
             let future = timeout_service.call(req);
-            
+
             // Drop the future immediately to test PinnedDrop cleanup
             drop(future);
         }
@@ -1152,15 +1275,18 @@ mod tests {
 
         // First 3 requests should be allowed and fail
         for i in 0..3 {
-            assert!(matches!(circuit_breaker_service.poll_ready(&mut cx), Poll::Ready(Ok(()))));
-            
+            assert!(matches!(
+                circuit_breaker_service.poll_ready(&mut cx),
+                Poll::Ready(Ok(()))
+            ));
+
             let req = Request::builder()
                 .method(Method::GET)
                 .uri(format!("/fail/{i}"))
                 .body(SimBody::empty())
                 .unwrap();
             let mut future = circuit_breaker_service.call(req);
-            
+
             // Poll the future to completion
             match Pin::new(&mut future).poll(&mut cx) {
                 Poll::Ready(Err(ServiceError::Internal(_))) => {

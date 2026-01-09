@@ -15,15 +15,13 @@
 //!
 //! Run with: cargo run --package des-components --example end_to_end_workload_example
 
-use des_components::{
-    ClientEvent, Server, ServerEvent, FifoQueue,
-};
+use des_components::{ClientEvent, FifoQueue, Server, ServerEvent};
 use des_core::{
-    Component, Key, Scheduler, SimTime, Simulation, Execute, Executor,
-    RequestAttempt, RequestAttemptId, RequestId, Response,
+    Component, Execute, Executor, Key, RequestAttempt, RequestAttemptId, RequestId, Response,
+    Scheduler, SimTime, Simulation,
 };
 use plotters::prelude::*;
-use rand_distr::{Exp, Distribution};
+use rand_distr::{Distribution, Exp};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -46,9 +44,9 @@ pub struct WorkloadConfig {
 impl Default for WorkloadConfig {
     fn default() -> Self {
         Self {
-            t1_duration: Duration::from_secs(300),  // 300 seconds low load
+            t1_duration: Duration::from_secs(300), // 300 seconds low load
             t2_duration: Duration::from_secs(60),  // 20 seconds high load
-            t3_duration: Duration::from_secs(300),  // 30 seconds low load
+            t3_duration: Duration::from_secs(300), // 30 seconds low load
             low_rps: 6.0,
             high_rps: 20.0,
         }
@@ -128,7 +126,8 @@ impl SimulationMetrics {
     pub fn record_request_sent(&mut self, phase: &str) {
         self.requests_sent += 1;
         self.time_series.requests_sent_since_last += 1;
-        self.phase_metrics.entry(phase.to_string())
+        self.phase_metrics
+            .entry(phase.to_string())
             .or_default()
             .requests_sent += 1;
     }
@@ -192,7 +191,8 @@ impl SimulationMetrics {
 
         // Calculate rates
         let avg_latency_ms = if self.time_series.latency_count_since_last > 0 {
-            self.time_series.latency_sum_since_last as f64 / self.time_series.latency_count_since_last as f64
+            self.time_series.latency_sum_since_last as f64
+                / self.time_series.latency_count_since_last as f64
         } else {
             0.0
         };
@@ -256,15 +256,14 @@ impl SimulationMetrics {
         if self.latency_samples.is_empty() {
             return None;
         }
-        
+
         let mut sorted_samples = self.latency_samples.clone();
         sorted_samples.sort_unstable();
-        
+
         let index = ((percentile / 100.0) * (sorted_samples.len() - 1) as f64).round() as usize;
         sorted_samples.get(index).copied()
     }
 }
-
 
 /// Variable workload client that changes request rate over time
 pub struct VariableWorkloadClient {
@@ -291,7 +290,7 @@ impl VariableWorkloadClient {
     ) -> Self {
         let initial_rps = workload_config.low_rps;
         let exp_dist = Exp::new(initial_rps).unwrap();
-        
+
         Self {
             name,
             server_key,
@@ -310,7 +309,7 @@ impl VariableWorkloadClient {
     /// Check current time and update phase if needed
     fn update_phase_if_needed(&mut self, current_time: SimTime) {
         let elapsed = current_time.duration_since(self.simulation_start_time);
-        
+
         let new_phase_info = if elapsed < self.workload_config.t1_duration {
             // Phase 1: Low RPS
             ("phase1", self.workload_config.low_rps)
@@ -321,14 +320,16 @@ impl VariableWorkloadClient {
             // Phase 3: Low RPS again
             ("phase3", self.workload_config.low_rps)
         };
-        
+
         let (new_phase, new_rps) = new_phase_info;
-        
+
         // Only update if phase has changed
         if self.current_phase != new_phase {
-            println!("=== PHASE TRANSITION: {} -> {} ({} RPS) at {:?} ===", 
-                     self.current_phase, new_phase, new_rps, current_time);
-            
+            println!(
+                "=== PHASE TRANSITION: {} -> {} ({} RPS) at {:?} ===",
+                self.current_phase, new_phase, new_rps, current_time
+            );
+
             self.current_phase = new_phase.to_string();
             self.current_rps = new_rps;
             self.exp_dist = Exp::new(new_rps).unwrap();
@@ -339,14 +340,17 @@ impl VariableWorkloadClient {
         self.current_rps = new_rps;
         self.current_phase = phase.clone();
         self.exp_dist = Exp::new(new_rps).unwrap();
-        println!("[{}] Updated to {} RPS ({}) at {:?}", self.name, new_rps, phase, current_time);
+        println!(
+            "[{}] Updated to {} RPS ({}) at {:?}",
+            self.name, new_rps, phase, current_time
+        );
     }
 
     fn schedule_next_request(&mut self, scheduler: &mut Scheduler, self_key: Key<ClientEvent>) {
         // Sample inter-arrival time from exponential distribution
         let inter_arrival = self.exp_dist.sample(&mut self.rng);
         let delay = Duration::from_secs_f64(inter_arrival);
-        
+
         scheduler.schedule(
             SimTime::from_duration(delay),
             self_key,
@@ -357,27 +361,32 @@ impl VariableWorkloadClient {
     fn send_request(&mut self, scheduler: &mut Scheduler, self_key: Key<ClientEvent>) {
         let request_id = RequestId(self.next_request_id);
         let attempt_id = RequestAttemptId(self.next_request_id);
-        
+
         // Record request start time for latency calculation
-        self.request_start_times.insert(request_id, scheduler.time());
-        
+        self.request_start_times
+            .insert(request_id, scheduler.time());
+
         // Create request attempt
         let attempt = RequestAttempt::new(
             attempt_id,
             request_id,
             1, // First attempt (NoRetryPolicy)
             scheduler.time(),
-            format!("Request {} from {} ({})", self.next_request_id, self.name, self.current_phase).into_bytes(),
+            format!(
+                "Request {} from {} ({})",
+                self.next_request_id, self.name, self.current_phase
+            )
+            .into_bytes(),
         );
-        
+
         self.next_request_id += 1;
-        
+
         // Record metrics
         {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.record_request_sent(&self.current_phase);
         }
-        
+
         // Send to server
         scheduler.schedule_now(
             self.server_key,
@@ -386,10 +395,15 @@ impl VariableWorkloadClient {
                 client_id: self_key,
             },
         );
-        
-        println!("[{}] Sent request {} at {:?} ({})", 
-                 self.name, request_id.0, scheduler.time(), self.current_phase);
-        
+
+        println!(
+            "[{}] Sent request {} at {:?} ({})",
+            self.name,
+            request_id.0,
+            scheduler.time(),
+            self.current_phase
+        );
+
         // Schedule next request
         self.schedule_next_request(scheduler, self_key);
     }
@@ -399,15 +413,21 @@ impl VariableWorkloadClient {
         if let Some(start_time) = self.request_start_times.remove(&response.request_id) {
             let latency = scheduler.time().duration_since(start_time);
             let latency_ms = latency.as_millis() as u64;
-            
+
             // Record metrics
             {
                 let mut metrics = self.metrics.lock().unwrap();
                 metrics.record_response(latency_ms, response.is_success(), &self.current_phase);
             }
-            
-            println!("[{}] Received response for request {} at {:?} (latency: {}ms, success: {})", 
-                     self.name, response.request_id.0, scheduler.time(), latency_ms, response.is_success());
+
+            println!(
+                "[{}] Received response for request {} at {:?} (latency: {}ms, success: {})",
+                self.name,
+                response.request_id.0,
+                scheduler.time(),
+                latency_ms,
+                response.is_success()
+            );
         }
     }
 }
@@ -423,7 +443,7 @@ impl Component for VariableWorkloadClient {
     ) {
         // Always check and update phase based on current time
         self.update_phase_if_needed(scheduler.time());
-        
+
         match event {
             ClientEvent::SendRequest => {
                 self.send_request(scheduler, self_id);
@@ -437,7 +457,10 @@ impl Component for VariableWorkloadClient {
             }
             ClientEvent::RetryRequest { .. } => {
                 // NoRetryPolicy should never trigger retries
-                println!("[{}] Warning: Retry requested but NoRetryPolicy is active", self.name);
+                println!(
+                    "[{}] Warning: Retry requested but NoRetryPolicy is active",
+                    self.name
+                );
             }
         }
     }
@@ -511,7 +534,12 @@ pub struct ExponentialServiceServer {
 }
 
 impl ExponentialServiceServer {
-    pub fn new(name: String, capacity: usize, mean_service_time: Duration, metrics: Arc<Mutex<SimulationMetrics>>) -> Self {
+    pub fn new(
+        name: String,
+        capacity: usize,
+        mean_service_time: Duration,
+        metrics: Arc<Mutex<SimulationMetrics>>,
+    ) -> Self {
         let mean_ms = mean_service_time.as_millis() as f64;
         let rate = 1.0 / mean_ms; // Rate parameter for exponential distribution
 
@@ -549,10 +577,18 @@ impl Component for ExponentialServiceServer {
         scheduler: &mut Scheduler,
     ) {
         match event {
-            ServerEvent::ProcessRequest { attempt, client_id: _ } => {
+            ServerEvent::ProcessRequest {
+                attempt,
+                client_id: _,
+            } => {
                 // Check if request will be rejected
-                let will_reject = self.inner_server.active_threads >= self.inner_server.thread_capacity
-                    && self.inner_server.queue.as_ref().map_or(false, |q| q.is_full());
+                let will_reject = self.inner_server.active_threads
+                    >= self.inner_server.thread_capacity
+                    && self
+                        .inner_server
+                        .queue
+                        .as_ref()
+                        .map_or(false, |q| q.is_full());
 
                 if will_reject {
                     // Record drop in metrics
@@ -569,8 +605,10 @@ impl Component for ExponentialServiceServer {
                     metrics.update_queue_depth(self.inner_server.queue_depth());
                 }
 
-                println!("[{}] Processing request {} with exponential service time distribution",
-                         self.inner_server.name, attempt.id.0);
+                println!(
+                    "[{}] Processing request {} with exponential service time distribution",
+                    self.inner_server.name, attempt.id.0
+                );
             }
             _ => {
                 // Delegate other events to inner server
@@ -588,18 +626,28 @@ impl Component for ExponentialServiceServer {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== End-to-End Workload Example ===\n");
-    
+
     let workload_config = WorkloadConfig::default();
-    let total_duration = workload_config.t1_duration + workload_config.t2_duration + workload_config.t3_duration;
-    
+    let total_duration =
+        workload_config.t1_duration + workload_config.t2_duration + workload_config.t3_duration;
+
     println!("Workload Configuration:");
-    println!("  Phase 1: {} RPS for {:?}", workload_config.low_rps, workload_config.t1_duration);
-    println!("  Phase 2: {} RPS for {:?}", workload_config.high_rps, workload_config.t2_duration);
-    println!("  Phase 3: {} RPS for {:?}", workload_config.low_rps, workload_config.t3_duration);
+    println!(
+        "  Phase 1: {} RPS for {:?}",
+        workload_config.low_rps, workload_config.t1_duration
+    );
+    println!(
+        "  Phase 2: {} RPS for {:?}",
+        workload_config.high_rps, workload_config.t2_duration
+    );
+    println!(
+        "  Phase 3: {} RPS for {:?}",
+        workload_config.low_rps, workload_config.t3_duration
+    );
     println!("  Total duration: {total_duration:?}\n");
-    
+
     run_simulation(workload_config)?;
-    
+
     Ok(())
 }
 
@@ -614,16 +662,13 @@ fn run_simulation(workload_config: WorkloadConfig) -> Result<(), Box<dyn std::er
         1,
         mean_service_time,
         metrics.clone(),
-    ).with_queue(Box::new(FifoQueue::bounded(50))); // Queue for overflow
+    )
+    .with_queue(Box::new(FifoQueue::bounded(50))); // Queue for overflow
 
     let server_key = simulation.add_component(server);
 
     // Create metrics sampler (sample every 1 second)
-    let sampler = MetricsSampler::new(
-        metrics.clone(),
-        server_key,
-        Duration::from_secs(1),
-    );
+    let sampler = MetricsSampler::new(metrics.clone(), server_key, Duration::from_secs(1));
     let sampler_key = simulation.add_component(sampler);
 
     // Start sampler
@@ -646,15 +691,14 @@ fn run_simulation(workload_config: WorkloadConfig) -> Result<(), Box<dyn std::er
     let client_key = simulation.add_component(client);
 
     // Start the client
-    simulation.schedule(
-        simulation_start_time,
-        client_key,
-        ClientEvent::SendRequest,
-    );
+    simulation.schedule(simulation_start_time, client_key, ClientEvent::SendRequest);
 
     // Run simulation
-    let total_duration = workload_config.t1_duration + workload_config.t2_duration + workload_config.t3_duration;
-    let executor = Executor::timed(SimTime::from_duration(total_duration + Duration::from_secs(10))); // Extra time for completion
+    let total_duration =
+        workload_config.t1_duration + workload_config.t2_duration + workload_config.t3_duration;
+    let executor = Executor::timed(SimTime::from_duration(
+        total_duration + Duration::from_secs(10),
+    )); // Extra time for completion
     executor.execute(&mut simulation);
 
     // Get final metrics
@@ -664,7 +708,9 @@ fn run_simulation(workload_config: WorkloadConfig) -> Result<(), Box<dyn std::er
     };
 
     // Get server metrics
-    let final_server = simulation.remove_component::<ServerEvent, ExponentialServiceServer>(server_key).unwrap();
+    let final_server = simulation
+        .remove_component::<ServerEvent, ExponentialServiceServer>(server_key)
+        .unwrap();
 
     // Print results
     print_results(&final_metrics, &final_server.inner_server, total_duration);
@@ -680,20 +726,16 @@ fn run_simulation(workload_config: WorkloadConfig) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-fn print_results(
-    metrics: &SimulationMetrics,
-    server: &Server,
-    total_duration: Duration,
-) {
+fn print_results(metrics: &SimulationMetrics, server: &Server, total_duration: Duration) {
     println!("\n=== SIMULATION RESULTS ===");
-    
+
     // Overall metrics
     println!("\n📊 Overall Metrics:");
     println!("  Requests sent: {}", metrics.requests_sent);
     println!("  Responses received: {}", metrics.responses_received);
     println!("  Success rate: {:.2}%", metrics.success_rate() * 100.0);
     println!("  Average latency: {:.2}ms", metrics.average_latency_ms());
-    
+
     if let Some(p50) = metrics.percentile_latency(50.0) {
         println!("  P50 latency: {p50}ms");
     }
@@ -703,23 +745,26 @@ fn print_results(
     if let Some(p99) = metrics.percentile_latency(99.0) {
         println!("  P99 latency: {p99}ms");
     }
-    
+
     if let Some(min) = metrics.min_latency_ms {
         println!("  Min latency: {min}ms");
     }
     if let Some(max) = metrics.max_latency_ms {
         println!("  Max latency: {max}ms");
     }
-    
-    println!("  Throughput: {:.2} RPS", metrics.throughput_rps(total_duration));
-    
+
+    println!(
+        "  Throughput: {:.2} RPS",
+        metrics.throughput_rps(total_duration)
+    );
+
     // Server metrics
     println!("\n🖥️  Server Metrics:");
     println!("  Requests processed: {}", server.requests_processed);
     println!("  Requests rejected: {}", server.requests_rejected);
     println!("  Final utilization: {:.2}%", server.utilization() * 100.0);
     println!("  Final queue depth: {}", server.queue_depth());
-    
+
     // Phase-specific metrics
     println!("\n📈 Phase-specific Metrics:");
     for (phase, phase_metrics) in &metrics.phase_metrics {
@@ -729,43 +774,61 @@ fn print_results(
             } else {
                 0.0
             };
-            
+
             let phase_success_rate = if phase_metrics.responses_received > 0 {
-                phase_metrics.successful_responses as f64 / phase_metrics.responses_received as f64 * 100.0
+                phase_metrics.successful_responses as f64 / phase_metrics.responses_received as f64
+                    * 100.0
             } else {
                 0.0
             };
-            
-            println!("  {}: {} sent, {} received, {:.2}ms avg latency, {:.1}% success",
-                     phase, phase_metrics.requests_sent, phase_metrics.responses_received,
-                     phase_avg_latency, phase_success_rate);
+
+            println!(
+                "  {}: {} sent, {} received, {:.2}ms avg latency, {:.1}% success",
+                phase,
+                phase_metrics.requests_sent,
+                phase_metrics.responses_received,
+                phase_avg_latency,
+                phase_success_rate
+            );
         }
     }
-    
+
     // Analysis
     println!("\n🔍 Analysis:");
     if metrics.successful_responses > 0 {
         let avg_latency = metrics.average_latency_ms();
         if avg_latency > 200.0 {
-            println!("  ⚠️  High average latency detected ({}ms) - server may be overloaded", avg_latency as u64);
+            println!(
+                "  ⚠️  High average latency detected ({}ms) - server may be overloaded",
+                avg_latency as u64
+            );
         } else if avg_latency > 150.0 {
-            println!("  ⚡ Moderate latency ({}ms) - system under stress", avg_latency as u64);
+            println!(
+                "  ⚡ Moderate latency ({}ms) - system under stress",
+                avg_latency as u64
+            );
         } else {
             println!("  ✅ Good latency performance ({}ms)", avg_latency as u64);
         }
     }
-    
+
     let success_rate = metrics.success_rate();
     if success_rate < 0.95 {
-        println!("  ⚠️  Low success rate ({:.1}%) - consider adding throttling or admission control", success_rate * 100.0);
+        println!(
+            "  ⚠️  Low success rate ({:.1}%) - consider adding throttling or admission control",
+            success_rate * 100.0
+        );
     } else {
         println!("  ✅ Good success rate ({:.1}%)", success_rate * 100.0);
     }
-    
+
     if server.requests_rejected > 0 {
-        println!("  📋 {} requests were rejected - queue and capacity limits reached", server.requests_rejected);
+        println!(
+            "  📋 {} requests were rejected - queue and capacity limits reached",
+            server.requests_rejected
+        );
     }
-    
+
     println!("\n💡 Next Steps:");
     println!("  - Add throttling middleware to limit request rate");
     println!("  - Implement admission control policies");
@@ -839,7 +902,11 @@ fn generate_visualizations(
         let root = BitMapBackend::new(path, (1200, 600)).into_drawing_area();
         root.fill(&WHITE)?;
 
-        let max_rate = samples.iter().map(|s| s.request_rate).fold(0.0f64, f64::max) * 1.2;
+        let max_rate = samples
+            .iter()
+            .map(|s| s.request_rate)
+            .fold(0.0f64, f64::max)
+            * 1.2;
 
         let mut chart = ChartBuilder::on(&root)
             .caption("Request Rate Over Time", ("sans-serif", 40))
@@ -1004,7 +1071,8 @@ fn generate_html_report(
     let drop_rate_img = fs::read("target/workload_viz/drop_rate_over_time.png")?;
     let drop_rate_b64 = base64_encode(&drop_rate_img);
 
-    let html = format!(r#"<!DOCTYPE html>
+    let html = format!(
+        r#"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -1321,7 +1389,8 @@ fn generate_html_report(
         high_rps = config.high_rps,
         t3_duration = config.t3_duration.as_secs_f64(),
         low_rps2 = config.low_rps,
-        total_duration = (config.t1_duration + config.t2_duration + config.t3_duration).as_secs_f64(),
+        total_duration =
+            (config.t1_duration + config.t2_duration + config.t3_duration).as_secs_f64(),
         latency_b64 = latency_b64,
         request_rate_b64 = request_rate_b64,
         queue_depth_b64 = queue_depth_b64,
@@ -1352,8 +1421,16 @@ fn base64_encode(data: &[u8]) -> String {
 
         result.push(CHARS[b1] as char);
         result.push(CHARS[b2] as char);
-        result.push(if chunk.len() > 1 { CHARS[b3] as char } else { '=' });
-        result.push(if chunk.len() > 2 { CHARS[b4] as char } else { '=' });
+        result.push(if chunk.len() > 1 {
+            CHARS[b3] as char
+        } else {
+            '='
+        });
+        result.push(if chunk.len() > 2 {
+            CHARS[b4] as char
+        } else {
+            '='
+        });
     }
 
     result
@@ -1403,13 +1480,13 @@ mod tests {
     #[test]
     fn test_simulation_metrics() {
         let mut metrics = SimulationMetrics::default();
-        
+
         // Record some requests and responses
         metrics.record_request_sent("phase1");
         metrics.record_request_sent("phase1");
         metrics.record_response(100, true, "phase1");
         metrics.record_response(150, false, "phase1");
-        
+
         assert_eq!(metrics.requests_sent, 2);
         assert_eq!(metrics.responses_received, 2);
         assert_eq!(metrics.successful_responses, 1);
@@ -1427,7 +1504,7 @@ mod tests {
             Duration::from_millis(100),
             metrics,
         );
-        
+
         assert_eq!(server.inner_server.name, "test-server");
         assert_eq!(server.inner_server.thread_capacity, 5);
         assert_eq!(server.base_service_time_ms, 100.0);

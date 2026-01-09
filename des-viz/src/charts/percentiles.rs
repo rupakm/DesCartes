@@ -48,8 +48,7 @@ pub fn create_percentile_chart_with_config(
     }
 
     let output_path = output_path.as_ref();
-    let root = BitMapBackend::new(output_path, (config.width, config.height))
-        .into_drawing_area();
+    let root = BitMapBackend::new(output_path, (config.width, config.height)).into_drawing_area();
 
     root.fill(&WHITE)
         .map_err(|e| VizError::RenderingError(format!("Failed to fill background: {e}")))?;
@@ -66,11 +65,7 @@ pub fn create_percentile_chart_with_config(
             format!("{}:{}", name, format_labels(labels))
         };
 
-        let data = vec![
-            (0, stats.median),
-            (1, stats.p95),
-            (2, stats.p99),
-        ];
+        let data = vec![(0, stats.median), (1, stats.p95), (2, stats.p99)];
 
         series_data.push((label, data));
     }
@@ -113,7 +108,9 @@ pub fn create_percentile_chart_with_config(
             ))
             .map_err(|e| VizError::RenderingError(format!("Failed to draw line series: {e}")))?
             .label(truncate_label(label, 25))
-            .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color.stroke_width(3)));
+            .legend(move |(x, y)| {
+                PathElement::new(vec![(x, y), (x + 20, y)], color.stroke_width(3))
+            });
 
         // Draw points
         chart
