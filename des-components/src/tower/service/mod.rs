@@ -150,7 +150,7 @@ pub struct TowerSchedulerHandle {
     pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
     /// Request ID generator
     next_request_id: Arc<AtomicU64>,
-    /// Attempt ID generator
+    /// Attempt ID generator (global, unique across all requests)
     next_attempt_id: Arc<AtomicU64>,
     /// Current load tracking
     current_load: Arc<AtomicUsize>,
@@ -195,7 +195,7 @@ impl TowerSchedulerHandle {
     /// - Inside scheduler context: uses `defer_wake` to schedule at end of current step
     /// - Outside scheduler context: uses the scheduler handle to schedule directly
     ///
-    /// In both cases, the server response will be routed through the pre-registered
+    /// The server response will be routed through the pre-registered
     /// `ResponseRouter` component, ensuring correct timing.
     pub fn schedule_request(
         &self,
@@ -230,6 +230,7 @@ impl TowerSchedulerHandle {
                 },
             );
         }
+        
         Ok(())
     }
 
@@ -237,6 +238,37 @@ impl TowerSchedulerHandle {
     pub fn register_waker(&self, waker: Waker) {
         let mut wakers = self.wakers.lock().unwrap();
         wakers.push(waker);
+    }
+
+    /// Create a RequestAttempt from an HTTP request, handling attempt numbering correctly
+    pub fn create_request_attempt(&self, req: &Request<SimBody>) -> RequestAttempt {
+        // Check if this request has retry metadata
+        if let Some(retry_meta) = crate::tower::retry::metadata::get_retry_metadata(req) {
+            // This is a retry - use the metadata to create the attempt
+            let attempt_id = RequestAttemptId(self.next_attempt_id.fetch_add(1, Ordering::Relaxed));
+            let payload = serialize_http_request(req);
+
+            RequestAttempt::new(
+                attempt_id,
+                retry_meta.original_request_id,
+                retry_meta.attempt_number,
+                SimTime::from_duration(Duration::ZERO), // Will be set by scheduler
+                payload,
+            )
+        } else {
+            // This is a new request (first attempt)
+            let request_id = RequestId(self.next_request_id.fetch_add(1, Ordering::Relaxed));
+            let attempt_id = RequestAttemptId(self.next_attempt_id.fetch_add(1, Ordering::Relaxed));
+            let payload = serialize_http_request(req);
+
+            RequestAttempt::new(
+                attempt_id,
+                request_id,
+                1, // First attempt
+                SimTime::from_duration(Duration::ZERO), // Will be set by scheduler
+                payload,
+            )
+        }
     }
 }
 
@@ -684,17 +716,5 @@ fn http_to_request_attempt(
     handle: &TowerSchedulerHandle,
     req: Request<SimBody>,
 ) -> RequestAttempt {
-    let request_id = handle.next_request_id.fetch_add(1, Ordering::Relaxed);
-    let attempt_id = handle.next_attempt_id.fetch_add(1, Ordering::Relaxed);
-
-    // Serialize the HTTP request into payload
-    let payload = serialize_http_request(&req);
-
-    RequestAttempt::new(
-        RequestAttemptId(attempt_id),
-        RequestId(request_id),
-        1, // First attempt
-        SimTime::from_duration(Duration::ZERO), // Will be set by scheduler
-        payload,
-    )
+    handle.create_request_attempt(&req)
 }

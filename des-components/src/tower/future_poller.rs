@@ -1,41 +1,8 @@
-//! Future Poller for asynchronous Tower service response handling
+//! Future Poller for asynchronous Tower service response handling.
 //!
 //! This module provides a mechanism for polling Tower service futures without blocking,
 //! enabling open-loop client patterns where requests are sent at a rate independent
 //! of response times.
-//!
-//! # Problem
-//!
-//! Tower services return futures from `call()`. In a discrete event simulation:
-//! - If you `.await` the future, you block until the response arrives
-//! - If you don't `.await`, the future never completes
-//! - Open-loop clients need to send requests without waiting for responses
-//!
-//! # Design Overview
-//!
-//! The implementation uses three key techniques to integrate async futures with DES:
-//!
-//! ## 1. Shared State Pattern
-//!
-//! The `FuturePoller` component uses `Arc<Mutex<FuturePollerState>>` to share state
-//! between the component (which is moved into the simulation) and the `FuturePollerHandle`
-//! (which can be cloned and used to spawn futures from anywhere). This solves the
-//! ownership problem where the component is moved into the simulation but we still
-//! need to spawn futures on it.
-//!
-//! ## 2. DES-Aware Waker
-//!
-//! When a future is polled and returns `Poll::Pending`, it registers a waker. The
-//! waker is implemented using `RawWakerVTable` and uses des-core's `defer_wake()`
-//! function to schedule a `PollFuture` event when the future becomes ready. This
-//! ensures futures are polled exactly when they're ready, with no busy-waiting.
-//!
-//! ## 3. Automatic Wake Processing via des-core
-//!
-//! The waker uses des-core's deferred wake mechanism (`defer_wake()`), which stores
-//! pending wakes in the scheduler. These are automatically processed at the end of
-//! each simulation step by `Simulation::step()`. This eliminates the need for manual
-//! wake processing and avoids deadlocks entirely.
 //!
 //! # Usage
 //!
@@ -56,34 +23,22 @@
 //! // Set the key on the handle (enables waker scheduling)
 //! handle.set_key(poller_key);
 //!
-//! // Schedule Initialize event to trigger initial polling of spawned futures
+//! // Schedule Initialize event to trigger initial polling
 //! simulation.schedule(SimTime::zero(), poller_key, FuturePollerEvent::Initialize);
 //!
-//! // Spawn futures using the handle
-//! // handle.spawn(future, |result| { ... });
-//!
-//! // Run simulation - deferred wakes are processed automatically!
+//! // Run simulation
 //! Executor::timed(SimTime::from_millis(100)).execute(&mut simulation);
 //! # Ok(())
 //! # }
 //! ```
-//!
-//! # Implementation Notes
-//!
-//! - Futures are stored as `Pin<Box<dyn Future>>` for type erasure
-//! - Completion callbacks are `FnOnce` closures stored in `Option<Box<...>>`
-//! - The component automatically sets its own key on the first event it processes
-//! - Uses des-core's `defer_wake()` which integrates with the scheduler's deferred wake system
-//! - The `Initialize` event polls all pending futures, handling the case where futures
-//!   are spawned before the simulation starts running
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use std::task::{Context, Poll};
 
-use des_core::{Component, Key, Scheduler, defer_wake, in_scheduler_context};
+use des_core::{Component, Key, Scheduler, create_des_waker, defer_wake};
 use http::Response;
 
 use super::{ServiceError, SimBody};
@@ -93,7 +48,7 @@ use super::{ServiceError, SimBody};
 pub struct FutureId(pub u64);
 
 /// Events for the FuturePoller component
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FuturePollerEvent {
     /// Poll a specific future that may be ready
     PollFuture { id: FutureId },
@@ -218,8 +173,10 @@ impl FuturePollerHandle {
             },
         );
 
-        // Schedule initial poll using deferred wake
-        Self::schedule_poll(&state, id);
+        // Schedule initial poll using defer_wake if we have a key and are in scheduler context
+        if let Some(key) = state.self_key {
+            defer_wake(key, FuturePollerEvent::PollFuture { id });
+        }
 
         id
     }
@@ -250,29 +207,15 @@ impl FuturePollerHandle {
         !self.state.lock().unwrap().futures.is_empty()
     }
 
-    /// Schedule a poll event for a future using des-core's defer_wake
-    fn schedule_poll(state: &FuturePollerState, id: FutureId) {
+    /// Create a DES-aware waker for a future using the unified waker utility.
+    fn create_waker(state: &FuturePollerState, future_id: FutureId) -> std::task::Waker {
         if let Some(key) = state.self_key {
-            // Use des-core's defer_wake mechanism - this works both inside and outside
-            // of scheduler context. If inside, it defers to end of step. If outside,
-            // it's a no-op (the initial poll will happen when the component processes
-            // its first event).
-            if in_scheduler_context() {
-                defer_wake(key, FuturePollerEvent::PollFuture { id });
-            }
-            // If not in scheduler context, the poll will be triggered when the
-            // component is first accessed or when an event is scheduled externally
+            create_des_waker(key, FuturePollerEvent::PollFuture { id: future_id })
+        } else {
+            // Fallback: create a no-op waker if key not set yet
+            // This shouldn't happen in normal usage
+            std::task::Waker::noop().clone()
         }
-    }
-
-    /// Create a DES-aware waker for a future
-    fn create_waker(state: &FuturePollerState, future_id: FutureId) -> Waker {
-        let data = Box::new(DesWakerData {
-            poller_key: state.self_key,
-            future_id,
-        });
-        let raw_waker = RawWaker::new(Box::into_raw(data) as *const (), &DES_WAKER_VTABLE);
-        unsafe { Waker::from_raw(raw_waker) }
     }
 
     /// Poll a specific future
@@ -377,59 +320,6 @@ impl Component for FuturePoller {
     }
 }
 
-// ============================================================================
-// DES-aware Waker Implementation
-// ============================================================================
-
-/// Data stored in each DES waker
-struct DesWakerData {
-    poller_key: Option<Key<FuturePollerEvent>>,
-    future_id: FutureId,
-}
-
-/// VTable for the DES waker
-static DES_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
-    des_waker_clone,
-    des_waker_wake,
-    des_waker_wake_by_ref,
-    des_waker_drop,
-);
-
-unsafe fn des_waker_clone(data: *const ()) -> RawWaker {
-    let waker_data = &*(data as *const DesWakerData);
-    let new_data = Box::new(DesWakerData {
-        poller_key: waker_data.poller_key,
-        future_id: waker_data.future_id,
-    });
-    RawWaker::new(Box::into_raw(new_data) as *const (), &DES_WAKER_VTABLE)
-}
-
-unsafe fn des_waker_wake(data: *const ()) {
-    let waker_data = Box::from_raw(data as *mut DesWakerData);
-    schedule_poll_event(&waker_data);
-}
-
-unsafe fn des_waker_wake_by_ref(data: *const ()) {
-    let waker_data = &*(data as *const DesWakerData);
-    schedule_poll_event(waker_data);
-}
-
-unsafe fn des_waker_drop(data: *const ()) {
-    drop(Box::from_raw(data as *mut DesWakerData));
-}
-
-/// Schedule a poll event for a future via des-core's defer_wake mechanism
-fn schedule_poll_event(data: &DesWakerData) {
-    let Some(poller_key) = data.poller_key else {
-        return;
-    };
-
-    // Use des-core's defer_wake - this automatically handles the case where
-    // we're inside scheduler context (defers to end of step) or outside
-    // (currently a no-op, but the event will be scheduled when appropriate)
-    defer_wake(poller_key, FuturePollerEvent::PollFuture { id: data.future_id });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,9 +392,9 @@ mod tests {
 
     #[test]
     fn test_future_poller_handle_waker_mechanism() {
-        // Test that the waker correctly schedules poll events via defer_wake
+        // Test that the waker correctly schedules poll events.
         // This test verifies that when a future becomes ready during simulation,
-        // the waker properly schedules a poll event via defer_wake.
+        // the waker properly schedules a poll event using the unified waker.
         
         let mut simulation = Simulation::default();
 

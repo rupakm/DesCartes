@@ -58,6 +58,7 @@ pub mod scheduler;
 pub mod time;
 pub mod types;
 pub mod task;
+pub mod waker;
 
 pub mod formal;
 
@@ -77,6 +78,7 @@ pub use logging::{init_simulation_logging, init_simulation_logging_with_level, i
 pub use request::{Request, RequestAttempt, RequestStatus, AttemptStatus, Response, ResponseStatus, RequestId, RequestAttemptId};
 pub use scheduler::{EventEntry, Scheduler, SchedulerHandle, ClockRef, defer_wake, in_scheduler_context, current_time};
 pub use task::{Task, TaskId, TaskHandle, ClosureTask, TimeoutTask, RetryTask, PeriodicTask};
+pub use waker::create_des_waker;
 
 
 

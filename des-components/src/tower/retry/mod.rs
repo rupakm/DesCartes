@@ -53,17 +53,100 @@
 //! # }
 //! ```
 
-use des_core::{SimTime, SchedulerHandle};
+use des_core::{SimTime, SchedulerHandle, RequestAttemptId, RequestId};
 use des_core::task::TimeoutTask;
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use tower::{Layer, Service};
 use tower::retry::Policy;
+use http;
 
-use super::ServiceError;
+use super::{ServiceError, SimBody};
+
+
+/// Retry-specific metadata that tracks attempt information
+#[derive(Debug, Clone)]
+pub struct RetryMetadata {
+    /// The original request ID (stays the same across retries)
+    pub original_request_id: RequestId,
+    /// Current attempt number (1, 2, 3, ...)
+    pub attempt_number: usize,
+    /// Total number of attempts made so far
+    pub total_attempts: usize,
+}
+
+impl RetryMetadata {
+    /// Create new retry metadata for the first attempt
+    pub fn new(request_id: RequestId) -> Self {
+        Self {
+            original_request_id: request_id,
+            attempt_number: 1,
+            total_attempts: 1,
+        }
+    }
+
+    /// Create metadata for a retry attempt
+    pub fn next_attempt(&self) -> Self {
+        Self {
+            original_request_id: self.original_request_id,
+            attempt_number: self.attempt_number + 1,
+            total_attempts: self.total_attempts + 1,
+        }
+    }
+}
+
+/// Utility functions for working with request metadata
+pub mod metadata {
+    use super::*;
+    use http::Request;
+
+    /// Add retry metadata to a request
+    pub fn add_retry_metadata(request: &mut Request<SimBody>, retry_meta: RetryMetadata) {
+        request.extensions_mut().insert(retry_meta);
+    }
+
+    /// Get retry metadata from a request
+    pub fn get_retry_metadata(request: &Request<SimBody>) -> Option<&RetryMetadata> {
+        request.extensions().get::<RetryMetadata>()
+    }
+
+    /// Create a retry request with updated metadata
+    pub fn create_retry_request(
+        original_request: &Request<SimBody>,
+        retry_meta: RetryMetadata,
+    ) -> Request<SimBody> {
+        let mut new_request = Request::builder()
+            .method(original_request.method())
+            .uri(original_request.uri())
+            .version(original_request.version());
+
+        // Copy headers
+        for (name, value) in original_request.headers() {
+            new_request = new_request.header(name, value);
+        }
+
+        // Copy body (clone the SimBody)
+        let body = original_request.body().clone();
+        let mut request = new_request.body(body).unwrap();
+
+        // Add retry metadata to the new request
+        add_retry_metadata(&mut request, retry_meta);
+
+        request
+    }
+}
+
+// Global attempt ID generator for retry layers
+static NEXT_RETRY_ATTEMPT_ID: AtomicU64 = AtomicU64::new(1000000); // Start high to avoid conflicts
+
+/// Generate a new unique attempt ID for retries
+fn next_retry_attempt_id() -> RequestAttemptId {
+    RequestAttemptId(NEXT_RETRY_ATTEMPT_ID.fetch_add(1, Ordering::Relaxed))
+}
 
 // Re-export Tower's retry components for convenience
 pub use tower::retry::backoff::ExponentialBackoff;
@@ -132,48 +215,71 @@ enum RetryState<F> {
 
 /// Future for DES-aware retry operations using Tower policies
 #[pin_project]
-pub struct DesRetryFuture<P, S, Request>
+pub struct DesRetryFuture<P, S>
 where
-    P: Policy<Request, S::Response, S::Error> + Clone,
-    S: Service<Request> + Clone,
-    Request: Clone,
+    P: Policy<http::Request<SimBody>, S::Response, S::Error> + Clone,
+    S: Service<http::Request<SimBody>> + Clone,
 {
     policy: P,
     service: S,
-    request: Request,
+    original_request: http::Request<SimBody>,
+    current_request: http::Request<SimBody>,
     state: RetryState<S::Future>,
     scheduler: SchedulerHandle,
+    /// Track retry metadata across attempts
+    retry_metadata: Option<RetryMetadata>,
 }
 
-impl<P, S, Request> DesRetryFuture<P, S, Request>
+impl<P, S> DesRetryFuture<P, S>
 where
-    P: Policy<Request, S::Response, S::Error> + Clone,
-    S: Service<Request> + Clone,
-    Request: Clone,
+    P: Policy<http::Request<SimBody>, S::Response, S::Error> + Clone,
+    S: Service<http::Request<SimBody>> + Clone,
 {
     fn new(
         policy: P,
         service: S,
-        request: Request,
+        request: http::Request<SimBody>,
         future: S::Future,
         scheduler: SchedulerHandle,
     ) -> Self {
+        // Check if this request already has retry metadata (nested retries)
+        let retry_metadata = metadata::get_retry_metadata(&request).cloned();
+        
         Self {
             policy,
             service,
-            request,
+            original_request: request.clone(),
+            current_request: request,
             state: RetryState::Calling(future),
             scheduler,
+            retry_metadata,
         }
+    }
+
+    /// Create a retry request with updated metadata
+    fn create_retry_request(&mut self) -> http::Request<SimBody> {
+        let retry_meta = if let Some(existing_meta) = &self.retry_metadata {
+            // This is a nested retry - increment the existing metadata
+            existing_meta.next_attempt()
+        } else {
+            // This is the first retry - we need to create metadata
+            // Extract the original request ID from the first attempt
+            // For now, we'll generate a new request ID - in a full implementation,
+            // we'd need to coordinate with the service layer
+            let original_request_id = RequestId(next_retry_attempt_id().0);
+            RetryMetadata::new(original_request_id).next_attempt()
+        };
+
+        self.retry_metadata = Some(retry_meta.clone());
+        metadata::create_retry_request(&self.original_request, retry_meta)
     }
 }
 
-impl<P, S, Request> Future for DesRetryFuture<P, S, Request>
+impl<P, S> Future for DesRetryFuture<P, S>
 where
-    P: Policy<Request, S::Response, S::Error> + Clone,
-    S: Service<Request, Error = ServiceError> + Clone,
+    P: Policy<http::Request<SimBody>, S::Response, S::Error> + Clone,
+    S: Service<http::Request<SimBody>, Error = ServiceError> + Clone,
     S::Future: Unpin,
-    Request: Clone,
 {
     type Output = Result<S::Response, S::Error>;
 
@@ -200,12 +306,11 @@ where
                     // Check if policy allows retry
                     let error_clone = error.clone();
                     let mut result = Err(error_clone);
-                    let should_retry = this.policy.retry(this.request, &mut result);
+                    let should_retry = this.policy.retry(this.current_request, &mut result);
                     
                     match should_retry {
                         Some(_delay_future) => {
-                            // Policy says we should retry - for now we'll use a fixed delay
-                            // In a full implementation, we'd poll the delay_future
+                            // Policy says we should retry
                             *this.state = RetryState::Retrying {
                                 waker: None,
                                 delay_scheduled: false,
@@ -229,7 +334,7 @@ where
                         });
                         
                         // Use a fixed delay for now - in a real implementation,
-                        // we'd get this from the backoff
+                        // we'd get this from the backoff policy
                         this.scheduler.schedule_task(
                             SimTime::from_duration(Duration::from_millis(100)),
                             timeout_task,
@@ -239,8 +344,14 @@ where
                         *waker = Some(cx.waker().clone());
                         return Poll::Pending;
                     } else {
-                        // Delay has completed, make the retry call
-                        let retry_future = this.service.call(this.request.clone());
+                        // Delay has completed, need to create retry request
+                        // Create retry request with updated metadata
+                        let retry_request = self.as_mut().create_retry_request();
+                        
+                        // Get a new projection
+                        let this = self.as_mut().project();
+                        let retry_future = this.service.call(retry_request.clone());
+                        *this.current_request = retry_request;
                         *this.state = RetryState::Calling(retry_future);
                         continue;
                     }
@@ -253,22 +364,21 @@ where
     }
 }
 
-impl<P, S, Request> Service<Request> for DesRetry<P, S>
+impl<P, S> Service<http::Request<SimBody>> for DesRetry<P, S>
 where
-    P: Policy<Request, S::Response, S::Error> + Clone,
-    S: Service<Request, Error = ServiceError> + Clone,
+    P: Policy<http::Request<SimBody>, S::Response, S::Error> + Clone,
+    S: Service<http::Request<SimBody>, Error = ServiceError> + Clone,
     S::Future: Unpin,
-    Request: Clone,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = DesRetryFuture<P, S, Request>;
+    type Future = DesRetryFuture<P, S>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request) -> Self::Future {
+    fn call(&mut self, request: http::Request<SimBody>) -> Self::Future {
         let future = self.inner.call(request.clone());
         DesRetryFuture::new(
             self.policy.clone(),
@@ -297,13 +407,11 @@ impl DesRetryPolicy {
     }
 }
 
-impl<Request, Response> Policy<Request, Response, ServiceError> for DesRetryPolicy
-where
-    Request: Clone,
+impl Policy<http::Request<SimBody>, http::Response<SimBody>, ServiceError> for DesRetryPolicy
 {
     type Future = std::future::Ready<()>;
 
-    fn retry(&mut self, _req: &mut Request, result: &mut Result<Response, ServiceError>) -> Option<Self::Future> {
+    fn retry(&mut self, _req: &mut http::Request<SimBody>, result: &mut Result<http::Response<SimBody>, ServiceError>) -> Option<Self::Future> {
         if self.current_attempts >= self.max_retries {
             return None;
         }
@@ -332,7 +440,7 @@ where
         }
     }
 
-    fn clone_request(&mut self, req: &Request) -> Option<Request> {
+    fn clone_request(&mut self, req: &http::Request<SimBody>) -> Option<http::Request<SimBody>> {
         Some(req.clone())
     }
 }
@@ -350,7 +458,6 @@ pub fn exponential_backoff_layer(
 mod tests {
     use super::*;
     use crate::DesServiceBuilder;
-    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_des_retry_policy_creation() {
@@ -358,15 +465,23 @@ mod tests {
         
         // Test that policy allows retries for retryable errors
         let retryable_error = ServiceError::Timeout { duration: Duration::from_millis(100) };
-        let mut result: Result<(), ServiceError> = Err(retryable_error);
-        let mut request = ();
+        let mut result: Result<http::Response<SimBody>, ServiceError> = Err(retryable_error);
+        let mut request = http::Request::builder()
+            .method("GET")
+            .uri("/test")
+            .body(SimBody::empty())
+            .unwrap();
         let should_retry = policy.retry(&mut request, &mut result);
         assert!(should_retry.is_some());
         
         // Test that policy rejects non-retryable errors
         let non_retryable_error = ServiceError::Cancelled;
-        let mut result: Result<(), ServiceError> = Err(non_retryable_error);
-        let mut request = ();
+        let mut result: Result<http::Response<SimBody>, ServiceError> = Err(non_retryable_error);
+        let mut request = http::Request::builder()
+            .method("GET")
+            .uri("/test")
+            .body(SimBody::empty())
+            .unwrap();
         let should_retry = policy.retry(&mut request, &mut result);
         assert!(should_retry.is_none());
     }

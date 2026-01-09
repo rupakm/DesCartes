@@ -1133,7 +1133,7 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_failure_threshold() {
-        let mut simulation = Simulation::default();
+        let simulation = Simulation::default();
         let scheduler = simulation.scheduler_handle();
 
         // Create a service that always fails
