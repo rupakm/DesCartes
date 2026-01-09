@@ -45,7 +45,7 @@ fn timeout_task_example() {
     });
     
     // Schedule the task to execute after 100ms
-    sim.scheduler.schedule_task(
+    sim.schedule_task(
         SimTime::from_duration(Duration::from_millis(100)),
         timeout_task
     );
@@ -76,7 +76,7 @@ fn periodic_task_example() {
     );
     
     // Schedule the task to start immediately
-    sim.scheduler.schedule_task(SimTime::zero(), periodic_task);
+    sim.schedule_task(SimTime::zero(), periodic_task);
     
     // Run simulation for 200ms (enough for 3 executions)
     Executor::timed(SimTime::from_duration(Duration::from_millis(200))).execute(&mut sim);
@@ -98,7 +98,7 @@ fn closure_task_example() {
     });
     
     // Schedule for immediate execution
-    sim.scheduler.schedule_task(SimTime::zero(), closure_task);
+    sim.schedule_task(SimTime::zero(), closure_task);
     
     // Run one simulation step
     sim.step();
@@ -143,9 +143,9 @@ fn task_coordination_example() {
     });
     
     // Schedule all tasks
-    sim.scheduler.schedule_task(SimTime::zero(), incrementer);
-    sim.scheduler.schedule_task(SimTime::from_duration(Duration::from_millis(50)), resetter);
-    sim.scheduler.schedule_task(SimTime::from_duration(Duration::from_millis(100)), reporter);
+    sim.schedule_task(SimTime::zero(), incrementer);
+    sim.schedule_task(SimTime::from_duration(Duration::from_millis(50)), resetter);
+    sim.schedule_task(SimTime::from_duration(Duration::from_millis(100)), reporter);
     
     // Run simulation
     Executor::timed(SimTime::from_duration(Duration::from_millis(150))).execute(&mut sim);
@@ -184,7 +184,7 @@ fn client_with_tasks_example() {
     );
     
     // Schedule the periodic task
-    sim.scheduler.schedule_task(SimTime::zero(), request_task);
+    sim.schedule_task(SimTime::zero(), request_task);
     
     // Add a monitoring task that reports progress
     let monitor_task = PeriodicTask::with_count(
@@ -194,7 +194,7 @@ fn client_with_tasks_example() {
         SimTime::from_duration(Duration::from_millis(100)),
         3
     );
-    sim.scheduler.schedule_task(SimTime::zero(), monitor_task);
+    sim.schedule_task(SimTime::zero(), monitor_task);
     
     // Run simulation
     Executor::timed(SimTime::from_duration(Duration::from_millis(350))).execute(&mut sim);

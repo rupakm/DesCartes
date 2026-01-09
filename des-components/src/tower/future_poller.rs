@@ -541,7 +541,7 @@ mod tests {
         // Schedule a task that will send the response during simulation
         // This ensures the waker is triggered while in scheduler context
         let tx_cell = std::cell::RefCell::new(Some(tx));
-        simulation.scheduler.schedule_closure(SimTime::from_millis(5), move |_scheduler| {
+        simulation.schedule_closure(SimTime::from_millis(5), move |_scheduler| {
             if let Some(tx) = tx_cell.borrow_mut().take() {
                 tx.send("Delayed!".to_string()).unwrap();
             }

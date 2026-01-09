@@ -994,7 +994,7 @@ pub fn run_mm1_with_retry(config: MmkConfig) -> MmkResults {
         },
         SimTime::from_duration(Duration::from_secs_f64(1.0 / config.lambda)),
     );
-    simulation.scheduler.schedule_task(SimTime::from_duration(Duration::from_millis(10)), task);
+    simulation.schedule_task(SimTime::from_duration(Duration::from_millis(10)), task);
 
     // Run simulation
     let executor = Executor::timed(SimTime::from_duration(config.duration));
@@ -1122,7 +1122,7 @@ pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
         },
         SimTime::from_duration(Duration::from_secs_f64(1.0 / config.lambda)),
     );
-    simulation.scheduler.schedule_task(SimTime::from_duration(Duration::from_millis(10)), task);
+    simulation.schedule_task(SimTime::from_duration(Duration::from_millis(10)), task);
 
     // Run simulation
     let executor = Executor::timed(SimTime::from_duration(config.duration));

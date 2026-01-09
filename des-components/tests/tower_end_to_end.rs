@@ -142,15 +142,17 @@ fn test_simple_tower_service() {
     println!("🚀 Simple Tower Service Test (with Deferred Scheduling Fix)");
     println!("============================================================");
 
-    let simulation = Simulation::default();
+    let mut simulation = Simulation::default();
 
-    // Create a simple Tower service - keep the Arc alive
-    let simulation_arc = Arc::new(Mutex::new(simulation));
+    // Create a simple Tower service first (before wrapping in Arc)
     let service = DesServiceBuilder::new("simple-server".to_string())
         .thread_capacity(1)
         .service_time(Duration::from_millis(10))
-        .build(simulation_arc.clone())
+        .build(&mut simulation)
         .expect("Failed to build service");
+
+    // Now wrap in Arc for shared access
+    let simulation_arc = Arc::new(Mutex::new(simulation));
 
     println!("📋 Test Setup:");
     println!("   - Tower service: 1 thread, 10ms processing time");
@@ -217,7 +219,7 @@ fn test_simple_tower_service() {
     println!("   Completed futures: {}", handle.completed_count());
     {
         let sim = simulation_arc.lock().unwrap();
-        println!("   Simulation time: {}ms", sim.scheduler.time().as_duration().as_millis());
+        println!("   Simulation time: {}ms", sim.time().as_duration().as_millis());
     }
 
     // Verify that we completed at least one request
@@ -366,15 +368,17 @@ fn test_periodic_tower_service() {
     println!("🚀 Periodic Tower Service Test (Open-Loop Client Pattern)");
     println!("=========================================================");
 
-    let simulation = Simulation::default();
+    let mut simulation = Simulation::default();
 
     // Create a Tower service with higher capacity to handle multiple requests
-    let simulation_arc = Arc::new(Mutex::new(simulation));
     let service = DesServiceBuilder::new("periodic-server".to_string())
         .thread_capacity(3)  // Allow 3 concurrent requests
         .service_time(Duration::from_millis(30))  // 30ms processing time
-        .build(simulation_arc.clone())
+        .build(&mut simulation)
         .expect("Failed to build service");
+
+    // Now wrap in Arc for shared access
+    let simulation_arc = Arc::new(Mutex::new(simulation));
 
     // Calculate test parameters
     let interval = Duration::from_millis(20);  // Send every 20ms
@@ -448,7 +452,7 @@ fn test_periodic_tower_service() {
     println!("   Completed futures: {}", handle.completed_count());
     {
         let sim = simulation_arc.lock().unwrap();
-        println!("   Simulation time: {}ms", sim.scheduler.time().as_duration().as_millis());
+        println!("   Simulation time: {}ms", sim.time().as_duration().as_millis());
     }
 
     // Verify that we sent and received a reasonable number of requests
@@ -639,15 +643,17 @@ fn test_retry_on_timeout() {
     println!("🚀 Retry on Timeout Test (Client-Side Timeout and Retry)");
     println!("========================================================");
 
-    let simulation = Simulation::default();
+    let mut simulation = Simulation::default();
 
     // Create a server that will be overloaded to cause timeouts
-    let simulation_arc = Arc::new(Mutex::new(simulation));
     let service = DesServiceBuilder::new("limited-server".to_string())
         .thread_capacity(1)  // Only 1 thread - will cause blocking
         .service_time(Duration::from_millis(300))  // 300ms processing time
-        .build(simulation_arc.clone())
+        .build(&mut simulation)
         .expect("Failed to build service");
+
+    // Now wrap in Arc for shared access
+    let simulation_arc = Arc::new(Mutex::new(simulation));
 
     // Client timeout and retry configuration
     let timeout_duration = Duration::from_millis(280);  // 150ms timeout (shorter than service time)
@@ -733,7 +739,7 @@ fn test_retry_on_timeout() {
     println!("   Completed futures: {}", handle.completed_count());
     {
         let sim = simulation_arc.lock().unwrap();
-        println!("   Simulation time: {}ms", sim.scheduler.time().as_duration().as_millis());
+        println!("   Simulation time: {}ms", sim.time().as_duration().as_millis());
     }
 
     // The test should show timeout and retry behavior
@@ -1069,15 +1075,17 @@ fn test_two_tier_app_db_service() {
     println!("====================================================");
     println!();
 
-    let simulation = Simulation::default();
-    let simulation_arc = Arc::new(Mutex::new(simulation));
+    let mut simulation = Simulation::default();
 
     // Create DB service with exponential service time (mean 100ms)
     let db_service = DesServiceBuilder::new("db-server".to_string())
         .thread_capacity(10)
         .exponential_service_time(Duration::from_millis(100))
-        .build(simulation_arc.clone())
+        .build(&mut simulation)
         .expect("Failed to build DB service");
+
+    // Now wrap in Arc for shared access
+    let simulation_arc = Arc::new(Mutex::new(simulation));
 
     // Test parameters
     let request_interval = Duration::from_millis(500);
@@ -1190,7 +1198,7 @@ fn test_two_tier_app_db_service() {
 
     {
         let sim = simulation_arc.lock().unwrap();
-        println!("   Final simulation time: {}ms", sim.scheduler.time().as_duration().as_millis());
+        println!("   Final simulation time: {}ms", sim.time().as_duration().as_millis());
     }
 
     // Assertions

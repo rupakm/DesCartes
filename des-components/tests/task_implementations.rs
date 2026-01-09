@@ -47,7 +47,7 @@ fn test_periodic_task_behavior() {
         5, // Should stop after 5 executions
     );
     
-    sim.scheduler.schedule_task(SimTime::zero(), task);
+    sim.schedule_task(SimTime::zero(), task);
     
     // Run simulation for enough time to see all requests
     Executor::timed(SimTime::from_duration(Duration::from_millis(300))).execute(&mut sim);
@@ -77,7 +77,7 @@ fn test_periodic_task_automatic_termination() {
         3, // Should execute exactly 3 times
     );
     
-    sim.scheduler.schedule_task(SimTime::zero(), task);
+    sim.schedule_task(SimTime::zero(), task);
     
     // Run simulation for longer than needed
     Executor::timed(SimTime::from_duration(Duration::from_millis(200))).execute(&mut sim);
@@ -104,7 +104,7 @@ fn test_task_cleanup_edge_cases() {
         fired_clone.store(true, Ordering::Relaxed);
     });
     
-    sim.scheduler.schedule_task(SimTime::zero(), immediate_task);
+    sim.schedule_task(SimTime::zero(), immediate_task);
     
     // Run one step
     assert!(sim.step(), "Simulation should have events to process");
@@ -119,7 +119,7 @@ fn test_task_cleanup_edge_cases() {
         cleanup_clone.store(true, Ordering::Relaxed);
     });
     
-    sim.scheduler.schedule_task(SimTime::from_duration(Duration::from_millis(10)), closure_task);
+    sim.schedule_task(SimTime::from_duration(Duration::from_millis(10)), closure_task);
     
     // Run simulation
     Executor::timed(SimTime::from_duration(Duration::from_millis(20))).execute(&mut sim);
@@ -135,7 +135,7 @@ fn test_task_cleanup_edge_cases() {
             count_clone.fetch_add(1, Ordering::Relaxed);
         });
         
-        sim.scheduler.schedule_task(
+        sim.schedule_task(
             SimTime::from_duration(Duration::from_millis(i * 10)),
             timeout_task
         );
@@ -170,7 +170,7 @@ fn test_task_timing_precision() {
             times.push((i, scheduler.time()));
         });
         
-        sim.scheduler.schedule_task(SimTime::from_duration(delay), task);
+        sim.schedule_task(SimTime::from_duration(delay), task);
     }
     
     // Run simulation
@@ -207,7 +207,7 @@ fn test_task_error_handling() {
             count_clone.fetch_add(1, Ordering::Relaxed);
         });
         
-        sim.scheduler.schedule_task(
+        sim.schedule_task(
             SimTime::from_duration(Duration::from_millis(i * 10)),
             task
         );
@@ -240,7 +240,7 @@ fn test_mixed_task_integration() {
         SimTime::from_duration(Duration::from_millis(30)),
         3,
     );
-    sim.scheduler.schedule_task(SimTime::zero(), periodic_task);
+    sim.schedule_task(SimTime::zero(), periodic_task);
     
     // 2. TimeoutTask that fires once
     let results_clone = results.clone();
@@ -248,7 +248,7 @@ fn test_mixed_task_integration() {
         let mut r = results_clone.lock().unwrap();
         r.push(format!("Timeout at {:?}", scheduler.time()));
     });
-    sim.scheduler.schedule_task(SimTime::from_duration(Duration::from_millis(45)), timeout_task);
+    sim.schedule_task(SimTime::from_duration(Duration::from_millis(45)), timeout_task);
     
     // 3. ClosureTask that executes immediately
     let results_clone = results.clone();
@@ -256,7 +256,7 @@ fn test_mixed_task_integration() {
         let mut r = results_clone.lock().unwrap();
         r.push(format!("Closure at {:?}", scheduler.time()));
     });
-    sim.scheduler.schedule_task(SimTime::zero(), closure_task);
+    sim.schedule_task(SimTime::zero(), closure_task);
     
     // Run simulation
     Executor::timed(SimTime::from_duration(Duration::from_millis(120))).execute(&mut sim);

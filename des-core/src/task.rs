@@ -365,8 +365,8 @@ mod tests {
             42
         });
 
-        let mut sim = Simulation::default();
-        let result = task.execute(&mut sim.scheduler);
+        let mut scheduler = Scheduler::default();
+        let result = task.execute(&mut scheduler);
         
         assert_eq!(result, 42);
         assert!(*executed.lock().unwrap());
@@ -381,8 +381,8 @@ mod tests {
             *executed_clone.lock().unwrap() = true;
         });
 
-        let mut sim = Simulation::default();
-        task.execute(&mut sim.scheduler);
+        let mut scheduler = Scheduler::default();
+        task.execute(&mut scheduler);
         
         assert!(*executed.lock().unwrap());
     }
@@ -400,16 +400,16 @@ mod tests {
             3,
         );
 
-        let mut sim = Simulation::default();
+        let mut scheduler = Scheduler::default();
         
         // Execute the task - it should schedule itself for the next execution
-        task.execute(&mut sim.scheduler);
+        task.execute(&mut scheduler);
         
         // The first execution should have happened
         assert_eq!(*counter.lock().unwrap(), 1);
         
         // There should be a scheduled event for the next execution
-        assert!(sim.scheduler.peek().is_some());
+        assert!(scheduler.peek().is_some());
     }
 
     #[test]
@@ -431,15 +431,15 @@ mod tests {
             SimTime::from_duration(Duration::from_millis(100)),
         );
 
-        let mut sim = Simulation::default();
-        let result = task.execute(&mut sim.scheduler);
+        let mut scheduler = Scheduler::default();
+        let result = task.execute(&mut scheduler);
         
         // First attempt should fail
         assert!(result.is_err());
         assert_eq!(*attempt_count.lock().unwrap(), 1);
         
         // Should have scheduled a retry
-        assert!(sim.scheduler.peek().is_some());
+        assert!(scheduler.peek().is_some());
     }
 
     #[test]
@@ -457,8 +457,8 @@ mod tests {
             SimTime::from_duration(Duration::from_millis(100)),
         );
 
-        let mut sim = Simulation::default();
-        let result: Result<i32, &'static str> = task.execute(&mut sim.scheduler);
+        let mut scheduler = Scheduler::default();
+        let result: Result<i32, &'static str> = task.execute(&mut scheduler);
         
         // Should fail after first attempt
         assert!(result.is_err());

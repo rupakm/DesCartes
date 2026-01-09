@@ -68,7 +68,7 @@ impl Execute for Executor {
         info!("Starting simulation execution");
         run_with(sim, self.end_condition, |_| {});
         info!(
-            final_time = ?sim.scheduler.time(),
+            final_time = ?sim.time(),
             "Simulation execution completed"
         );
     }
@@ -91,7 +91,7 @@ where
         info!("Starting simulation execution with side effects");
         run_with(sim, self.end_condition, self.side_effect);
         info!(
-            final_time = ?sim.scheduler.time(),
+            final_time = ?sim.time(),
             "Simulation execution with side effects completed"
         );
     }
@@ -102,7 +102,7 @@ where
     F: Fn(&Simulation),
 {
     debug!(?end_condition, "Starting simulation run");
-    let start_time = sim.scheduler.time();
+    let start_time = sim.time();
     
     let step_fn = |sim: &mut Simulation| {
         let result = sim.step();
@@ -127,7 +127,7 @@ where
         },
     }
     
-    let final_time = sim.scheduler.time();
+    let final_time = sim.time();
     let time_elapsed = final_time - start_time;
     
     debug!(
@@ -148,7 +148,7 @@ where
         if steps % 10000 == 0 {
             trace!(
                 steps,
-                current_time = ?sim.scheduler.time(),
+                current_time = ?sim.time(),
                 "Execution progress"
             );
         }
@@ -161,19 +161,19 @@ where
     F: Fn(&mut Simulation) -> bool,
 {
     let mut steps = 0;
-    while sim.scheduler.peek().is_some_and(|e| e.time() <= time) {
+    while sim.peek_next_event_time().is_some_and(|t| t <= time) {
         step(sim);
         steps += 1;
         if steps % 10000 == 0 {
             trace!(
                 steps,
-                current_time = ?sim.scheduler.time(),
+                current_time = ?sim.time(),
                 time_limit = ?time,
                 "Execution progress"
             );
         }
     }
-    debug!(steps, final_time = ?sim.scheduler.time(), "Executed until time limit");
+    debug!(steps, final_time = ?sim.time(), "Executed until time limit");
 }
 
 fn execute_steps<F>(sim: &mut Simulation, steps: usize, step: F)
@@ -195,7 +195,7 @@ where
             trace!(
                 executed_steps = executed,
                 total_steps = steps,
-                current_time = ?sim.scheduler.time(),
+                current_time = ?sim.time(),
                 "Execution progress"
             );
         }
@@ -203,7 +203,7 @@ where
     debug!(
         requested_steps = steps,
         executed_steps = executed,
-        final_time = ?sim.scheduler.time(),
+        final_time = ?sim.time(),
         "Step-limited execution completed"
     );
 }
@@ -299,7 +299,7 @@ mod test {
         Executor::timed(SimTime::from_duration(Duration::from_secs(6))).execute(&mut sim);
         let c: TestComponent = sim.remove_component(component).unwrap();
         assert_eq!(c.counter, 4);
-        assert_eq!(sim.scheduler.clock().time(), SimTime::from_duration(Duration::from_secs(6)));
+        assert_eq!(sim.clock().time(), SimTime::from_duration(Duration::from_secs(6)));
     }
 
     #[test]
@@ -312,6 +312,6 @@ mod test {
         Executor::timed(SimTime::from_duration(Duration::from_secs(5))).execute(&mut sim);
         let c: TestComponent = sim.remove_component(component).unwrap();
         assert_eq!(c.counter, 3);
-        assert_eq!(sim.scheduler.clock().time(), SimTime::from_duration(Duration::from_secs(4)));
+        assert_eq!(sim.clock().time(), SimTime::from_duration(Duration::from_secs(4)));
     }
 }

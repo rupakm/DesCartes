@@ -1006,7 +1006,7 @@ mod tests {
             .side_effect(move |simulation| {
                 let mut count = step_count_clone.borrow_mut();
                 *count += 1;
-                println!("--- Step {}: Time = {} ---", *count, simulation.scheduler.time());
+                println!("--- Step {}: Time = {} ---", *count, simulation.time());
             })
             .execute(&mut sim);
 
@@ -1065,7 +1065,7 @@ mod tests {
             .side_effect(move |simulation| {
                 let mut count = step_count_clone.borrow_mut();
                 *count += 1;
-                println!("Step {}: Time = {:?}", *count, simulation.scheduler.time());
+                println!("Step {}: Time = {:?}", *count, simulation.time());
                 
                 // Print current events
                 let current_events = events_for_logging.borrow();
@@ -1201,7 +1201,7 @@ mod tests {
                 let mut count = step_count_clone.borrow_mut();
                 *count += 1;
                 
-                println!("--- Step {}: Time = {} ---", *count, simulation.scheduler.time());
+                println!("--- Step {}: Time = {} ---", *count, simulation.time());
                 
                 // Just print step info without accessing shared state during execution
                 // This avoids borrow conflicts with async tasks

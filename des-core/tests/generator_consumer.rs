@@ -143,7 +143,7 @@ fn test_generator_consumer_pattern() {
     // Verify results
     let final_log = log.lock().unwrap();
     
-    println!("Final simulation time: {:?}", sim.scheduler.time());
+    println!("Final simulation time: {:?}", sim.time());
     println!("Generator events: {} (expected 5)", final_log.generator_events.len());
     println!("Consumer hellos: {} (expected 10)", final_log.consumer_hellos.len());
 
@@ -230,7 +230,7 @@ fn test_generator_consumer_interleaved() {
     let final_log = log.lock().unwrap();
     
     println!("Final Results:");
-    println!("  Simulation time: {:?}", sim.scheduler.time());
+    println!("  Simulation time: {:?}", sim.time());
     println!("  Generator events: {} (expected 3)", final_log.generator_events.len());
     println!("  Consumer hellos: {} (expected 6)", final_log.consumer_hellos.len());
 

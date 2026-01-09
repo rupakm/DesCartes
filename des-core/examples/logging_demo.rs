@@ -220,12 +220,12 @@ fn main() {
     info!(
         server_requests_processed = final_server.requests_processed,
         client_requests_sent = final_client.requests_sent,
-        final_time = ?sim.scheduler.time(),
+        final_time = ?sim.time(),
         "Simulation completed"
     );
     
     println!("\n=== Simulation Summary ===");
     println!("Server '{}' processed {} requests", final_server.name, final_server.requests_processed);
     println!("Client '{}' sent {} requests", final_client.name, final_client.requests_sent);
-    println!("Final simulation time: {:?}", sim.scheduler.time());
+    println!("Final simulation time: {:?}", sim.time());
 }

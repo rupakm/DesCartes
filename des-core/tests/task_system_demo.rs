@@ -116,7 +116,7 @@ fn test_task_component_async_integration() {
     
     // Schedule standalone tasks
     let log_clone3 = execution_log.clone();
-    sim.scheduler.schedule_closure(
+    sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(20)),
         move |_scheduler| {
             log_clone3.lock().unwrap().push("Task: Standalone task executed".to_string());
@@ -126,7 +126,7 @@ fn test_task_component_async_integration() {
     // Schedule periodic task
     let log_clone4 = execution_log.clone();
     let mut counter = 0;
-    sim.scheduler.schedule_closure(
+    sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(40)),
         move |scheduler| {
             counter += 1;
@@ -203,7 +203,7 @@ fn test_task_cancellation_demo() {
     
     // Schedule a task that will be cancelled
     let executed_clone = executed.clone();
-    let handle1 = sim.scheduler.schedule_closure(
+    let handle1 = sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(100)),
         move |_scheduler| {
             executed_clone.lock().unwrap().push("Task 1: Should not execute".to_string());
@@ -212,7 +212,7 @@ fn test_task_cancellation_demo() {
     
     // Schedule a task that will execute
     let executed_clone2 = executed.clone();
-    let _handle2 = sim.scheduler.schedule_closure(
+    let _handle2 = sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(50)),
         move |_scheduler| {
             executed_clone2.lock().unwrap().push("Task 2: Should execute".to_string());
@@ -220,7 +220,7 @@ fn test_task_cancellation_demo() {
     );
     
     // Schedule a task to cancel the first task
-    sim.scheduler.schedule_closure(
+    sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(25)),
         move |scheduler| {
             let cancelled = scheduler.cancel_task(handle1);
@@ -250,7 +250,7 @@ fn test_task_return_values_demo() {
     let mut sim = Simulation::default();
     
     // Schedule tasks with different return types
-    let handle1 = sim.scheduler.schedule_closure(
+    let handle1 = sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(50)),
         |_scheduler| -> i32 {
             println!("Task 1: Computing result...");
@@ -258,7 +258,7 @@ fn test_task_return_values_demo() {
         }
     );
     
-    let handle2 = sim.scheduler.schedule_closure(
+    let handle2 = sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(75)),
         |_scheduler| -> String {
             println!("Task 2: Computing result...");
@@ -266,7 +266,7 @@ fn test_task_return_values_demo() {
         }
     );
     
-    let handle3 = sim.scheduler.schedule_closure(
+    let handle3 = sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(100)),
         |_scheduler| -> Vec<i32> {
             println!("Task 3: Computing result...");
@@ -278,9 +278,9 @@ fn test_task_return_values_demo() {
     Executor::timed(SimTime::from_duration(Duration::from_millis(150))).execute(&mut sim);
     
     // Retrieve results
-    let result1 = sim.scheduler.get_task_result(handle1);
-    let result2 = sim.scheduler.get_task_result(handle2);
-    let result3 = sim.scheduler.get_task_result(handle3);
+    let result1 = sim.get_task_result(handle1);
+    let result2 = sim.get_task_result(handle2);
+    let result3 = sim.get_task_result(handle3);
     
     println!("Task 1 result: {result1:?}");
     println!("Task 2 result: {result2:?}");

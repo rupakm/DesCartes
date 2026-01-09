@@ -12,7 +12,7 @@ fn test_task_execution_in_simulation() {
     let executed_clone = executed.clone();
     
     // Schedule a task to execute after 100ms
-    let _handle: TaskHandle<()> = sim.scheduler.schedule_closure(
+    let _handle: TaskHandle<()> = sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(100)),
         move |_scheduler| {
             *executed_clone.lock().unwrap() = true;
@@ -34,7 +34,7 @@ fn test_timeout_task_in_simulation() {
     let timeout_clone = timeout_fired.clone();
     
     // Schedule a timeout
-    let _handle = sim.scheduler.timeout(
+    let _handle = sim.timeout(
         SimTime::from_duration(Duration::from_millis(50)),
         move |_scheduler| {
             *timeout_clone.lock().unwrap() = true;
@@ -56,7 +56,7 @@ fn test_task_cancellation() {
     let executed_clone = executed.clone();
     
     // Schedule a task
-    let handle = sim.scheduler.schedule_closure(
+    let handle = sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(100)),
         move |_scheduler| {
             *executed_clone.lock().unwrap() = true;
@@ -64,7 +64,7 @@ fn test_task_cancellation() {
     );
     
     // Cancel the task before it executes
-    let cancelled = sim.scheduler.cancel_task(handle);
+    let cancelled = sim.cancel_task(handle);
     assert!(cancelled);
     
     // Run simulation for 200ms
@@ -82,7 +82,7 @@ fn test_multiple_tasks_execution_order() {
     
     // Schedule tasks at different times
     let order1 = execution_order.clone();
-    sim.scheduler.schedule_closure(
+    sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(100)),
         move |_scheduler| {
             order1.lock().unwrap().push(1);
@@ -90,7 +90,7 @@ fn test_multiple_tasks_execution_order() {
     );
     
     let order2 = execution_order.clone();
-    sim.scheduler.schedule_closure(
+    sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(50)),
         move |_scheduler| {
             order2.lock().unwrap().push(2);
@@ -98,7 +98,7 @@ fn test_multiple_tasks_execution_order() {
     );
     
     let order3 = execution_order.clone();
-    sim.scheduler.schedule_closure(
+    sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(150)),
         move |_scheduler| {
             order3.lock().unwrap().push(3);
@@ -121,7 +121,7 @@ fn test_task_scheduling_from_within_task() {
     let count_clone = execution_count.clone();
     
     // Schedule a task that schedules another task
-    sim.scheduler.schedule_closure(
+    sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(50)),
         move |scheduler| {
             *count_clone.lock().unwrap() += 1;
@@ -149,7 +149,7 @@ fn test_task_with_return_value() {
     let mut sim = Simulation::default();
     
     // Schedule a task that returns a value
-    let handle = sim.scheduler.schedule_closure(
+    let handle = sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(50)),
         |_scheduler| -> i32 {
             42
@@ -160,7 +160,7 @@ fn test_task_with_return_value() {
     Executor::timed(SimTime::from_duration(Duration::from_millis(100))).execute(&mut sim);
     
     // Get the result
-    let result = sim.scheduler.get_task_result(handle);
+    let result = sim.get_task_result(handle);
     assert_eq!(result, Some(42));
 }
 
@@ -181,7 +181,7 @@ fn test_custom_task_implementation() {
     let mut sim = Simulation::default();
     
     let task = CounterTask { count: 21 };
-    let handle = sim.scheduler.schedule_task(
+    let handle = sim.schedule_task(
         SimTime::from_duration(Duration::from_millis(50)),
         task
     );
@@ -190,7 +190,7 @@ fn test_custom_task_implementation() {
     Executor::timed(SimTime::from_duration(Duration::from_millis(100))).execute(&mut sim);
     
     // Check result
-    let result = sim.scheduler.get_task_result(handle);
+    let result = sim.get_task_result(handle);
     assert_eq!(result, Some(42));
 }
 
@@ -249,7 +249,7 @@ fn test_tasks_mixed_with_components() {
     let task_clone = task_executed.clone();
     
     // Schedule a task
-    sim.scheduler.schedule_closure(
+    sim.schedule_closure(
         SimTime::from_duration(Duration::from_millis(100)),
         move |_scheduler| {
             *task_clone.lock().unwrap() = true;

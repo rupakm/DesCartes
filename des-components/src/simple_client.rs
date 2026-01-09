@@ -372,7 +372,7 @@ mod tests {
             SimTime::from_duration(Duration::from_millis(100)),
             3,
         );
-        sim.scheduler.schedule_task(SimTime::zero(), task);
+        sim.schedule_task(SimTime::zero(), task);
         
         // Run simulation for 5 seconds to allow for retries
         Executor::timed(SimTime::from_duration(Duration::from_secs(5))).execute(&mut sim);
@@ -414,7 +414,7 @@ mod tests {
             },
             SimTime::from_duration(Duration::from_millis(50)),
         );
-        sim.scheduler.schedule_task(SimTime::zero(), task);
+        sim.schedule_task(SimTime::zero(), task);
         
         // Run simulation for 495ms (should send 10 requests: at 0, 50, 100, 150, 200, 250, 300, 350, 400, 450ms)
         Executor::timed(SimTime::from_duration(Duration::from_millis(495))).execute(&mut sim);

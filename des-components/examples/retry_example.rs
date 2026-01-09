@@ -5,8 +5,8 @@
 //!
 //! Run with: cargo run --package des-components --example retry_example
 
-use des_components::{DesServiceBuilder, DesRetryLayer, DesRetryPolicy};
-use des_core::{Simulation, SimTime, task::RetryTask, Task};
+use des_components::tower::{DesServiceBuilder, DesRetryLayer, DesRetryPolicy};
+use des_core::{Simulation, SimTime, Scheduler, task::RetryTask, Task};
 use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
 use std::time::Duration;
 use tower::Layer;
@@ -31,7 +31,7 @@ fn basic_retry_task_example() {
     println!("1. Basic RetryTask Example");
     println!("   Demonstrating RetryTask with simulated failures\n");
     
-    let mut sim = Simulation::default();
+    let mut scheduler = Scheduler::default();
     let attempt_count = Arc::new(AtomicUsize::new(0));
     let attempt_count_clone = attempt_count.clone();
     
@@ -52,7 +52,7 @@ fn basic_retry_task_example() {
     );
     
     // Execute the retry task
-    let result = retry_task.execute(&mut sim.scheduler);
+    let result = retry_task.execute(&mut scheduler);
     
     match result {
         Ok(value) => println!("   ✅ RetryTask succeeded: {value}"),
@@ -66,19 +66,20 @@ fn retry_layer_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("2. DesRetryLayer Example");
     println!("   Creating retry-enabled Tower services\n");
     
-    let simulation = Arc::new(Mutex::new(Simulation::default()));
+    let mut simulation = Simulation::default();
+    let scheduler = simulation.scheduler_handle();
     
     // Create a base service
     let base_service = DesServiceBuilder::new("retry-service".to_string())
         .thread_capacity(2)
         .service_time(Duration::from_millis(50))
-        .build(simulation.clone())?;
+        .build(&mut simulation)?;
     
     // Create retry layer with policy
     let retry_policy = DesRetryPolicy::new(3); // max attempts
     let retry_layer = DesRetryLayer::new(
         retry_policy,
-        Arc::downgrade(&simulation),
+        scheduler,
     );
     
     // Apply retry layer to service
@@ -96,7 +97,7 @@ fn exponential_backoff_example() {
     println!("3. Exponential Backoff Example");
     println!("   Demonstrating RetryTask backoff timing\n");
     
-    let mut sim = Simulation::default();
+    let mut scheduler = Scheduler::default();
     let execution_times = Arc::new(Mutex::new(Vec::new()));
     let execution_times_clone = execution_times.clone();
     
@@ -113,7 +114,7 @@ fn exponential_backoff_example() {
     );
     
     // Execute the retry task
-    let _result = retry_task.execute(&mut sim.scheduler);
+    let _result = retry_task.execute(&mut scheduler);
     
     // Show the timing pattern
     let times = execution_times.lock().unwrap();
@@ -154,7 +155,7 @@ fn demonstrate_retry_patterns() {
     println!("   let retry_policy = DesRetryPolicy::new(3);");
     println!("   let retry_layer = DesRetryLayer::new(");
     println!("       retry_policy,");
-    println!("       Arc::downgrade(&simulation)");
+    println!("       simulation.scheduler_handle()");
     println!("   );");
     println!("   let retry_service = retry_layer.layer(base_service);");
     println!("   ```");
@@ -164,7 +165,7 @@ fn demonstrate_retry_patterns() {
     println!("   ```rust");
     println!("   let retry_layer = exponential_backoff_layer(");
     println!("       3, // max attempts");
-    println!("       Arc::downgrade(&simulation)");
+    println!("       simulation.scheduler_handle()");
     println!("   );");
     println!("   ```");
     println!();

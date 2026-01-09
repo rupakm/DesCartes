@@ -38,7 +38,7 @@
 
 use crate::{Server, ServerEvent, ClientEvent};
 use des_core::{Component, Key, Scheduler, SimTime, Simulation, RequestAttempt, RequestAttemptId, RequestId, Response};
-use des_core::{defer_wake, in_scheduler_context};
+use des_core::{defer_wake, in_scheduler_context, SchedulerHandle as CoreSchedulerHandle};
 use des_core::dists::{ServiceTimeDistribution, ConstantServiceTime, ExponentialDistribution};
 
 use http::Request;
@@ -47,7 +47,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -131,7 +131,7 @@ impl Component for ResponseRouter {
 }
 
 // ============================================================================
-// Scheduler Handle - Interface for scheduling requests
+// Tower Scheduler Handle - Interface for scheduling requests to Tower services
 // ============================================================================
 
 /// Handle to interact with the DES scheduler from Tower services.
@@ -139,9 +139,9 @@ impl Component for ResponseRouter {
 /// This handle uses a pre-registered `ResponseRouter` component to receive server
 /// responses, avoiding the need to create components during event processing.
 #[derive(Clone)]
-pub struct SchedulerHandle {
-    /// Weak reference to avoid circular dependencies
-    simulation: Weak<Mutex<Simulation>>,
+pub struct TowerSchedulerHandle {
+    /// Core scheduler handle for scheduling events
+    scheduler: CoreSchedulerHandle,
     /// Server component key in the simulation
     server_key: Key<ServerEvent>,
     /// Response router component key (pre-registered)
@@ -160,10 +160,10 @@ pub struct SchedulerHandle {
     wakers: Arc<Mutex<Vec<Waker>>>,
 }
 
-impl SchedulerHandle {
+impl TowerSchedulerHandle {
     /// Create a new scheduler handle with a pre-registered response router
     pub fn new(
-        simulation: Weak<Mutex<Simulation>>,
+        scheduler: CoreSchedulerHandle,
         server_key: Key<ServerEvent>,
         router_key: Key<ClientEvent>,
         pending_responses: Arc<Mutex<HashMap<RequestAttemptId, oneshot::Sender<Response>>>>,
@@ -172,7 +172,7 @@ impl SchedulerHandle {
         capacity: usize,
     ) -> Self {
         Self {
-            simulation,
+            scheduler,
             server_key,
             router_key,
             pending_responses,
@@ -193,7 +193,7 @@ impl SchedulerHandle {
     ///
     /// This method works correctly from both inside and outside scheduler context:
     /// - Inside scheduler context: uses `defer_wake` to schedule at end of current step
-    /// - Outside scheduler context: locks simulation and schedules directly
+    /// - Outside scheduler context: uses the scheduler handle to schedule directly
     ///
     /// In both cases, the server response will be routed through the pre-registered
     /// `ResponseRouter` component, ensuring correct timing.
@@ -214,33 +214,23 @@ impl SchedulerHandle {
 
         // Schedule the request to the server with the router as the client
         if in_scheduler_context() {
-            // Inside event processing - use defer_wake to avoid issues
-            // The server_key event will be scheduled at the end of the current step
+            // Inside event processing - use defer_wake to avoid deadlock
             defer_wake(self.server_key, ServerEvent::ProcessRequest {
                 attempt,
                 client_id: self.router_key,
             });
-            Ok(())
         } else {
-            // Outside event processing - can safely lock the simulation
-            if let Some(sim) = self.simulation.upgrade() {
-                let mut simulation = sim.lock().unwrap();
-                simulation.schedule(
-                    SimTime::zero(),
-                    self.server_key,
-                    ServerEvent::ProcessRequest {
-                        attempt,
-                        client_id: self.router_key,
-                    },
-                );
-                Ok(())
-            } else {
-                // Simulation dropped - clean up
-                self.current_load.fetch_sub(1, Ordering::Relaxed);
-                self.pending_responses.lock().unwrap().remove(&attempt.id);
-                Err(ServiceError::Internal("Simulation has been dropped".to_string()))
-            }
+            // Outside event processing - use the scheduler handle directly
+            self.scheduler.schedule(
+                SimTime::zero(),
+                self.server_key,
+                ServerEvent::ProcessRequest {
+                    attempt,
+                    client_id: self.router_key,
+                },
+            );
         }
+        Ok(())
     }
 
     /// Register a waker for poll_ready
@@ -360,31 +350,31 @@ impl<L> DesServiceBuilder<L> {
         self,
         num: u64,
         per: std::time::Duration,
-        simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
+        scheduler: CoreSchedulerHandle,
     ) -> DesServiceBuilder<tower_layer::Stack<super::limit::rate::DesRateLimitLayer, L>> {
         let rate = num as f64 / per.as_secs_f64();
-        self.layer(super::limit::rate::DesRateLimitLayer::new(rate, num as usize, simulation))
+        self.layer(super::limit::rate::DesRateLimitLayer::new(rate, num as usize, scheduler))
     }
 
     /// Retry failed requests according to the given retry policy.
     pub fn retry<P>(
         self, 
         policy: P,
-        simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
+        scheduler: CoreSchedulerHandle,
     ) -> DesServiceBuilder<tower_layer::Stack<super::retry::DesRetryLayer<P>, L>> 
     where
         P: Clone,
     {
-        self.layer(super::retry::DesRetryLayer::new(policy, simulation))
+        self.layer(super::retry::DesRetryLayer::new(policy, scheduler))
     }
 
     /// Fail requests that take longer than `timeout`.
     pub fn timeout(
         self,
         timeout: std::time::Duration,
-        simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
+        scheduler: CoreSchedulerHandle,
     ) -> DesServiceBuilder<tower_layer::Stack<super::timeout::DesTimeoutLayer, L>> {
-        self.layer(super::timeout::DesTimeoutLayer::new(timeout, simulation))
+        self.layer(super::timeout::DesTimeoutLayer::new(timeout, scheduler))
     }
 
     /// Conditionally reject requests based on `predicate`.
@@ -452,12 +442,12 @@ impl<L> DesServiceBuilder<L> {
         self,
         failure_threshold: usize,
         recovery_timeout: std::time::Duration,
-        simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
+        scheduler: CoreSchedulerHandle,
     ) -> DesServiceBuilder<tower_layer::Stack<super::circuit_breaker::DesCircuitBreakerLayer, L>> {
         self.layer(super::circuit_breaker::DesCircuitBreakerLayer::new(
             failure_threshold,
             recovery_timeout,
-            simulation,
+            scheduler,
         ))
     }
 
@@ -473,9 +463,9 @@ impl<L> DesServiceBuilder<L> {
     pub fn hedge(
         self,
         delay: std::time::Duration,
-        simulation: std::sync::Weak<std::sync::Mutex<Simulation>>,
+        scheduler: CoreSchedulerHandle,
     ) -> DesServiceBuilder<tower_layer::Stack<super::hedge::DesHedgeLayer, L>> {
-        self.layer(super::hedge::DesHedgeLayer::new(delay, 2, simulation))
+        self.layer(super::hedge::DesHedgeLayer::new(delay, 2, scheduler))
     }
 
     /// Returns the underlying `Layer` implementation.
@@ -533,17 +523,15 @@ impl<L> DesServiceBuilder<L> {
     /// This method:
     /// 1. Creates the server component with the configured service time distribution
     /// 2. Creates and registers a `ResponseRouter` component to handle all responses
-    /// 3. Creates the `SchedulerHandle` with references to both components
+    /// 3. Creates the `TowerSchedulerHandle` with references to both components
     /// 4. Wraps the base service with any configured middleware layers
     pub fn build(
         self,
-        simulation: Arc<Mutex<Simulation>>,
+        simulation: &mut Simulation,
     ) -> Result<L::Service, ServiceError> 
     where
         L: tower_layer::Layer<DesService>,
     {
-        let mut sim = simulation.lock().unwrap();
-
         // Use the configured distribution or default to 100ms constant
         let service_time_distribution = self.service_time_distribution
             .unwrap_or_else(|| Box::new(ConstantServiceTime::new(Duration::from_millis(100))));
@@ -560,7 +548,7 @@ impl<L> DesServiceBuilder<L> {
             current_load.clone(),
             wakers.clone(),
         );
-        let router_key = sim.add_component(router);
+        let router_key = simulation.add_component(router);
 
         // Create the DES server
         let server = Server::new(
@@ -568,11 +556,14 @@ impl<L> DesServiceBuilder<L> {
             self.thread_capacity, 
             service_time_distribution,
         );
-        let server_key = sim.add_component(server);
+        let server_key = simulation.add_component(server);
 
-        // Create scheduler handle with the pre-registered router
-        let handle = SchedulerHandle::new(
-            Arc::downgrade(&simulation),
+        // Get scheduler handle from simulation
+        let scheduler = simulation.scheduler_handle();
+
+        // Create Tower scheduler handle with the pre-registered router
+        let handle = TowerSchedulerHandle::new(
+            scheduler,
             server_key,
             router_key,
             pending_responses,
@@ -580,8 +571,6 @@ impl<L> DesServiceBuilder<L> {
             wakers,
             self.thread_capacity,
         );
-
-        drop(sim); // Release the lock
 
         let base_service = DesService::new(handle);
         Ok(self.layer.layer(base_service))
@@ -621,12 +610,12 @@ where
 /// by the DES scheduler, ensuring deterministic and reproducible behavior.
 #[derive(Clone)]
 pub struct DesService {
-    scheduler_handle: SchedulerHandle,
+    scheduler_handle: TowerSchedulerHandle,
 }
 
 impl DesService {
     /// Create a new DES-backed Tower service
-    pub fn new(scheduler_handle: SchedulerHandle) -> Self {
+    pub fn new(scheduler_handle: TowerSchedulerHandle) -> Self {
         Self { scheduler_handle }
     }
 }
@@ -692,7 +681,7 @@ impl Service<Request<SimBody>> for DesService {
 
 /// Convert HTTP request to RequestAttempt
 fn http_to_request_attempt(
-    handle: &SchedulerHandle,
+    handle: &TowerSchedulerHandle,
     req: Request<SimBody>,
 ) -> RequestAttempt {
     let request_id = handle.next_request_id.fetch_add(1, Ordering::Relaxed);

@@ -35,7 +35,7 @@ fn test_client_server_integration() {
         SimTime::from_duration(Duration::from_millis(100)),
         5,
     );
-    sim.scheduler.schedule_task(SimTime::zero(), task);
+    sim.schedule_task(SimTime::zero(), task);
 
     println!("Running simulation for 1 second...\n");
 
@@ -90,7 +90,7 @@ fn test_server_overload_scenario() {
         SimTime::from_duration(Duration::from_millis(50)),
         3,
     );
-    sim.scheduler.schedule_task(SimTime::zero(), task);
+    sim.schedule_task(SimTime::zero(), task);
 
     println!("Running simulation with server overload scenario...\n");
 

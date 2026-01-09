@@ -108,7 +108,7 @@ fn client_metrics_example() {
         SimTime::from_duration(Duration::from_millis(200)),
         5,
     );
-    sim.scheduler.schedule_task(SimTime::zero(), task);
+    sim.schedule_task(SimTime::zero(), task);
     
     // Run simulation
     Executor::timed(SimTime::from_duration(Duration::from_secs(3))).execute(&mut sim);

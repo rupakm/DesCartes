@@ -3,8 +3,8 @@
 //! These tests validate the retry functionality and demonstrate
 //! how RetryTask integrates with Tower services.
 
-use des_components::{DesServiceBuilder, DesRetryLayer, DesRetryPolicy, ServiceError};
-use des_core::{Simulation, SimTime, Task, task::RetryTask};
+use des_components::tower::{DesServiceBuilder, DesRetryLayer, DesRetryPolicy, ServiceError};
+use des_core::{Simulation, SimTime, Task, Scheduler, task::RetryTask};
 use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
 use std::time::Duration;
 use tower::{Layer, retry::Policy};
@@ -13,7 +13,7 @@ use tower::{Layer, retry::Policy};
 fn test_retry_task_basic_functionality() {
     println!("\n=== RetryTask Basic Functionality Test ===\n");
     
-    let mut sim = Simulation::default();
+    let mut scheduler = Scheduler::default();
     let attempt_count = Arc::new(AtomicUsize::new(0));
     let attempt_count_clone = attempt_count.clone();
     
@@ -28,7 +28,7 @@ fn test_retry_task_basic_functionality() {
         SimTime::from_duration(Duration::from_millis(100)),
     );
     
-    let result = retry_task.execute(&mut sim.scheduler);
+    let result = retry_task.execute(&mut scheduler);
     
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "Success!");
@@ -41,7 +41,7 @@ fn test_retry_task_basic_functionality() {
 fn test_retry_task_with_failures() {
     println!("\n=== RetryTask with Failures Test ===\n");
     
-    let mut sim = Simulation::default();
+    let mut scheduler = Scheduler::default();
     let attempt_count = Arc::new(AtomicUsize::new(0));
     let attempt_count_clone = attempt_count.clone();
     
@@ -61,7 +61,7 @@ fn test_retry_task_with_failures() {
         SimTime::from_duration(Duration::from_millis(50)),
     );
     
-    let result = retry_task.execute(&mut sim.scheduler);
+    let result = retry_task.execute(&mut scheduler);
     
     // Note: Current RetryTask implementation returns the first result
     // The retry scheduling happens in the background
@@ -78,7 +78,7 @@ fn test_retry_task_with_failures() {
 fn test_retry_task_max_attempts() {
     println!("\n=== RetryTask Max Attempts Test ===\n");
     
-    let mut sim = Simulation::default();
+    let mut scheduler = Scheduler::default();
     let attempt_count = Arc::new(AtomicUsize::new(0));
     let attempt_count_clone = attempt_count.clone();
     
@@ -93,7 +93,7 @@ fn test_retry_task_max_attempts() {
         SimTime::from_duration(Duration::from_millis(25)),
     );
     
-    let result = retry_task.execute(&mut sim.scheduler);
+    let result = retry_task.execute(&mut scheduler);
     
     assert!(result.is_err());
     assert_eq!(result.unwrap_err(), "Always fails");
@@ -106,20 +106,21 @@ fn test_retry_task_max_attempts() {
 fn test_des_retry_layer_creation() {
     println!("\n=== DesRetryLayer Creation Test ===\n");
     
-    let simulation = Arc::new(Mutex::new(Simulation::default()));
+    let mut simulation = Simulation::default();
+    let scheduler = simulation.scheduler_handle();
     
     // Create retry layer with policy
     let retry_policy = DesRetryPolicy::new(3); // max attempts
     let retry_layer = DesRetryLayer::new(
         retry_policy,
-        Arc::downgrade(&simulation),
+        scheduler,
     );
     
     // Create base service
     let base_service = DesServiceBuilder::new("retry-test-service".to_string())
         .thread_capacity(2)
         .service_time(Duration::from_millis(50))
-        .build(simulation.clone())
+        .build(&mut simulation)
         .unwrap();
     
     // Apply retry layer
@@ -157,7 +158,7 @@ fn test_des_retry_policy_functionality() {
 fn test_retry_task_with_scheduler_integration() {
     println!("\n=== RetryTask Scheduler Integration Test ===\n");
     
-    let mut sim = Simulation::default();
+    let mut scheduler = Scheduler::default();
     let execution_times = Arc::new(Mutex::new(Vec::new()));
     let execution_times_clone = execution_times.clone();
     
@@ -173,7 +174,7 @@ fn test_retry_task_with_scheduler_integration() {
         SimTime::from_duration(Duration::from_millis(100)),
     );
     
-    let _result = retry_task.execute(&mut sim.scheduler);
+    let _result = retry_task.execute(&mut scheduler);
     
     let times = execution_times.lock().unwrap();
     assert_eq!(times.len(), 1);
@@ -186,13 +187,14 @@ fn test_retry_task_with_scheduler_integration() {
 fn test_retry_layer_with_service_builder() {
     println!("\n=== Retry Layer with ServiceBuilder Test ===\n");
     
-    let simulation = Arc::new(Mutex::new(Simulation::default()));
+    let mut simulation = Simulation::default();
+    let scheduler = simulation.scheduler_handle();
     
     // Create base service
     let base_service = DesServiceBuilder::new("layered-retry-service".to_string())
         .thread_capacity(3)
         .service_time(Duration::from_millis(75))
-        .build(simulation.clone())
+        .build(&mut simulation)
         .unwrap();
     
     // Use Tower's ServiceBuilder to compose layers
@@ -202,7 +204,7 @@ fn test_retry_layer_with_service_builder() {
     let _composed_service = ServiceBuilder::new()
         .layer(DesRetryLayer::new(
             retry_policy,
-            Arc::downgrade(&simulation),
+            scheduler,
         ))
         .service(base_service);
     

@@ -185,11 +185,11 @@ impl FixedDurationExecutor {
 
 impl Execute for FixedDurationExecutor {
     fn execute(self, simulation: &mut Simulation) {
-        let start_time = simulation.scheduler.time();
+        let start_time = simulation.time();
         let end_time = start_time + self.duration;
         
         while simulation.step() {
-            if simulation.scheduler.time() >= end_time {
+            if simulation.time() >= end_time {
                 break;
             }
         }
@@ -285,25 +285,23 @@ fn test_exponential_traffic_load_balancer_three_servers() {
     let server2_key = simulation.add_component(server2);
     let server3_key = simulation.add_component(server3);
     
-    // Create Tower services for each server
-    let simulation_arc = Arc::new(Mutex::new(simulation));
-    
+    // Create Tower services for each server (before wrapping in Arc)
     let service1 = DesServiceBuilder::new("tower-backend-1".to_string())
         .thread_capacity(1)
         .service_time(Duration::from_millis(80))
-        .build(simulation_arc.clone())
+        .build(&mut simulation)
         .unwrap();
     
     let service2 = DesServiceBuilder::new("tower-backend-2".to_string())
         .thread_capacity(1)
         .service_time(Duration::from_millis(90))
-        .build(simulation_arc.clone())
+        .build(&mut simulation)
         .unwrap();
     
     let service3 = DesServiceBuilder::new("tower-backend-3".to_string())
         .thread_capacity(1)
         .service_time(Duration::from_millis(85))
-        .build(simulation_arc.clone())
+        .build(&mut simulation)
         .unwrap();
     
     // Create load balancer
@@ -314,8 +312,6 @@ fn test_exponential_traffic_load_balancer_three_servers() {
     
     // For this test, we'll use a simpler approach with direct server communication
     // since the Tower integration requires more complex async handling
-    
-    let mut simulation = Arc::try_unwrap(simulation_arc).map_err(|_| "Failed to unwrap Arc").unwrap().into_inner().unwrap();
     
     // Create a load balancing client that distributes requests
     struct LoadBalancingClient {

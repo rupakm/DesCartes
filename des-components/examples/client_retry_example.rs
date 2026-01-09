@@ -66,7 +66,7 @@ fn exponential_backoff_example() {
         SimTime::from_duration(Duration::from_millis(500)),
         3,
     );
-    sim.scheduler.schedule_task(SimTime::zero(), task);
+    sim.schedule_task(SimTime::zero(), task);
     
     // Run simulation for 10 seconds to see retry behavior
     Executor::timed(SimTime::from_duration(Duration::from_secs(10))).execute(&mut sim);
@@ -140,7 +140,7 @@ fn token_bucket_example() {
         SimTime::from_duration(Duration::from_millis(300)),
         4,
     );
-    sim.scheduler.schedule_task(SimTime::zero(), task);
+    sim.schedule_task(SimTime::zero(), task);
     
     // Run simulation
     Executor::timed(SimTime::from_duration(Duration::from_secs(8))).execute(&mut sim);
@@ -215,7 +215,7 @@ fn success_based_example() {
         SimTime::from_duration(Duration::from_millis(400)),
         5,
     );
-    sim.scheduler.schedule_task(SimTime::zero(), task);
+    sim.schedule_task(SimTime::zero(), task);
     
     // Run simulation
     Executor::timed(SimTime::from_duration(Duration::from_secs(12))).execute(&mut sim);
@@ -308,7 +308,7 @@ fn policy_comparison_example() {
             SimTime::from_duration(Duration::from_millis(1000)),
             3,
         );
-        sim.scheduler.schedule_task(SimTime::from_duration(Duration::from_millis(delay_offset)), task);
+        sim.schedule_task(SimTime::from_duration(Duration::from_millis(delay_offset)), task);
     }
     
     // Run simulation
