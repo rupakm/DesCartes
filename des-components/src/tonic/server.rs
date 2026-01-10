@@ -1,8 +1,7 @@
 //! Tonic-compatible RPC server implementation for discrete event simulation
 
 use crate::tonic::{
-    utils, RpcEvent, RpcRequest, RpcResponse, RpcService,
-    RpcStatusCode, TonicError, TonicResult,
+    utils, RpcEvent, RpcRequest, RpcResponse, RpcService, RpcStatusCode, TonicError, TonicResult,
 };
 use crate::transport::{
     EndpointId, EndpointInfo, MessageType, SharedEndpointRegistry, TransportEvent,
@@ -382,6 +381,7 @@ impl RpcService for EchoService {
 mod tests {
     use super::*;
     use crate::transport::{SimTransport, SimpleNetworkModel};
+    use crate::tonic::MethodDescriptor;
     use des_core::Simulation;
 
     #[test]

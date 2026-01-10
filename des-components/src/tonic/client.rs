@@ -4,9 +4,7 @@ use crate::tonic::{
     utils, MethodDescriptor, RpcCodec, RpcEvent, RpcRequest, RpcResponse, RpcStatus, RpcStatusCode,
     TonicError, TonicResult,
 };
-use crate::transport::{
-    EndpointId, MessageType, SharedEndpointRegistry, TransportEvent,
-};
+use crate::transport::{EndpointId, MessageType, SharedEndpointRegistry, TransportEvent};
 use des_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

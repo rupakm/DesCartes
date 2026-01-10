@@ -10,3 +10,4 @@ tracing.workspace = true
 [dev-dependencies]
 rand.workspace = true
 rand_distr.workspace = true
+tokio.workspace = true
