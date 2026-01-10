@@ -115,6 +115,8 @@ pub enum RuntimeEvent {
 /// A suspended async task.
 struct Task {
     future: Pin<Box<dyn Future<Output = ()>>>,
+    /// Whether the task is currently present in the ready queue.
+    queued: bool,
 }
 
 /// DES-based async runtime component.
@@ -177,6 +179,7 @@ impl DesRuntime {
             task_id,
             Task {
                 future: Box::pin(future),
+                queued: true,
             },
         );
         self.ready_queue.push_back(task_id);
@@ -235,10 +238,24 @@ impl DesRuntime {
     fn poll_ready_tasks(&mut self, scheduler: &mut Scheduler) {
         debug!("Polling ready tasks");
 
-        let ready: Vec<TaskId> = self.ready_queue.drain(..).collect();
+        // Snapshot polling: only poll tasks that were ready at the start of this cycle.
+        // Tasks woken while polling will be queued for the next cycle.
+        let mut to_poll = self.ready_queue.len();
         let mut completed = 0;
 
-        for task_id in ready {
+        while to_poll > 0 {
+            let Some(task_id) = self.ready_queue.pop_front() else {
+                break;
+            };
+            to_poll -= 1;
+
+            // Mark as no longer queued before polling so a wake during polling can re-queue it.
+            if let Some(task) = self.tasks.get_mut(&task_id) {
+                task.queued = false;
+            } else {
+                continue;
+            }
+
             if let Some(Poll::Ready(())) = self.poll_task(task_id, scheduler) {
                 self.tasks.remove(&task_id);
                 completed += 1;
@@ -254,10 +271,17 @@ impl DesRuntime {
 
     /// Wake a specific task.
     pub fn wake_task(&mut self, task_id: TaskId) {
-        if self.tasks.contains_key(&task_id) && !self.ready_queue.contains(&task_id) {
-            self.ready_queue.push_back(task_id);
-            trace!(?task_id, "Task added to ready queue");
+        let Some(task) = self.tasks.get_mut(&task_id) else {
+            return;
+        };
+
+        if task.queued {
+            return;
         }
+
+        task.queued = true;
+        self.ready_queue.push_back(task_id);
+        trace!(?task_id, "Task added to ready queue");
     }
 
     fn schedule_next_timer_tick(&mut self, scheduler: &mut Scheduler, self_id: Key<RuntimeEvent>) {

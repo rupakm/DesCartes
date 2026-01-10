@@ -117,6 +117,15 @@ pub struct Key<T> {
 }
 
 impl<T> Key<T> {
+    /// Create a new key with a generated UUID.
+    ///
+    /// Note: the UUID is generated at runtime (currently `Uuid::now_v7()`).
+    /// For fully deterministic simulations, prefer generating keys from a
+    /// deterministic source and using [`Key::new_with_id`].
+    pub fn new() -> Self {
+        Self::new_with_id(Uuid::now_v7())
+    }
+
     pub fn new_with_id(id: Uuid) -> Self {
         Self {
             id,

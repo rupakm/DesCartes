@@ -1720,7 +1720,7 @@ mod tests {
         let results = run_constant_arrival_debug(
             Duration::from_millis(100), // 100ms intervals (10 req/s)
             1,                          // Single server
-            Duration::from_millis(50),  // 50ms service time (20 req/s capacity)
+            20.0,                       // 50ms service time (20 req/s capacity)
             Duration::from_secs(1),     // 1 second simulation
             Some(5),                    // Send exactly 5 requests
             Some(10),                   // Small queue
