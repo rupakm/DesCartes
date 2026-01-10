@@ -4,8 +4,7 @@
 //! message delivery through the simulated network using configurable network models.
 
 use crate::transport::{
-    EndpointId, MessageType, NetworkModel, 
-    endpoint_registry::SharedEndpointRegistry,
+    endpoint_registry::SharedEndpointRegistry, EndpointId, MessageType, NetworkModel,
     TransportEvent, TransportMessage,
 };
 use des_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
@@ -90,7 +89,7 @@ impl SimTransport {
         );
 
         self.schedule_message_delivery(message, scheduler_handle, self_key)?;
-        
+
         Ok(message_id)
     }
 
@@ -115,10 +114,11 @@ impl SimTransport {
             payload,
             scheduler_handle.time(),
             message_type,
-        ).with_correlation_id(correlation_id);
+        )
+        .with_correlation_id(correlation_id);
 
         self.schedule_message_delivery(message, scheduler_handle, self_key)?;
-        
+
         Ok(message_id)
     }
 
@@ -134,9 +134,12 @@ impl SimTransport {
         self.stats.bytes_sent += message.size() as u64;
 
         // Check if message should be dropped
-        if self.network_model.should_drop_message(message.source, message.destination, &message) {
+        if self
+            .network_model
+            .should_drop_message(message.source, message.destination, &message)
+        {
             self.stats.messages_dropped += 1;
-            
+
             // Schedule drop event
             scheduler_handle.schedule_now(
                 self_key,
@@ -149,8 +152,14 @@ impl SimTransport {
         }
 
         // Calculate total delivery time (latency + bandwidth delay)
-        let latency = self.network_model.calculate_latency(message.source, message.destination, &message);
-        let bandwidth_delay = self.network_model.calculate_bandwidth_delay(message.source, message.destination, &message);
+        let latency =
+            self.network_model
+                .calculate_latency(message.source, message.destination, &message);
+        let bandwidth_delay = self.network_model.calculate_bandwidth_delay(
+            message.source,
+            message.destination,
+            &message,
+        );
         let total_delay = latency + bandwidth_delay;
 
         // Schedule delivery
@@ -181,7 +190,10 @@ impl SimTransport {
         if let Some(&handler_key) = self.message_handlers.get(&destination) {
             scheduler.schedule_now(
                 handler_key,
-                TransportEvent::MessageDelivered { message, destination },
+                TransportEvent::MessageDelivered {
+                    message,
+                    destination,
+                },
             );
         } else {
             // No handler registered - message is lost
@@ -221,12 +233,65 @@ impl Component for SimTransport {
 
     fn process_event(
         &mut self,
-        _self_id: Key<Self::Event>,
+        self_id: Key<Self::Event>,
         event: &Self::Event,
         scheduler: &mut Scheduler,
     ) {
         match event {
-            TransportEvent::MessageDelivered { message, destination } => {
+            TransportEvent::SendMessage { message } => {
+                // Handle message send request - assign new message ID and apply network simulation
+                let mut message_with_id = message.clone();
+                message_with_id.id = self.next_message_id;
+                self.next_message_id += 1;
+
+                // Apply network simulation directly without using scheduler handle
+                self.stats.messages_sent += 1;
+                self.stats.bytes_sent += message_with_id.size() as u64;
+
+                // Check if message should be dropped
+                if self.network_model.should_drop_message(
+                    message_with_id.source,
+                    message_with_id.destination,
+                    &message_with_id,
+                ) {
+                    self.stats.messages_dropped += 1;
+                    scheduler.schedule_now(
+                        self_id,
+                        TransportEvent::MessageDropped {
+                            message: message_with_id,
+                            reason: "Network packet loss".to_string(),
+                        },
+                    );
+                } else {
+                    // Calculate total delivery time (latency + bandwidth delay)
+                    let latency = self.network_model.calculate_latency(
+                        message_with_id.source,
+                        message_with_id.destination,
+                        &message_with_id,
+                    );
+                    let bandwidth_delay = self.network_model.calculate_bandwidth_delay(
+                        message_with_id.source,
+                        message_with_id.destination,
+                        &message_with_id,
+                    );
+                    let total_delay = latency + bandwidth_delay;
+
+                    // Schedule delivery
+                    let destination = message_with_id.destination;
+                    scheduler.schedule(
+                        SimTime::from_duration(total_delay),
+                        self_id,
+                        TransportEvent::MessageDelivered {
+                            message: message_with_id,
+                            destination,
+                        },
+                    );
+                }
+            }
+            TransportEvent::MessageDelivered {
+                message,
+                destination,
+            } => {
                 self.handle_message_delivered(message.clone(), *destination, scheduler);
             }
             TransportEvent::MessageDropped { message, reason } => {
@@ -257,7 +322,8 @@ impl SimTransportBuilder {
 
     /// Build the transport
     pub fn build(self) -> Result<SimTransport, String> {
-        let network_model = self.network_model
+        let network_model = self
+            .network_model
             .ok_or_else(|| "Network model is required".to_string())?;
 
         Ok(SimTransport::new(network_model))
@@ -273,7 +339,7 @@ impl Default for SimTransportBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::{SimpleNetworkModel, endpoint_registry::EndpointInfo};
+    use crate::transport::{endpoint_registry::EndpointInfo, SimpleNetworkModel};
     use des_core::Simulation;
     use std::time::Duration;
 
@@ -286,7 +352,7 @@ mod tests {
         ));
 
         let transport = SimTransport::new(network_model);
-        
+
         assert_eq!(transport.stats().messages_sent, 0);
         assert_eq!(transport.stats().messages_delivered, 0);
         assert_eq!(transport.stats().messages_dropped, 0);
@@ -295,7 +361,7 @@ mod tests {
     #[test]
     fn test_message_sending() {
         let mut sim = Simulation::default();
-        
+
         let network_model = Box::new(SimpleNetworkModel::with_seed(
             Duration::from_millis(50),
             0.0, // No packet loss
@@ -311,22 +377,28 @@ mod tests {
         // Send a message
         let scheduler_handle = sim.scheduler_handle();
         let message_id = {
-            let transport_ref = sim.get_component_mut::<TransportEvent, SimTransport>(transport_key).unwrap();
-            transport_ref.send_message(
-                endpoint1,
-                endpoint2,
-                vec![1, 2, 3, 4],
-                MessageType::UnaryRequest,
-                &scheduler_handle,
-                transport_key,
-            ).unwrap()
+            let transport_ref = sim
+                .get_component_mut::<TransportEvent, SimTransport>(transport_key)
+                .unwrap();
+            transport_ref
+                .send_message(
+                    endpoint1,
+                    endpoint2,
+                    vec![1, 2, 3, 4],
+                    MessageType::UnaryRequest,
+                    &scheduler_handle,
+                    transport_key,
+                )
+                .unwrap()
         };
 
         assert_eq!(message_id, 1);
-        
+
         // Check stats
         {
-            let transport_ref = sim.get_component_mut::<TransportEvent, SimTransport>(transport_key).unwrap();
+            let transport_ref = sim
+                .get_component_mut::<TransportEvent, SimTransport>(transport_key)
+                .unwrap();
             assert_eq!(transport_ref.stats().messages_sent, 1);
             assert_eq!(transport_ref.stats().bytes_sent, 4);
         }
@@ -339,7 +411,9 @@ mod tests {
         }
 
         // Check that message was processed (though no handler was registered)
-        let transport_ref = sim.get_component_mut::<TransportEvent, SimTransport>(transport_key).unwrap();
+        let transport_ref = sim
+            .get_component_mut::<TransportEvent, SimTransport>(transport_key)
+            .unwrap();
         assert_eq!(transport_ref.stats().messages_delivered, 1);
         assert_eq!(transport_ref.stats().bytes_delivered, 4);
     }
@@ -347,7 +421,7 @@ mod tests {
     #[test]
     fn test_packet_loss() {
         let mut sim = Simulation::default();
-        
+
         let network_model = Box::new(SimpleNetworkModel::with_seed(
             Duration::from_millis(50),
             1.0, // 100% packet loss
@@ -363,15 +437,19 @@ mod tests {
         // Send a message that should be dropped
         let scheduler_handle = sim.scheduler_handle();
         {
-            let transport_ref = sim.get_component_mut::<TransportEvent, SimTransport>(transport_key).unwrap();
-            transport_ref.send_message(
-                endpoint1,
-                endpoint2,
-                vec![1, 2, 3, 4],
-                MessageType::UnaryRequest,
-                &scheduler_handle,
-                transport_key,
-            ).unwrap();
+            let transport_ref = sim
+                .get_component_mut::<TransportEvent, SimTransport>(transport_key)
+                .unwrap();
+            transport_ref
+                .send_message(
+                    endpoint1,
+                    endpoint2,
+                    vec![1, 2, 3, 4],
+                    MessageType::UnaryRequest,
+                    &scheduler_handle,
+                    transport_key,
+                )
+                .unwrap();
 
             assert_eq!(transport_ref.stats().messages_sent, 1);
         }
@@ -384,17 +462,16 @@ mod tests {
         }
 
         // Check that message was dropped
-        let transport_ref = sim.get_component_mut::<TransportEvent, SimTransport>(transport_key).unwrap();
+        let transport_ref = sim
+            .get_component_mut::<TransportEvent, SimTransport>(transport_key)
+            .unwrap();
         assert_eq!(transport_ref.stats().messages_dropped, 1);
         assert_eq!(transport_ref.stats().messages_delivered, 0);
     }
 
     #[test]
     fn test_transport_builder() {
-        let network_model = Box::new(SimpleNetworkModel::new(
-            Duration::from_millis(100),
-            0.1,
-        ));
+        let network_model = Box::new(SimpleNetworkModel::new(Duration::from_millis(100), 0.1));
 
         let transport = SimTransportBuilder::new()
             .network_model(network_model)
@@ -406,16 +483,16 @@ mod tests {
 
     #[test]
     fn test_endpoint_registry_integration() {
-        let network_model = Box::new(SimpleNetworkModel::new(
-            Duration::from_millis(100),
-            0.0,
-        ));
+        let network_model = Box::new(SimpleNetworkModel::new(Duration::from_millis(100), 0.0));
 
         let transport = SimTransport::new(network_model);
-        
+
         // Register an endpoint
         let endpoint_info = EndpointInfo::new("user-service".to_string(), "instance-1".to_string());
-        transport.endpoint_registry().register_endpoint(endpoint_info.clone()).unwrap();
+        transport
+            .endpoint_registry()
+            .register_endpoint(endpoint_info.clone())
+            .unwrap();
 
         // Find the endpoint
         let found_endpoints = transport.endpoint_registry().find_endpoints("user-service");

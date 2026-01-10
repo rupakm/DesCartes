@@ -5,14 +5,20 @@
 //! network behavior while maintaining familiar tonic APIs.
 
 pub mod client;
-pub mod server;
 pub mod codec;
+pub mod des_client;
+pub mod des_server;
 pub mod error;
+pub mod server;
+pub mod transport_router;
 
 pub use client::{SimTonicClient, TonicClientBuilder, TonicClientComponent};
-pub use server::{SimTonicServer, TonicServerBuilder, TonicServerComponent};
-pub use codec::{ProtobufCodec, RpcCodec, JsonCodec};
+pub use codec::{JsonCodec, ProtobufCodec, RpcCodec};
+pub use des_client::{ClientStats, DesTonicClient, DesTonicClientBuilder, TonicClientEvent};
+pub use des_server::{DesTonicServer, DesTonicServerBuilder, ServerStats, TonicServerEvent};
 pub use error::{TonicError, TonicResult};
+pub use server::{SimTonicServer, TonicServerBuilder, TonicServerComponent};
+pub use transport_router::TonicTransportRouter;
 
 use crate::transport::{EndpointId, MessageType, SimTransport, TransportEvent};
 use des_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
@@ -169,9 +175,7 @@ pub enum RpcEvent {
         correlation_id: String,
     },
     /// RPC request timed out
-    RequestTimeout {
-        correlation_id: String,
-    },
+    RequestTimeout { correlation_id: String },
 }
 
 /// Trait for RPC service implementations
@@ -199,14 +203,14 @@ pub mod utils {
         // Simple serialization format: method_name\n\nmetadata_json\n\npayload
         let method_name = request.method.full_name();
         let metadata_json = serde_json::to_string(&request.metadata).unwrap_or_default();
-        
+
         let mut result = Vec::new();
         result.extend_from_slice(method_name.as_bytes());
         result.extend_from_slice(b"\n\n");
         result.extend_from_slice(metadata_json.as_bytes());
         result.extend_from_slice(b"\n\n");
         result.extend_from_slice(&request.payload);
-        
+
         result
     }
 
@@ -214,29 +218,30 @@ pub mod utils {
     pub fn deserialize_rpc_request(payload: &[u8]) -> Result<RpcRequest, TonicError> {
         let payload_str = String::from_utf8_lossy(payload);
         let parts: Vec<&str> = payload_str.splitn(3, "\n\n").collect();
-        
+
         if parts.len() != 3 {
-            return Err(TonicError::InvalidMessage("Invalid RPC request format".to_string()));
+            return Err(TonicError::InvalidMessage(
+                "Invalid RPC request format".to_string(),
+            ));
         }
-        
+
         // Parse method name
         let method_parts: Vec<&str> = parts[0].splitn(2, '/').collect();
         if method_parts.len() != 2 {
-            return Err(TonicError::InvalidMessage("Invalid method name format".to_string()));
+            return Err(TonicError::InvalidMessage(
+                "Invalid method name format".to_string(),
+            ));
         }
-        
-        let method = MethodDescriptor::new(
-            method_parts[0].to_string(),
-            method_parts[1].to_string(),
-        );
-        
+
+        let method =
+            MethodDescriptor::new(method_parts[0].to_string(), method_parts[1].to_string());
+
         // Parse metadata
-        let metadata: HashMap<String, String> = serde_json::from_str(parts[1])
-            .unwrap_or_default();
-        
+        let metadata: HashMap<String, String> = serde_json::from_str(parts[1]).unwrap_or_default();
+
         // Extract payload
         let request_payload = parts[2].as_bytes().to_vec();
-        
+
         Ok(RpcRequest {
             method,
             payload: request_payload,
@@ -250,14 +255,14 @@ pub mod utils {
         // Simple serialization format: status_json\n\nmetadata_json\n\npayload
         let status_json = serde_json::to_string(&response.status).unwrap_or_default();
         let metadata_json = serde_json::to_string(&response.metadata).unwrap_or_default();
-        
+
         let mut result = Vec::new();
         result.extend_from_slice(status_json.as_bytes());
         result.extend_from_slice(b"\n\n");
         result.extend_from_slice(metadata_json.as_bytes());
         result.extend_from_slice(b"\n\n");
         result.extend_from_slice(&response.payload);
-        
+
         result
     }
 
@@ -265,22 +270,23 @@ pub mod utils {
     pub fn deserialize_rpc_response(payload: &[u8]) -> Result<RpcResponse, TonicError> {
         let payload_str = String::from_utf8_lossy(payload);
         let parts: Vec<&str> = payload_str.splitn(3, "\n\n").collect();
-        
+
         if parts.len() != 3 {
-            return Err(TonicError::InvalidMessage("Invalid RPC response format".to_string()));
+            return Err(TonicError::InvalidMessage(
+                "Invalid RPC response format".to_string(),
+            ));
         }
-        
+
         // Parse status
         let status: RpcStatus = serde_json::from_str(parts[0])
             .map_err(|e| TonicError::InvalidMessage(format!("Invalid status format: {}", e)))?;
-        
+
         // Parse metadata
-        let metadata: HashMap<String, String> = serde_json::from_str(parts[1])
-            .unwrap_or_default();
-        
+        let metadata: HashMap<String, String> = serde_json::from_str(parts[1]).unwrap_or_default();
+
         // Extract payload
         let response_payload = parts[2].as_bytes().to_vec();
-        
+
         Ok(RpcResponse {
             payload: response_payload,
             metadata,
@@ -314,8 +320,14 @@ mod tests {
         assert_eq!(deserialized.method.service, "test.Service");
         assert_eq!(deserialized.method.method, "TestMethod");
         assert_eq!(deserialized.payload, vec![1, 2, 3, 4]);
-        assert_eq!(deserialized.metadata.get("key1"), Some(&"value1".to_string()));
-        assert_eq!(deserialized.metadata.get("key2"), Some(&"value2".to_string()));
+        assert_eq!(
+            deserialized.metadata.get("key1"),
+            Some(&"value1".to_string())
+        );
+        assert_eq!(
+            deserialized.metadata.get("key2"),
+            Some(&"value2".to_string())
+        );
     }
 
     #[test]
@@ -328,7 +340,10 @@ mod tests {
 
         assert!(deserialized.is_success());
         assert_eq!(deserialized.payload, vec![5, 6, 7, 8]);
-        assert_eq!(deserialized.metadata.get("response_key"), Some(&"response_value".to_string()));
+        assert_eq!(
+            deserialized.metadata.get("response_key"),
+            Some(&"response_value".to_string())
+        );
     }
 
     #[test]

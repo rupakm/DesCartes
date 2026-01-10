@@ -1,10 +1,12 @@
 //! Tonic-compatible RPC client implementation for discrete event simulation
 
 use crate::tonic::{
-    MethodDescriptor, RpcCodec, RpcEvent, RpcRequest, RpcResponse, RpcStatus, RpcStatusCode,
-    TonicError, TonicResult, utils,
+    utils, MethodDescriptor, RpcCodec, RpcEvent, RpcRequest, RpcResponse, RpcStatus, RpcStatusCode,
+    TonicError, TonicResult,
 };
-use crate::transport::{EndpointId, MessageType, SharedEndpointRegistry, SimTransport, TransportEvent};
+use crate::transport::{
+    EndpointId, MessageType, SharedEndpointRegistry, SimTransport, TransportEvent,
+};
 use des_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -43,7 +45,7 @@ where
         codec: Box<dyn RpcCodec<T>>,
     ) -> Self {
         let endpoint_id = EndpointId::new(format!("client-{}", service_name));
-        
+
         Self {
             endpoint_id,
             service_name,
@@ -70,7 +72,8 @@ where
         scheduler_handle: &SchedulerHandle,
     ) -> TonicResult<T> {
         // Find target endpoint
-        let target_endpoint = self.endpoint_registry
+        let target_endpoint = self
+            .endpoint_registry
             .get_endpoint_for_service(&self.service_name)
             .ok_or_else(|| TonicError::ServiceNotFound(self.service_name.clone()))?;
 
@@ -79,8 +82,8 @@ where
 
         // Create RPC request
         let method = MethodDescriptor::new(self.service_name.clone(), method_name.to_string());
-        let rpc_request = RpcRequest::new(method, request_payload)
-            .with_timeout(self.default_timeout);
+        let rpc_request =
+            RpcRequest::new(method, request_payload).with_timeout(self.default_timeout);
 
         // Generate correlation ID
         let correlation_id = {
@@ -94,7 +97,7 @@ where
 
         // Create response channel
         let (response_tx, response_rx) = oneshot::channel();
-        
+
         // Store pending request
         {
             let mut pending = self.pending_requests.lock().unwrap();
@@ -114,7 +117,8 @@ where
                     transport_payload,
                     scheduler_handle.time(),
                     MessageType::UnaryRequest,
-                ).with_correlation_id(correlation_id.clone()),
+                )
+                .with_correlation_id(correlation_id.clone()),
                 destination: target_endpoint.id,
             },
         );
@@ -124,11 +128,14 @@ where
         scheduler_handle.schedule(
             SimTime::from_duration(self.default_timeout),
             client_key,
-            RpcEvent::RequestTimeout { correlation_id: correlation_id.clone() },
+            RpcEvent::RequestTimeout {
+                correlation_id: correlation_id.clone(),
+            },
         );
 
         // Wait for response
-        let rpc_response = response_rx.await
+        let rpc_response = response_rx
+            .await
             .map_err(|_| TonicError::Internal("Response channel closed".to_string()))?;
 
         // Check response status
@@ -137,9 +144,7 @@ where
                 // Decode response
                 self.codec.decode(&rpc_response.payload)
             }
-            RpcStatus::Error { code, message } => {
-                Err(TonicError::RpcFailed { code, message })
-            }
+            RpcStatus::Error { code, message } => Err(TonicError::RpcFailed { code, message }),
         }
     }
 
@@ -202,8 +207,12 @@ where
         _scheduler: &mut Scheduler,
     ) {
         match event {
-            RpcEvent::ResponseReceived { response, correlation_id } => {
-                self.client.handle_response(response.clone(), correlation_id.clone());
+            RpcEvent::ResponseReceived {
+                response,
+                correlation_id,
+            } => {
+                self.client
+                    .handle_response(response.clone(), correlation_id.clone());
             }
             RpcEvent::RequestTimeout { correlation_id } => {
                 self.client.handle_timeout(correlation_id.clone());
@@ -271,17 +280,23 @@ where
 
     /// Build the client
     pub fn build(self) -> TonicResult<SimTonicClient<T>> {
-        let service_name = self.service_name
+        let service_name = self
+            .service_name
             .ok_or_else(|| TonicError::Internal("Service name is required".to_string()))?;
-        let transport_key = self.transport_key
+        let transport_key = self
+            .transport_key
             .ok_or_else(|| TonicError::Internal("Transport key is required".to_string()))?;
-        let endpoint_registry = self.endpoint_registry
+        let endpoint_registry = self
+            .endpoint_registry
             .ok_or_else(|| TonicError::Internal("Endpoint registry is required".to_string()))?;
-        let codec = self.codec
+        let codec = self
+            .codec
             .ok_or_else(|| TonicError::Internal("Codec is required".to_string()))?;
 
-        Ok(SimTonicClient::new(service_name, transport_key, endpoint_registry, codec)
-            .with_timeout(self.timeout))
+        Ok(
+            SimTonicClient::new(service_name, transport_key, endpoint_registry, codec)
+                .with_timeout(self.timeout),
+        )
     }
 }
 
@@ -298,7 +313,7 @@ where
 mod tests {
     use super::*;
     use crate::tonic::codec::JsonCodec;
-    use crate::transport::{SimpleNetworkModel, SimTransport};
+    use crate::transport::{SimTransport, SimpleNetworkModel};
     use des_core::Simulation;
     use serde::{Deserialize, Serialize};
 
@@ -316,12 +331,9 @@ mod tests {
     #[test]
     fn test_client_creation() {
         let mut sim = Simulation::default();
-        
+
         // Create transport
-        let network_model = Box::new(SimpleNetworkModel::new(
-            Duration::from_millis(10),
-            0.0,
-        ));
+        let network_model = Box::new(SimpleNetworkModel::new(Duration::from_millis(10), 0.0));
         let transport = SimTransport::new(network_model);
         let transport_key = sim.add_component(transport);
 
@@ -342,8 +354,7 @@ mod tests {
     #[test]
     fn test_client_builder_validation() {
         // Missing service name
-        let result = TonicClientBuilder::<TestRequest>::new()
-            .build();
+        let result = TonicClientBuilder::<TestRequest>::new().build();
         assert!(result.is_err());
 
         // Missing transport key

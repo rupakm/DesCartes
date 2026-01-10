@@ -6,10 +6,10 @@ use crate::tonic::{TonicError, TonicResult};
 pub trait RpcCodec<T>: Send + Sync {
     /// Encode a message to bytes
     fn encode(&self, message: &T) -> TonicResult<Vec<u8>>;
-    
+
     /// Decode bytes to a message
     fn decode(&self, bytes: &[u8]) -> TonicResult<T>;
-    
+
     /// Get the content type for this codec
     fn content_type(&self) -> &'static str;
 }
@@ -40,16 +40,17 @@ where
 {
     fn encode(&self, message: &T) -> TonicResult<Vec<u8>> {
         let mut buf = Vec::new();
-        message.encode(&mut buf)
+        message
+            .encode(&mut buf)
             .map_err(|e| TonicError::Serialization(format!("Protobuf encode error: {}", e)))?;
         Ok(buf)
     }
-    
+
     fn decode(&self, bytes: &[u8]) -> TonicResult<T> {
         T::decode(bytes)
             .map_err(|e| TonicError::Serialization(format!("Protobuf decode error: {}", e)))
     }
-    
+
     fn content_type(&self) -> &'static str {
         "application/grpc+proto"
     }
@@ -83,12 +84,12 @@ where
         serde_json::to_vec(message)
             .map_err(|e| TonicError::Serialization(format!("JSON encode error: {}", e)))
     }
-    
+
     fn decode(&self, bytes: &[u8]) -> TonicResult<T> {
         serde_json::from_slice(bytes)
             .map_err(|e| TonicError::Serialization(format!("JSON decode error: {}", e)))
     }
-    
+
     fn content_type(&self) -> &'static str {
         "application/grpc+json"
     }

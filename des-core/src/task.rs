@@ -97,7 +97,6 @@ impl<T: Task> TaskExecution for TaskWrapper<T> {
         Box::new(result)
     }
 
-    #[must_use]
     fn task_id(&self) -> TaskId {
         self.task_id
     }

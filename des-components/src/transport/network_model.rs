@@ -13,14 +13,29 @@ use std::time::Duration;
 /// Trait for modeling network characteristics between endpoints
 pub trait NetworkModel: Send + Sync {
     /// Calculate the latency for a message between two endpoints
-    fn calculate_latency(&mut self, from: EndpointId, to: EndpointId, message: &TransportMessage) -> Duration;
-    
+    fn calculate_latency(
+        &mut self,
+        from: EndpointId,
+        to: EndpointId,
+        message: &TransportMessage,
+    ) -> Duration;
+
     /// Determine if a message should be dropped
-    fn should_drop_message(&mut self, from: EndpointId, to: EndpointId, message: &TransportMessage) -> bool;
-    
+    fn should_drop_message(
+        &mut self,
+        from: EndpointId,
+        to: EndpointId,
+        message: &TransportMessage,
+    ) -> bool;
+
     /// Calculate bandwidth delay based on message size
-    fn calculate_bandwidth_delay(&mut self, from: EndpointId, to: EndpointId, message: &TransportMessage) -> Duration;
-    
+    fn calculate_bandwidth_delay(
+        &mut self,
+        from: EndpointId,
+        to: EndpointId,
+        message: &TransportMessage,
+    ) -> Duration;
+
     /// Reset any internal state (useful for deterministic testing)
     fn reset(&mut self);
 }
@@ -38,6 +53,11 @@ pub struct SimpleNetworkModel {
 impl SimpleNetworkModel {
     /// Create a new simple network model
     pub fn new(base_latency: Duration, packet_loss_rate: f64) -> Self {
+        assert!(
+            packet_loss_rate >= 0.0 && packet_loss_rate <= 1.0,
+            "packet_loss_rate must be between 0.0 and 1.0, got {}",
+            packet_loss_rate
+        );
         use rand::SeedableRng;
         Self {
             base_latency,
@@ -46,8 +66,13 @@ impl SimpleNetworkModel {
         }
     }
 
-    /// Create with a specific seed for deterministic behavior
+    /// Create a new simple network model with deterministic RNG
     pub fn with_seed(base_latency: Duration, packet_loss_rate: f64, seed: u64) -> Self {
+        assert!(
+            packet_loss_rate >= 0.0 && packet_loss_rate <= 1.0,
+            "packet_loss_rate must be between 0.0 and 1.0, got {}",
+            packet_loss_rate
+        );
         use rand::SeedableRng;
         Self {
             base_latency,
@@ -58,15 +83,30 @@ impl SimpleNetworkModel {
 }
 
 impl NetworkModel for SimpleNetworkModel {
-    fn calculate_latency(&mut self, _from: EndpointId, _to: EndpointId, _message: &TransportMessage) -> Duration {
+    fn calculate_latency(
+        &mut self,
+        _from: EndpointId,
+        _to: EndpointId,
+        _message: &TransportMessage,
+    ) -> Duration {
         self.base_latency
     }
 
-    fn should_drop_message(&mut self, _from: EndpointId, _to: EndpointId, _message: &TransportMessage) -> bool {
+    fn should_drop_message(
+        &mut self,
+        _from: EndpointId,
+        _to: EndpointId,
+        _message: &TransportMessage,
+    ) -> bool {
         self.rng.gen::<f64>() < self.packet_loss_rate
     }
 
-    fn calculate_bandwidth_delay(&mut self, _from: EndpointId, _to: EndpointId, _message: &TransportMessage) -> Duration {
+    fn calculate_bandwidth_delay(
+        &mut self,
+        _from: EndpointId,
+        _to: EndpointId,
+        _message: &TransportMessage,
+    ) -> Duration {
         Duration::ZERO // No bandwidth limits in simple model
     }
 
@@ -112,12 +152,22 @@ impl LatencyConfig {
 
     /// Add jitter as a fraction of base latency
     pub fn with_jitter(mut self, jitter_factor: f64) -> Self {
+        assert!(
+            jitter_factor >= 0.0,
+            "jitter_factor must be non-negative, got {}",
+            jitter_factor
+        );
         self.jitter_factor = jitter_factor;
         self
     }
 
     /// Add packet loss
     pub fn with_packet_loss(mut self, packet_loss_rate: f64) -> Self {
+        assert!(
+            packet_loss_rate >= 0.0 && packet_loss_rate <= 1.0,
+            "packet_loss_rate must be between 0.0 and 1.0, got {}",
+            packet_loss_rate
+        );
         self.packet_loss_rate = packet_loss_rate;
         self
     }
@@ -157,18 +207,26 @@ impl LatencyJitterModel {
 
     /// Get latency configuration for an endpoint pair
     fn get_config(&self, from: EndpointId, to: EndpointId) -> &LatencyConfig {
-        self.latency_config.get(&(from, to)).unwrap_or(&self.default_config)
+        self.latency_config
+            .get(&(from, to))
+            .unwrap_or(&self.default_config)
     }
 }
 
 impl NetworkModel for LatencyJitterModel {
-    fn calculate_latency(&mut self, from: EndpointId, to: EndpointId, _message: &TransportMessage) -> Duration {
+    fn calculate_latency(
+        &mut self,
+        from: EndpointId,
+        to: EndpointId,
+        _message: &TransportMessage,
+    ) -> Duration {
         let config = self.get_config(from, to);
         let base_ms = config.base_latency.as_millis() as f64;
-        
+
         if config.jitter_factor > 0.0 {
             let jitter_std = base_ms * config.jitter_factor;
-            let normal = Normal::new(base_ms, jitter_std).unwrap_or_else(|_| Normal::new(base_ms, 1.0).unwrap());
+            let normal = Normal::new(base_ms, jitter_std)
+                .unwrap_or_else(|_| Normal::new(base_ms, 1.0).unwrap());
             let latency_ms = normal.sample(&mut self.rng).max(0.0);
             Duration::from_millis(latency_ms as u64)
         } else {
@@ -176,12 +234,22 @@ impl NetworkModel for LatencyJitterModel {
         }
     }
 
-    fn should_drop_message(&mut self, from: EndpointId, to: EndpointId, _message: &TransportMessage) -> bool {
+    fn should_drop_message(
+        &mut self,
+        from: EndpointId,
+        to: EndpointId,
+        _message: &TransportMessage,
+    ) -> bool {
         let packet_loss_rate = self.get_config(from, to).packet_loss_rate;
         self.rng.gen::<f64>() < packet_loss_rate
     }
 
-    fn calculate_bandwidth_delay(&mut self, from: EndpointId, to: EndpointId, message: &TransportMessage) -> Duration {
+    fn calculate_bandwidth_delay(
+        &mut self,
+        from: EndpointId,
+        to: EndpointId,
+        message: &TransportMessage,
+    ) -> Duration {
         let config = self.get_config(from, to);
         if config.bandwidth_bps > 0 {
             let bytes = message.size() as u64;
@@ -212,7 +280,7 @@ mod tests {
 
         let endpoint1 = EndpointId::new("service1".to_string());
         let endpoint2 = EndpointId::new("service2".to_string());
-        
+
         let message = TransportMessage::new(
             1,
             endpoint1,
@@ -242,7 +310,7 @@ mod tests {
 
         let endpoint1 = EndpointId::new("service1".to_string());
         let endpoint2 = EndpointId::new("service2".to_string());
-        
+
         let message = TransportMessage::new(
             1,
             endpoint1,
@@ -255,11 +323,11 @@ mod tests {
         // Test latency with jitter
         let latency1 = model.calculate_latency(endpoint1, endpoint2, &message);
         let latency2 = model.calculate_latency(endpoint1, endpoint2, &message);
-        
+
         // With jitter, latencies should potentially be different
         // (though with small sample size they might be the same)
         println!("Latency 1: {:?}, Latency 2: {:?}", latency1, latency2);
-        
+
         // Both should be reasonable values around 50ms
         assert!(latency1.as_millis() > 0);
         assert!(latency2.as_millis() > 0);
@@ -269,14 +337,13 @@ mod tests {
 
     #[test]
     fn test_bandwidth_delay() {
-        let config = LatencyConfig::new(Duration::from_millis(10))
-            .with_bandwidth(1000); // 1000 bytes per second
+        let config = LatencyConfig::new(Duration::from_millis(10)).with_bandwidth(1000); // 1000 bytes per second
 
         let mut model = LatencyJitterModel::with_seed(config, 456);
 
         let endpoint1 = EndpointId::new("service1".to_string());
         let endpoint2 = EndpointId::new("service2".to_string());
-        
+
         // 500 byte message
         let message = TransportMessage::new(
             1,
@@ -288,7 +355,7 @@ mod tests {
         );
 
         let bandwidth_delay = model.calculate_bandwidth_delay(endpoint1, endpoint2, &message);
-        
+
         // 500 bytes at 1000 bps = 0.5 seconds
         assert_eq!(bandwidth_delay, Duration::from_millis(500));
     }

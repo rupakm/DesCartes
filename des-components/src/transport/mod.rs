@@ -4,20 +4,24 @@
 //! simulations. It supports configurable network models for latency, jitter, packet loss,
 //! and bandwidth constraints while maintaining deterministic behavior.
 
-pub mod network_model;
 pub mod endpoint_registry;
+pub mod network_model;
 pub mod sim_transport;
 
-pub use network_model::{NetworkModel, SimpleNetworkModel, LatencyJitterModel, LatencyConfig};
-pub use endpoint_registry::{EndpointId, EndpointRegistry, SimEndpointRegistry, EndpointInfo, SharedEndpointRegistry};
-pub use sim_transport::{SimTransport};
+pub use endpoint_registry::{
+    EndpointId, EndpointInfo, EndpointRegistry, SharedEndpointRegistry, SimEndpointRegistry,
+};
+pub use network_model::{LatencyConfig, LatencyJitterModel, NetworkModel, SimpleNetworkModel};
+pub use sim_transport::SimTransport;
 
-use des_core::{SimTime};
+use des_core::SimTime;
 use std::time::Duration;
 
 /// Events that can be processed by transport components
 #[derive(Debug, Clone)]
 pub enum TransportEvent {
+    /// Request to send a message through the transport
+    SendMessage { message: TransportMessage },
     /// A message has been delivered to its destination
     MessageDelivered {
         message: TransportMessage,

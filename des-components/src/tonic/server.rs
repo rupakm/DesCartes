@@ -1,10 +1,12 @@
 //! Tonic-compatible RPC server implementation for discrete event simulation
 
 use crate::tonic::{
-    MethodDescriptor, RpcCodec, RpcEvent, RpcRequest, RpcResponse, RpcService, RpcStatus,
-    RpcStatusCode, TonicError, TonicResult, utils,
+    utils, MethodDescriptor, RpcCodec, RpcEvent, RpcRequest, RpcResponse, RpcService, RpcStatus,
+    RpcStatusCode, TonicError, TonicResult,
 };
-use crate::transport::{EndpointId, EndpointInfo, MessageType, SharedEndpointRegistry, TransportEvent};
+use crate::transport::{
+    EndpointId, EndpointInfo, MessageType, SharedEndpointRegistry, TransportEvent,
+};
 use des_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -38,7 +40,7 @@ impl SimTonicServer {
         endpoint_registry: SharedEndpointRegistry,
     ) -> Self {
         let endpoint_id = EndpointId::new(format!("{}:{}", service_name, instance_name));
-        
+
         Self {
             endpoint_id,
             service_name,
@@ -65,9 +67,10 @@ impl SimTonicServer {
 
     /// Start the server (register with endpoint registry)
     pub fn start(&self) -> TonicResult<()> {
-        let endpoint_info = EndpointInfo::new(self.service_name.clone(), self.instance_name.clone())
-            .with_metadata("type".to_string(), "grpc".to_string())
-            .with_metadata("endpoint_id".to_string(), self.endpoint_id.id().to_string());
+        let endpoint_info =
+            EndpointInfo::new(self.service_name.clone(), self.instance_name.clone())
+                .with_metadata("type".to_string(), "grpc".to_string())
+                .with_metadata("endpoint_id".to_string(), self.endpoint_id.id().to_string());
 
         self.endpoint_registry
             .register_endpoint(endpoint_info)
@@ -94,7 +97,9 @@ impl SimTonicServer {
         scheduler_handle: &SchedulerHandle,
     ) -> TonicResult<()> {
         // Find service for this method
-        let service = self.services.get_mut(&request.method.service)
+        let service = self
+            .services
+            .get_mut(&request.method.service)
             .ok_or_else(|| TonicError::ServiceNotFound(request.method.service.clone()))?;
 
         // Check if method is supported
@@ -103,7 +108,12 @@ impl SimTonicServer {
                 RpcStatusCode::Unimplemented,
                 format!("Method {} not implemented", request.method.method),
             );
-            self.send_response(error_response, response_sender, client_endpoint, scheduler_handle)?;
+            self.send_response(
+                error_response,
+                response_sender,
+                client_endpoint,
+                scheduler_handle,
+            )?;
             return Ok(());
         }
 
@@ -114,14 +124,15 @@ impl SimTonicServer {
             }
             Err(error) => {
                 let error_response = match error {
-                    TonicError::RpcFailed { code, message } => {
-                        RpcResponse::error(code, message)
-                    }
-                    _ => {
-                        RpcResponse::error(RpcStatusCode::Internal, error.to_string())
-                    }
+                    TonicError::RpcFailed { code, message } => RpcResponse::error(code, message),
+                    _ => RpcResponse::error(RpcStatusCode::Internal, error.to_string()),
                 };
-                self.send_response(error_response, response_sender, client_endpoint, scheduler_handle)?;
+                self.send_response(
+                    error_response,
+                    response_sender,
+                    client_endpoint,
+                    scheduler_handle,
+                )?;
             }
         }
 
@@ -146,7 +157,7 @@ impl SimTonicServer {
 
         // Also send through transport (for network simulation)
         let transport_payload = utils::serialize_rpc_response(&response);
-        
+
         // Schedule transport message
         scheduler_handle.schedule_now(
             self.transport_key,
@@ -212,7 +223,7 @@ impl Component for TonicServerComponent {
         _self_id: Key<Self::Event>,
         event: &Self::Event,
         scheduler: &mut Scheduler,
-    ) {        
+    ) {
         match event {
             RpcEvent::RequestReceived {
                 request,
@@ -300,17 +311,24 @@ impl TonicServerBuilder {
 
     /// Build the server
     pub fn build(self) -> TonicResult<SimTonicServer> {
-        let service_name = self.service_name
+        let service_name = self
+            .service_name
             .ok_or_else(|| TonicError::Internal("Service name is required".to_string()))?;
-        let instance_name = self.instance_name
-            .unwrap_or_else(|| "default".to_string());
-        let transport_key = self.transport_key
+        let instance_name = self.instance_name.unwrap_or_else(|| "default".to_string());
+        let transport_key = self
+            .transport_key
             .ok_or_else(|| TonicError::Internal("Transport key is required".to_string()))?;
-        let endpoint_registry = self.endpoint_registry
+        let endpoint_registry = self
+            .endpoint_registry
             .ok_or_else(|| TonicError::Internal("Endpoint registry is required".to_string()))?;
 
-        let mut server = SimTonicServer::new(service_name, instance_name, transport_key, endpoint_registry)
-            .with_timeout(self.timeout);
+        let mut server = SimTonicServer::new(
+            service_name,
+            instance_name,
+            transport_key,
+            endpoint_registry,
+        )
+        .with_timeout(self.timeout);
 
         // Add all services
         for service in self.services {
@@ -344,12 +362,10 @@ impl RpcService for EchoService {
                 // Echo the request payload back as response
                 Ok(RpcResponse::success(request.payload))
             }
-            _ => {
-                Err(TonicError::MethodNotFound {
-                    service: request.method.service,
-                    method: request.method.method,
-                })
-            }
+            _ => Err(TonicError::MethodNotFound {
+                service: request.method.service,
+                method: request.method.method,
+            }),
         }
     }
 
@@ -365,18 +381,15 @@ impl RpcService for EchoService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::{SimpleNetworkModel, SimTransport};
+    use crate::transport::{SimTransport, SimpleNetworkModel};
     use des_core::Simulation;
 
     #[test]
     fn test_server_creation() {
         let mut sim = Simulation::default();
-        
+
         // Create transport
-        let network_model = Box::new(SimpleNetworkModel::new(
-            Duration::from_millis(10),
-            0.0,
-        ));
+        let network_model = Box::new(SimpleNetworkModel::new(Duration::from_millis(10), 0.0));
         let transport = SimTransport::new(network_model);
         let transport_key = sim.add_component(transport);
 
@@ -398,8 +411,7 @@ mod tests {
     #[test]
     fn test_server_builder_validation() {
         // Missing service name
-        let result = TonicServerBuilder::new()
-            .build();
+        let result = TonicServerBuilder::new().build();
         assert!(result.is_err());
 
         // Missing transport key

@@ -55,58 +55,44 @@ use crate::{Component, Key, SimTime};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TaskId(pub u64);
 
-// Thread-local storage for current simulation time and scheduler during polling.
-// This allows SimSleep to access the current time and schedule wake events.
+// Thread-local storage for the currently-polling runtime and task.
+//
+// Time access and scheduling are provided by the scheduler's own context
+// (`des_core::scheduler::current_time` and `schedule_in_context`) so we avoid
+// duplicating TLS or storing raw scheduler pointers here.
 thread_local! {
-    static CURRENT_TIME: RefCell<Option<SimTime>> = const { RefCell::new(None) };
-    static CURRENT_SCHEDULER: RefCell<Option<*mut Scheduler>> = const { RefCell::new(None) };
     static CURRENT_RUNTIME_KEY: RefCell<Option<Key<RuntimeEvent>>> = const { RefCell::new(None) };
     static CURRENT_TASK_ID: RefCell<Option<TaskId>> = const { RefCell::new(None) };
 }
 
 /// Get the current simulation time (for use in futures).
+///
+/// Returns `None` if called outside scheduler context.
 pub fn current_sim_time() -> Option<SimTime> {
-    CURRENT_TIME.with(|t| *t.borrow())
+    crate::scheduler::current_time()
 }
 
-fn set_poll_context(
-    time: SimTime,
-    scheduler: &mut Scheduler,
-    runtime_key: Key<RuntimeEvent>,
-    task_id: TaskId,
-) {
-    CURRENT_TIME.with(|t| *t.borrow_mut() = Some(time));
-    CURRENT_SCHEDULER.with(|s| *s.borrow_mut() = Some(scheduler as *mut Scheduler));
+fn set_poll_context(runtime_key: Key<RuntimeEvent>, task_id: TaskId) {
     CURRENT_RUNTIME_KEY.with(|k| *k.borrow_mut() = Some(runtime_key));
     CURRENT_TASK_ID.with(|t| *t.borrow_mut() = Some(task_id));
 }
 
 fn clear_poll_context() {
-    CURRENT_TIME.with(|t| *t.borrow_mut() = None);
-    CURRENT_SCHEDULER.with(|s| *s.borrow_mut() = None);
     CURRENT_RUNTIME_KEY.with(|k| *k.borrow_mut() = None);
     CURRENT_TASK_ID.with(|t| *t.borrow_mut() = None);
 }
 
 /// Schedule a wake event at a specific time (used by SimSleep).
 fn schedule_wake_at(delay: SimTime) {
-    CURRENT_SCHEDULER.with(|sched| {
-        CURRENT_RUNTIME_KEY.with(|key| {
-            CURRENT_TASK_ID.with(|task| {
-                if let (Some(sched_ptr), Some(runtime_key), Some(task_id)) =
-                    (*sched.borrow(), *key.borrow(), *task.borrow())
-                {
-                    if !sched_ptr.is_null() {
-                        unsafe {
-                            (*sched_ptr).schedule(
-                                delay,
-                                runtime_key,
-                                RuntimeEvent::Wake { task_id },
-                            );
-                        }
-                    }
-                }
-            });
+    CURRENT_RUNTIME_KEY.with(|key| {
+        CURRENT_TASK_ID.with(|task| {
+            if let (Some(runtime_key), Some(task_id)) = (*key.borrow(), *task.borrow()) {
+                crate::scheduler::schedule_in_context(
+                    delay,
+                    runtime_key,
+                    RuntimeEvent::Wake { task_id },
+                );
+            }
         });
     });
 }
@@ -203,8 +189,8 @@ impl DesRuntime {
     }
 
     /// Poll a single task.
-    #[instrument(skip(self, scheduler), fields(task_id = ?task_id))]
-    fn poll_task(&mut self, task_id: TaskId, scheduler: &mut Scheduler) -> Option<Poll<()>> {
+    #[instrument(skip(self, _scheduler), fields(task_id = ?task_id))]
+    fn poll_task(&mut self, task_id: TaskId, _scheduler: &mut Scheduler) -> Option<Poll<()>> {
         let runtime_key = self.runtime_key?;
         let task = self.tasks.get_mut(&task_id)?;
 
@@ -213,7 +199,7 @@ impl DesRuntime {
         let mut cx = Context::from_waker(&waker);
 
         // Set poll context for SimSleep
-        set_poll_context(scheduler.time(), scheduler, runtime_key, task_id);
+        set_poll_context(runtime_key, task_id);
 
         trace!("Polling async task");
         let result = task.future.as_mut().poll(&mut cx);

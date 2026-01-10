@@ -30,6 +30,14 @@ pub use retry_policy::{
 };
 pub use server::{Server, ServerEvent};
 pub use simple_client::{ClientEvent, SimpleClient};
+pub use tonic::{
+    codec::{JsonCodec, ProtobufCodec},
+    ClientStats, DesTonicClient, DesTonicClientBuilder, DesTonicServer, DesTonicServerBuilder,
+    MethodDescriptor, RpcCodec, RpcEvent, RpcRequest, RpcResponse, RpcService, RpcStatus,
+    RpcStatusCode, ServerStats, SimTonicClient, SimTonicServer, TonicClientBuilder,
+    TonicClientComponent, TonicClientEvent, TonicError, TonicResult, TonicServerBuilder,
+    TonicServerComponent, TonicServerEvent, TonicTransportRouter,
+};
 pub use tower::retry::{
     exponential_backoff_layer, DesRetryLayer, DesRetryPolicy, ExponentialBackoff,
 };
@@ -42,11 +50,6 @@ pub use transport::{
     EndpointId, EndpointInfo, EndpointRegistry, LatencyConfig, LatencyJitterModel, MessageType,
     NetworkModel, SharedEndpointRegistry, SimEndpointRegistry, SimTransport, SimpleNetworkModel,
     TransportEvent, TransportMessage,
-};
-pub use tonic::{
-    codec::{JsonCodec, ProtobufCodec}, MethodDescriptor, RpcCodec, RpcEvent, RpcRequest, RpcResponse,
-    RpcService, RpcStatus, RpcStatusCode, SimTonicClient, SimTonicServer, TonicClientBuilder,
-    TonicClientComponent, TonicError, TonicResult, TonicServerBuilder, TonicServerComponent,
 };
 
 pub use builder::{

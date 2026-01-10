@@ -10,28 +10,28 @@ pub type TonicResult<T> = Result<T, TonicError>;
 pub enum TonicError {
     #[error("Transport error: {0}")]
     Transport(String),
-    
+
     #[error("Serialization error: {0}")]
     Serialization(String),
-    
+
     #[error("Invalid message format: {0}")]
     InvalidMessage(String),
-    
+
     #[error("Service not found: {0}")]
     ServiceNotFound(String),
-    
+
     #[error("Method not found: {service}/{method}")]
     MethodNotFound { service: String, method: String },
-    
+
     #[error("Request timeout after {duration:?}")]
     Timeout { duration: std::time::Duration },
-    
+
     #[error("RPC failed with status {code:?}: {message}")]
     RpcFailed {
         code: crate::tonic::RpcStatusCode,
         message: String,
     },
-    
+
     #[error("Internal error: {0}")]
     Internal(String),
 }

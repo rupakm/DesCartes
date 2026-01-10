@@ -410,6 +410,12 @@ impl Simulation {
         scheduler.schedule(time, component, event);
     }
 
+    /// Schedules a new event to be executed right away in component `component`.
+    pub fn schedule_now<E: std::fmt::Debug + 'static>(&mut self, component: Key<E>, event: E) {
+        let mut scheduler = self.scheduler.lock().unwrap();
+        scheduler.schedule(SimTime::zero(), component, event);
+    }
+
     /// Returns the time of the next scheduled event, or None if no events are scheduled.
     pub fn peek_next_event_time(&self) -> Option<SimTime> {
         let mut scheduler = self.scheduler.lock().unwrap();
