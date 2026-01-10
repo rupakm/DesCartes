@@ -123,6 +123,34 @@ impl Future for ResponseFuture {
     }
 }
 
+async fn unary_call(server_key: Key<ServerEvent>, response_state: ResponseStateHandle) -> String {
+    // Send request at t=0.
+    //
+    // Important: scheduling from inside an async task runs during event processing.
+    // Using `SchedulerHandle` would attempt to lock the scheduler mutex again and can deadlock.
+    // Use `defer_wake(...)` instead, which schedules at the current sim time without locking.
+    defer_wake(
+        server_key,
+        ServerEvent::Request {
+            response_state: response_state.clone(),
+        },
+    );
+
+    // Await the response future. This returns Pending until the server responds.
+    response_state.future().await
+}
+
+async fn client_task(
+    server_key: Key<ServerEvent>,
+    response_state: ResponseStateHandle,
+    completed: Arc<Mutex<bool>>,
+) {
+    let response = unary_call(server_key, response_state).await;
+    assert_eq!(response, "ok");
+
+    *completed.lock().unwrap() = true;
+}
+
 #[test]
 fn async_client_awaits_server_response_without_blocking_simulation() {
     let mut sim = Simulation::default();
@@ -133,27 +161,14 @@ fn async_client_awaits_server_response_without_blocking_simulation() {
     // Add runtime component.
     let mut runtime = DesRuntime::new();
 
-    // Important: scheduling from inside an async task runs during event processing.
-    // Using `SchedulerHandle` would attempt to lock the scheduler mutex again and can deadlock.
-    // Use `defer_wake(...)` instead, which schedules at the current sim time without locking.
-
-    let response_state = ResponseStateHandle::new();
-    let response_future = response_state.future();
-
-    // Spawn an async "client" task.
     let completed = Arc::new(Mutex::new(false));
     let completed_clone = completed.clone();
 
+    let response_state = ResponseStateHandle::new();
+
+    // Spawn the client task using explicit `async fn` and `.await`.
     runtime.spawn(async move {
-        // Send request at t=0.
-        defer_wake(server_key, ServerEvent::Request { response_state });
-
-        // Await response; this should yield Poll::Pending until the server
-        // delivers a response at t=1s.
-        let response = response_future.await;
-        assert_eq!(response, "ok");
-
-        *completed_clone.lock().unwrap() = true;
+        client_task(server_key, response_state, completed_clone).await;
     });
 
     let runtime_key = sim.add_component(runtime);
