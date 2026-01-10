@@ -130,53 +130,6 @@ pub fn current_time() -> Option<SimTime> {
     })
 }
 
-/// Schedule an event relative to the current time.
-///
-/// This is intended for use by async runtime helpers (e.g. simulated timers)
-/// while running inside scheduler context.
-///
-/// # Panics
-///
-/// Panics in debug mode if called outside scheduler context. In release mode,
-/// buffers the scheduling operation until scheduler context becomes available.
-pub(crate) fn schedule_in_context<E: fmt::Debug + 'static>(
-    delay: SimTime,
-    component: Key<E>,
-    event: E,
-) {
-    CURRENT_SCHEDULER.with(|sched| {
-        if let Some(ptr) = *sched.borrow() {
-            // Safety: The pointer is valid during single-threaded event processing
-            let scheduler = unsafe { &mut *ptr };
-            scheduler.schedule(delay, component, event);
-        } else {
-            #[cfg(debug_assertions)]
-            panic!(
-                "schedule_in_context called outside of scheduler context. \
-                 This should only be used during single-threaded event processing. \
-                 Event: {:?}",
-                event
-            );
-
-            #[cfg(not(debug_assertions))]
-            {
-                eprintln!(
-                    "Warning: schedule_in_context called outside of scheduler context; buffering. \
-                     Event: {:?}",
-                    event
-                );
-                PENDING_WAKES.with(|pending| {
-                    pending.borrow_mut().push(DeferredWake {
-                        schedule_fn: Box::new(move |scheduler: &mut Scheduler| {
-                            scheduler.schedule(delay, component, event);
-                        }),
-                    });
-                });
-            }
-        }
-    });
-}
-
 /// Execute a closure with access to the scheduler via thread-local storage.
 /// Used internally by the simulation step to enable deferred wakes.
 pub(crate) fn set_scheduler_context(scheduler: &mut Scheduler) {

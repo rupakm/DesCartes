@@ -40,7 +40,7 @@
 //! ```
 
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -57,8 +57,8 @@ pub struct TaskId(pub u64);
 
 // Thread-local storage for the currently-polling runtime and task.
 //
-// Time access and scheduling are provided by the scheduler's own context
-// (`des_core::scheduler::current_time` and `schedule_in_context`) so we avoid
+// Time access is provided by the scheduler's own context
+// (`des_core::scheduler::current_time`) so we avoid
 // duplicating TLS or storing raw scheduler pointers here.
 thread_local! {
     static CURRENT_RUNTIME_KEY: RefCell<Option<Key<RuntimeEvent>>> = const { RefCell::new(None) };
@@ -82,15 +82,17 @@ fn clear_poll_context() {
     CURRENT_TASK_ID.with(|t| *t.borrow_mut() = None);
 }
 
-/// Schedule a wake event at a specific time (used by SimSleep).
-fn schedule_wake_at(delay: SimTime) {
+/// Register a timer for the currently polled task.
+///
+/// This schedules a `RuntimeEvent::RegisterTimer` event to the runtime via
+/// `defer_wake(...)` (no scheduler locking).
+fn register_timer_at(deadline: SimTime) {
     CURRENT_RUNTIME_KEY.with(|key| {
         CURRENT_TASK_ID.with(|task| {
             if let (Some(runtime_key), Some(task_id)) = (*key.borrow(), *task.borrow()) {
-                crate::scheduler::schedule_in_context(
-                    delay,
+                crate::defer_wake(
                     runtime_key,
-                    RuntimeEvent::Wake { task_id },
+                    RuntimeEvent::RegisterTimer { task_id, deadline },
                 );
             }
         });
@@ -102,8 +104,12 @@ fn schedule_wake_at(delay: SimTime) {
 pub enum RuntimeEvent {
     /// Poll all ready tasks.
     Poll,
-    /// Wake a specific task (from timer expiration or external event).
+    /// Wake a specific task.
     Wake { task_id: TaskId },
+    /// Register a timer for a task to be woken at `deadline`.
+    RegisterTimer { task_id: TaskId, deadline: SimTime },
+    /// Internal event fired when the next timer deadline is reached.
+    TimerTick,
 }
 
 /// A suspended async task.
@@ -127,6 +133,11 @@ pub struct DesRuntime {
     next_task_id: u64,
     tasks: HashMap<TaskId, Task>,
     ready_queue: VecDeque<TaskId>,
+
+    // Timer management
+    timers: BTreeMap<SimTime, Vec<TaskId>>,
+    next_timer_deadline: Option<SimTime>,
+
     /// Runtime's own component key (set on first event).
     runtime_key: Option<Key<RuntimeEvent>>,
 }
@@ -144,6 +155,8 @@ impl DesRuntime {
             next_task_id: 0,
             tasks: HashMap::new(),
             ready_queue: VecDeque::new(),
+            timers: BTreeMap::new(),
+            next_timer_deadline: None,
             runtime_key: None,
         }
     }
@@ -246,6 +259,63 @@ impl DesRuntime {
             trace!(?task_id, "Task added to ready queue");
         }
     }
+
+    fn schedule_next_timer_tick(&mut self, scheduler: &mut Scheduler, self_id: Key<RuntimeEvent>) {
+        let now = scheduler.time();
+        let next_deadline = self.timers.keys().next().copied();
+
+        if next_deadline == self.next_timer_deadline {
+            return;
+        }
+
+        self.next_timer_deadline = next_deadline;
+
+        if let Some(deadline) = next_deadline {
+            let delay = if deadline <= now {
+                SimTime::zero()
+            } else {
+                SimTime::from_duration(deadline - now)
+            };
+
+            scheduler.schedule(delay, self_id, RuntimeEvent::TimerTick);
+        }
+    }
+
+    fn register_timer(
+        &mut self,
+        task_id: TaskId,
+        deadline: SimTime,
+        scheduler: &mut Scheduler,
+        self_id: Key<RuntimeEvent>,
+    ) {
+        if !self.tasks.contains_key(&task_id) {
+            return;
+        }
+
+        self.timers.entry(deadline).or_default().push(task_id);
+        self.schedule_next_timer_tick(scheduler, self_id);
+    }
+
+    fn handle_timer_tick(&mut self, scheduler: &mut Scheduler, self_id: Key<RuntimeEvent>) {
+        let now = scheduler.time();
+
+        // We are about to potentially schedule a new timer tick.
+        self.next_timer_deadline = None;
+
+        while let Some((&deadline, _)) = self.timers.iter().next() {
+            if deadline > now {
+                break;
+            }
+
+            let (_deadline, tasks) = self.timers.pop_first().expect("deadline exists");
+            for task_id in tasks {
+                self.wake_task(task_id);
+            }
+        }
+
+        self.schedule_next_timer_tick(scheduler, self_id);
+        self.poll_ready_tasks(scheduler);
+    }
 }
 
 impl Component for DesRuntime {
@@ -277,6 +347,14 @@ impl Component for DesRuntime {
                 debug!(?task_id, "Processing Wake event");
                 self.wake_task(*task_id);
                 self.poll_ready_tasks(scheduler);
+            }
+            RuntimeEvent::RegisterTimer { task_id, deadline } => {
+                trace!(?task_id, ?deadline, "Processing RegisterTimer event");
+                self.register_timer(*task_id, *deadline, scheduler, self_id);
+            }
+            RuntimeEvent::TimerTick => {
+                trace!(current_time = ?scheduler.time(), "Processing TimerTick event");
+                self.handle_timer_tick(scheduler, self_id);
             }
         }
 
@@ -336,9 +414,9 @@ impl Future for SimSleep {
         if current_time >= target {
             Poll::Ready(())
         } else if !self.timer_scheduled {
-            // Schedule a wake event at the target time
-            let delay = target - current_time;
-            schedule_wake_at(SimTime::from_duration(delay));
+            // Register a timer for the task. The runtime will wake this task
+            // by emitting `RuntimeEvent::Wake { task_id }` when `target` is reached.
+            register_timer_at(target);
             self.timer_scheduled = true;
             Poll::Pending
         } else {
