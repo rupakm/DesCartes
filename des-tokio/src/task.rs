@@ -9,7 +9,7 @@ use std::task::{Context, Poll, Waker};
 use des_core::async_runtime::{RuntimeEvent, TaskId};
 use des_core::{defer_wake, Key};
 
-use crate::runtime;
+use crate::{runtime, runtime_internal};
 
 #[derive(Debug)]
 pub enum JoinError {
@@ -118,6 +118,8 @@ where
         state_clone.complete(result);
     });
 
+    runtime_internal::ensure_polled(runtime_key);
+
     JoinHandle {
         task_id,
         runtime_key,
@@ -141,6 +143,8 @@ where
         let result = future.await;
         state_clone.complete(result);
     });
+
+    runtime_internal::ensure_polled(runtime_key);
 
     JoinHandle {
         task_id,

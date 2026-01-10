@@ -3,12 +3,13 @@ use std::cell::RefCell;
 use des_core::async_runtime::{
     self, DesRuntime, DesRuntimeHandle, DesRuntimeLocalHandle, RuntimeEvent,
 };
-use des_core::{Key, Simulation};
+use des_core::{Key, SchedulerHandle, Simulation};
 
 #[derive(Clone)]
 struct Installed {
     handle: DesRuntimeHandle,
     local_handle: DesRuntimeLocalHandle,
+    scheduler: SchedulerHandle,
 }
 
 thread_local! {
@@ -24,6 +25,7 @@ thread_local! {
 pub fn install(sim: &mut Simulation) -> Key<RuntimeEvent> {
     let runtime = DesRuntime::new();
 
+    let scheduler = sim.scheduler_handle();
     let installed = async_runtime::install(sim, runtime);
 
     INSTALLED.with(|cell| {
@@ -34,10 +36,21 @@ pub fn install(sim: &mut Simulation) -> Key<RuntimeEvent> {
         *slot = Some(Installed {
             handle: installed.handle,
             local_handle: installed.local_handle,
+            scheduler,
         });
     });
 
     installed.runtime_key
+}
+
+pub(crate) fn with_scheduler<R>(f: impl FnOnce(&SchedulerHandle) -> R) -> R {
+    INSTALLED.with(|cell| {
+        let slot = cell.borrow();
+        let installed = slot.as_ref().expect(
+            "des_tokio runtime not installed. Call des_tokio::runtime::install(&mut Simulation) first",
+        );
+        f(&installed.scheduler)
+    })
 }
 
 pub(crate) fn with_handle<R>(f: impl FnOnce(&DesRuntimeHandle) -> R) -> R {

@@ -1,5 +1,15 @@
 //! Demonstrates deterministic async client/server interaction in DES.
 //!
+//! Note: this test intentionally uses a tiny custom response future (instead of
+//! `des_tokio::sync::oneshot`) to keep the mechanics explicit.
+//!
+//! For a comparable Tokio example using oneshot channels, see:
+//! - Tokio docs: https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html
+//! - Tokio source (oneshot implementation/tests): https://github.com/tokio-rs/tokio/blob/master/tokio/src/sync/oneshot.rs
+//!
+//! For the DES equivalent oneshot tests, see:
+//! - `des-tokio/tests/oneshot.rs`
+//!
 //! ## What this test demonstrates
 //! In a discrete-event simulation, **nothing blocks the OS thread**.
 //! Instead, an async task runs until it hits an `.await` on a Future that
