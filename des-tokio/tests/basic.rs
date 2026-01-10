@@ -25,7 +25,8 @@ fn spawn_and_join() {
         7usize
     });
 
-    // Keep the joiner handle alive; by design, dropping a JoinHandle cancels the task.
+    // JoinHandle drop is detach (Tokio-like). The joiner task will still run
+    // even if we don't keep its JoinHandle.
     let _joiner = des_tokio::task::spawn(async move {
         let v = h.await.expect("join");
         *out_clone.lock().unwrap() = Some(v);
@@ -36,7 +37,7 @@ fn spawn_and_join() {
 }
 
 #[test]
-fn drop_cancels_task() {
+fn drop_detaches_task() {
     let mut sim = Simulation::default();
     des_tokio::runtime::install(&mut sim);
 
@@ -49,9 +50,29 @@ fn drop_cancels_task() {
         0usize
     });
 
+    // Dropping the handle detaches the task (Tokio-like).
     drop(h);
 
-    // Run long enough that the task would have completed if not cancelled.
+    Executor::timed(SimTime::from_duration(Duration::from_secs(2))).execute(&mut sim);
+    assert!(*flag.lock().unwrap());
+}
+
+#[test]
+fn abort_cancels_task() {
+    let mut sim = Simulation::default();
+    des_tokio::runtime::install(&mut sim);
+
+    let flag = Arc::new(Mutex::new(false));
+    let flag2 = flag.clone();
+
+    let h = des_tokio::task::spawn(async move {
+        des_tokio::time::sleep(Duration::from_secs(1)).await;
+        *flag2.lock().unwrap() = true;
+        0usize
+    });
+
+    h.abort();
+
     Executor::timed(SimTime::from_duration(Duration::from_secs(2))).execute(&mut sim);
     assert!(!*flag.lock().unwrap());
 }

@@ -54,32 +54,11 @@ pub struct JoinHandle<T> {
     task_id: TaskId,
     runtime_key: Key<RuntimeEvent>,
     state: Arc<JoinState<T>>,
-    cancelled_on_drop: bool,
 }
 
 impl<T> JoinHandle<T> {
     pub fn abort(&self) {
         self.state.set_cancelled();
-        defer_wake(
-            self.runtime_key,
-            RuntimeEvent::Cancel {
-                task_id: self.task_id,
-            },
-        );
-    }
-}
-
-impl<T> Drop for JoinHandle<T> {
-    fn drop(&mut self) {
-        if !self.cancelled_on_drop {
-            return;
-        }
-
-        if self.state.completed.load(AtomicOrdering::Acquire) {
-            return;
-        }
-
-        // Tokio-like: dropping the JoinHandle cancels the task.
         defer_wake(
             self.runtime_key,
             RuntimeEvent::Cancel {
@@ -143,7 +122,6 @@ where
         task_id,
         runtime_key,
         state,
-        cancelled_on_drop: true,
     }
 }
 
@@ -168,6 +146,5 @@ where
         task_id,
         runtime_key,
         state,
-        cancelled_on_drop: true,
     }
 }

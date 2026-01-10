@@ -54,19 +54,41 @@ impl SimTime {
         self.0
     }
 
-    /// Calculate the duration since another SimTime
+    /// Calculate the duration since another SimTime (saturating).
     pub fn duration_since(&self, earlier: SimTime) -> Duration {
         Duration::from_nanos(self.0.saturating_sub(earlier.0))
     }
 
-    /// Add a duration to this SimTime
-    pub fn add_duration(&self, duration: Duration) -> Self {
-        SimTime(self.0.saturating_add(duration.as_nanos() as u64))
+    /// Checked duration since another SimTime.
+    /// Returns `None` if `earlier > self`.
+    pub fn checked_duration_since(&self, earlier: SimTime) -> Option<Duration> {
+        self.0.checked_sub(earlier.0).map(Duration::from_nanos)
     }
 
-    /// Subtract a duration from this SimTime
+    /// Add a duration to this SimTime (saturating).
+    pub fn add_duration(&self, duration: Duration) -> Self {
+        let nanos = duration.as_nanos();
+        let nanos = u64::try_from(nanos).unwrap_or(u64::MAX);
+        SimTime(self.0.saturating_add(nanos))
+    }
+
+    /// Checked add a duration to this SimTime.
+    pub fn checked_add_duration(&self, duration: Duration) -> Option<Self> {
+        let nanos = u64::try_from(duration.as_nanos()).ok()?;
+        self.0.checked_add(nanos).map(SimTime)
+    }
+
+    /// Subtract a duration from this SimTime (saturating).
     pub fn sub_duration(&self, duration: Duration) -> Self {
-        SimTime(self.0.saturating_sub(duration.as_nanos() as u64))
+        let nanos = duration.as_nanos();
+        let nanos = u64::try_from(nanos).unwrap_or(u64::MAX);
+        SimTime(self.0.saturating_sub(nanos))
+    }
+
+    /// Checked subtract a duration from this SimTime.
+    pub fn checked_sub_duration(&self, duration: Duration) -> Option<Self> {
+        let nanos = u64::try_from(duration.as_nanos()).ok()?;
+        self.0.checked_sub(nanos).map(SimTime)
     }
 }
 
