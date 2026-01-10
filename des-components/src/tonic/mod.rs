@@ -20,8 +20,8 @@ pub use error::{TonicError, TonicResult};
 pub use server::{SimTonicServer, TonicServerBuilder, TonicServerComponent};
 pub use transport_router::TonicTransportRouter;
 
-use crate::transport::{EndpointId, MessageType, SimTransport, TransportEvent};
-use des_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
+use crate::transport::EndpointId;
+use des_core::SchedulerHandle;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
@@ -279,7 +279,7 @@ pub mod utils {
 
         // Parse status
         let status: RpcStatus = serde_json::from_str(parts[0])
-            .map_err(|e| TonicError::InvalidMessage(format!("Invalid status format: {}", e)))?;
+            .map_err(|e| TonicError::InvalidMessage(format!("Invalid status format: {e}")))?;
 
         // Parse metadata
         let metadata: HashMap<String, String> = serde_json::from_str(parts[1]).unwrap_or_default();

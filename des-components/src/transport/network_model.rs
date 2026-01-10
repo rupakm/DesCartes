@@ -4,7 +4,6 @@
 //! network conditions including latency, jitter, packet loss, and bandwidth limits.
 
 use crate::transport::{EndpointId, TransportMessage};
-use des_core::SimTime;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use std::collections::HashMap;
@@ -54,9 +53,8 @@ impl SimpleNetworkModel {
     /// Create a new simple network model
     pub fn new(base_latency: Duration, packet_loss_rate: f64) -> Self {
         assert!(
-            packet_loss_rate >= 0.0 && packet_loss_rate <= 1.0,
-            "packet_loss_rate must be between 0.0 and 1.0, got {}",
-            packet_loss_rate
+            (0.0..=1.0).contains(&packet_loss_rate),
+            "packet_loss_rate must be between 0.0 and 1.0, got {packet_loss_rate}"
         );
         use rand::SeedableRng;
         Self {
@@ -69,9 +67,8 @@ impl SimpleNetworkModel {
     /// Create a new simple network model with deterministic RNG
     pub fn with_seed(base_latency: Duration, packet_loss_rate: f64, seed: u64) -> Self {
         assert!(
-            packet_loss_rate >= 0.0 && packet_loss_rate <= 1.0,
-            "packet_loss_rate must be between 0.0 and 1.0, got {}",
-            packet_loss_rate
+            (0.0..=1.0).contains(&packet_loss_rate),
+            "packet_loss_rate must be between 0.0 and 1.0, got {packet_loss_rate}"
         );
         use rand::SeedableRng;
         Self {
@@ -154,8 +151,7 @@ impl LatencyConfig {
     pub fn with_jitter(mut self, jitter_factor: f64) -> Self {
         assert!(
             jitter_factor >= 0.0,
-            "jitter_factor must be non-negative, got {}",
-            jitter_factor
+            "jitter_factor must be non-negative, got {jitter_factor}"
         );
         self.jitter_factor = jitter_factor;
         self
@@ -164,9 +160,8 @@ impl LatencyConfig {
     /// Add packet loss
     pub fn with_packet_loss(mut self, packet_loss_rate: f64) -> Self {
         assert!(
-            packet_loss_rate >= 0.0 && packet_loss_rate <= 1.0,
-            "packet_loss_rate must be between 0.0 and 1.0, got {}",
-            packet_loss_rate
+            (0.0..=1.0).contains(&packet_loss_rate),
+            "packet_loss_rate must be between 0.0 and 1.0, got {packet_loss_rate}"
         );
         self.packet_loss_rate = packet_loss_rate;
         self

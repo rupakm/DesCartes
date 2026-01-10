@@ -72,7 +72,7 @@ where
         codec: Box<dyn RpcCodec<T>>,
         request_generator: Box<dyn Fn(u64) -> T + Send + Sync>,
     ) -> Self {
-        let endpoint_id = EndpointId::new(format!("client-{}", name));
+        let endpoint_id = EndpointId::new(format!("client-{name}"));
 
         Self {
             name,

@@ -1,13 +1,13 @@
 //! Tonic-compatible RPC server implementation for discrete event simulation
 
 use crate::tonic::{
-    utils, MethodDescriptor, RpcCodec, RpcEvent, RpcRequest, RpcResponse, RpcService, RpcStatus,
+    utils, RpcEvent, RpcRequest, RpcResponse, RpcService,
     RpcStatusCode, TonicError, TonicResult,
 };
 use crate::transport::{
     EndpointId, EndpointInfo, MessageType, SharedEndpointRegistry, TransportEvent,
 };
-use des_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
+use des_core::{Component, Key, Scheduler, SchedulerHandle};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -39,7 +39,7 @@ impl SimTonicServer {
         transport_key: Key<TransportEvent>,
         endpoint_registry: SharedEndpointRegistry,
     ) -> Self {
-        let endpoint_id = EndpointId::new(format!("{}:{}", service_name, instance_name));
+        let endpoint_id = EndpointId::new(format!("{service_name}:{instance_name}"));
 
         Self {
             endpoint_id,
@@ -74,7 +74,7 @@ impl SimTonicServer {
 
         self.endpoint_registry
             .register_endpoint(endpoint_info)
-            .map_err(|e| TonicError::Internal(format!("Failed to register endpoint: {}", e)))?;
+            .map_err(|e| TonicError::Internal(format!("Failed to register endpoint: {e}")))?;
 
         Ok(())
     }
@@ -83,7 +83,7 @@ impl SimTonicServer {
     pub fn stop(&self) -> TonicResult<()> {
         self.endpoint_registry
             .unregister_endpoint(self.endpoint_id)
-            .map_err(|e| TonicError::Internal(format!("Failed to unregister endpoint: {}", e)))?;
+            .map_err(|e| TonicError::Internal(format!("Failed to unregister endpoint: {e}")))?;
 
         Ok(())
     }
@@ -232,7 +232,7 @@ impl Component for TonicServerComponent {
             } => {
                 // For now, we'll handle the request synchronously
                 // In a real implementation, this would be more sophisticated
-                let mut sim = des_core::Simulation::default();
+                let sim = des_core::Simulation::default();
                 let scheduler_handle = sim.scheduler_handle();
                 if let Err(e) = self.server.handle_request(
                     request.clone(),
@@ -240,7 +240,7 @@ impl Component for TonicServerComponent {
                     *client_endpoint,
                     &scheduler_handle,
                 ) {
-                    eprintln!("Error handling RPC request: {}", e);
+                    eprintln!("Error handling RPC request: {e}");
                 }
             }
             _ => {

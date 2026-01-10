@@ -70,7 +70,7 @@ impl TonicTransportRouter {
                             );
                         }
                         Err(e) => {
-                            eprintln!("Failed to deserialize response: {}", e);
+                            eprintln!("Failed to deserialize response: {e}");
                         }
                     }
                 } else {

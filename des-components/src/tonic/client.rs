@@ -5,7 +5,7 @@ use crate::tonic::{
     TonicError, TonicResult,
 };
 use crate::transport::{
-    EndpointId, MessageType, SharedEndpointRegistry, SimTransport, TransportEvent,
+    EndpointId, MessageType, SharedEndpointRegistry, TransportEvent,
 };
 use des_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
 use std::collections::HashMap;
@@ -44,7 +44,7 @@ where
         endpoint_registry: SharedEndpointRegistry,
         codec: Box<dyn RpcCodec<T>>,
     ) -> Self {
-        let endpoint_id = EndpointId::new(format!("client-{}", service_name));
+        let endpoint_id = EndpointId::new(format!("client-{service_name}"));
 
         Self {
             endpoint_id,

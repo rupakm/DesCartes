@@ -42,13 +42,13 @@ where
         let mut buf = Vec::new();
         message
             .encode(&mut buf)
-            .map_err(|e| TonicError::Serialization(format!("Protobuf encode error: {}", e)))?;
+            .map_err(|e| TonicError::Serialization(format!("Protobuf encode error: {e}")))?;
         Ok(buf)
     }
 
     fn decode(&self, bytes: &[u8]) -> TonicResult<T> {
         T::decode(bytes)
-            .map_err(|e| TonicError::Serialization(format!("Protobuf decode error: {}", e)))
+            .map_err(|e| TonicError::Serialization(format!("Protobuf decode error: {e}")))
     }
 
     fn content_type(&self) -> &'static str {
@@ -82,12 +82,12 @@ where
 {
     fn encode(&self, message: &T) -> TonicResult<Vec<u8>> {
         serde_json::to_vec(message)
-            .map_err(|e| TonicError::Serialization(format!("JSON encode error: {}", e)))
+            .map_err(|e| TonicError::Serialization(format!("JSON encode error: {e}")))
     }
 
     fn decode(&self, bytes: &[u8]) -> TonicResult<T> {
         serde_json::from_slice(bytes)
-            .map_err(|e| TonicError::Serialization(format!("JSON decode error: {}", e)))
+            .map_err(|e| TonicError::Serialization(format!("JSON decode error: {e}")))
     }
 
     fn content_type(&self) -> &'static str {

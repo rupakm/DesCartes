@@ -54,7 +54,7 @@ impl DesTonicServer {
         transport_key: Key<TransportEvent>,
         endpoint_registry: SharedEndpointRegistry,
     ) -> Self {
-        let endpoint_id = EndpointId::new(format!("{}:{}", service_name, instance_name));
+        let endpoint_id = EndpointId::new(format!("{service_name}:{instance_name}"));
 
         Self {
             name,
@@ -94,7 +94,7 @@ impl DesTonicServer {
 
         self.endpoint_registry
             .register_endpoint(endpoint_info)
-            .map_err(|e| TonicError::Internal(format!("Failed to register endpoint: {}", e)))?;
+            .map_err(|e| TonicError::Internal(format!("Failed to register endpoint: {e}")))?;
 
         println!(
             "[{}] Server {} registered and listening on endpoint {}",

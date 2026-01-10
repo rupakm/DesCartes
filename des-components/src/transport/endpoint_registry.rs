@@ -64,7 +64,7 @@ pub struct EndpointInfo {
 impl EndpointInfo {
     /// Create a new endpoint info
     pub fn new(service_name: String, instance_name: String) -> Self {
-        let id = EndpointId::new(format!("{}:{}", service_name, instance_name));
+        let id = EndpointId::new(format!("{service_name}:{instance_name}"));
         Self {
             id,
             service_name,
@@ -140,7 +140,7 @@ impl EndpointRegistry for SimEndpointRegistry {
 
         // Check if endpoint is already registered
         if self.endpoints.contains_key(&endpoint_id) {
-            return Err(format!("Endpoint {} is already registered", endpoint_id));
+            return Err(format!("Endpoint {endpoint_id} is already registered"));
         }
 
         // Register the endpoint
@@ -149,7 +149,7 @@ impl EndpointRegistry for SimEndpointRegistry {
         // Add to service list
         self.services
             .entry(service_name.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(endpoint_id);
 
         // Initialize round-robin counter if needed
@@ -163,7 +163,7 @@ impl EndpointRegistry for SimEndpointRegistry {
         let endpoint = self
             .endpoints
             .remove(&endpoint_id)
-            .ok_or_else(|| format!("Endpoint {} not found", endpoint_id))?;
+            .ok_or_else(|| format!("Endpoint {endpoint_id} not found"))?;
 
         // Remove from service list
         if let Some(endpoint_list) = self.services.get_mut(&endpoint.service_name) {
@@ -218,6 +218,12 @@ impl EndpointRegistry for SimEndpointRegistry {
 /// Thread-safe wrapper for endpoint registry
 pub struct SharedEndpointRegistry {
     inner: Arc<Mutex<SimEndpointRegistry>>,
+}
+
+impl Default for SharedEndpointRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SharedEndpointRegistry {
