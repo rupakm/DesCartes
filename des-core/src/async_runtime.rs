@@ -43,6 +43,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{
+    atomic::{AtomicU64, Ordering as AtomicOrdering},
+    Arc, Mutex,
+};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tracing::{debug, instrument, trace, warn};
@@ -54,6 +58,166 @@ use crate::{Component, Key, SimTime};
 /// Unique identifier for async tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TaskId(pub u64);
+
+struct SpawnRequestSend {
+    task_id: TaskId,
+    future: Pin<Box<dyn Future<Output = ()> + Send>>,
+}
+
+struct SpawnRequestLocal {
+    task_id: TaskId,
+    future: Pin<Box<dyn Future<Output = ()>>>,
+}
+
+/// Handle for enqueueing tasks into a runtime installed in a `Simulation`.
+///
+/// This is used by higher-level facades (e.g. `des_tokio`) to spawn tasks without
+/// direct mutable access to the runtime component.
+#[derive(Clone)]
+pub struct DesRuntimeHandle {
+    runtime_key: Key<RuntimeEvent>,
+    next_task_id: Arc<AtomicU64>,
+    spawn_queue: Arc<Mutex<VecDeque<SpawnRequestSend>>>,
+}
+
+#[derive(Clone)]
+pub struct DesRuntimeLocalHandle {
+    runtime_key: Key<RuntimeEvent>,
+    next_task_id: Arc<AtomicU64>,
+    spawn_queue: Arc<Mutex<VecDeque<SpawnRequestLocal>>>,
+}
+
+pub struct InstalledDesRuntime {
+    pub runtime_key: Key<RuntimeEvent>,
+    pub handle: DesRuntimeHandle,
+    pub local_handle: DesRuntimeLocalHandle,
+}
+
+/// Install a `DesRuntime` into the simulation and return handles for spawning tasks.
+///
+/// This schedules an initial `RuntimeEvent::Poll` at `t=0`.
+pub fn install(sim: &mut crate::Simulation, runtime: DesRuntime) -> InstalledDesRuntime {
+    let next_task_id = runtime.next_task_id.clone();
+    let spawn_queue = runtime.spawn_queue.clone();
+    let spawn_queue_local = runtime.spawn_queue_local.clone();
+
+    let runtime_key = sim.add_component(runtime);
+    sim.schedule(crate::SimTime::zero(), runtime_key, RuntimeEvent::Poll);
+
+    InstalledDesRuntime {
+        runtime_key,
+        handle: DesRuntimeHandle {
+            runtime_key,
+            next_task_id: next_task_id.clone(),
+            spawn_queue,
+        },
+        local_handle: DesRuntimeLocalHandle {
+            runtime_key,
+            next_task_id,
+            spawn_queue: spawn_queue_local,
+        },
+    }
+}
+
+impl DesRuntimeHandle {
+    pub fn runtime_key(&self) -> Key<RuntimeEvent> {
+        self.runtime_key
+    }
+
+    /// Enqueue a task to be spawned by the runtime.
+    ///
+    /// Returns the allocated `TaskId`.
+    pub fn spawn<F>(&self, future: F) -> TaskId
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let task_id = TaskId(self.next_task_id.fetch_add(1, AtomicOrdering::Relaxed));
+
+        self.spawn_queue
+            .lock()
+            .unwrap()
+            .push_back(SpawnRequestSend {
+                task_id,
+                future: Box::pin(future),
+            });
+
+        // Ensure the runtime gets polled.
+        //
+        // If we are outside scheduler context (e.g., spawning tasks during setup
+        // before the simulation starts), the initial poll scheduled by `install()`
+        // will pick up the queued tasks.
+        if crate::scheduler::in_scheduler_context() {
+            crate::defer_wake(self.runtime_key, RuntimeEvent::Poll);
+        }
+
+        task_id
+    }
+
+    /// Cancel a task by ID.
+    pub fn cancel(&self, task_id: TaskId) {
+        // If the task hasn't been installed into the runtime yet (still in the spawn queue),
+        // remove it immediately.
+        let mut queue = self.spawn_queue.lock().unwrap();
+        if !queue.is_empty() {
+            let mut retained = VecDeque::with_capacity(queue.len());
+            while let Some(req) = queue.pop_front() {
+                if req.task_id != task_id {
+                    retained.push_back(req);
+                }
+            }
+            *queue = retained;
+        }
+        drop(queue);
+
+        if crate::scheduler::in_scheduler_context() {
+            crate::defer_wake(self.runtime_key, RuntimeEvent::Cancel { task_id });
+        }
+    }
+}
+
+impl DesRuntimeLocalHandle {
+    pub fn runtime_key(&self) -> Key<RuntimeEvent> {
+        self.runtime_key
+    }
+
+    pub fn spawn_local<F>(&self, future: F) -> TaskId
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        let task_id = TaskId(self.next_task_id.fetch_add(1, AtomicOrdering::Relaxed));
+
+        self.spawn_queue
+            .lock()
+            .unwrap()
+            .push_back(SpawnRequestLocal {
+                task_id,
+                future: Box::pin(future),
+            });
+
+        if crate::scheduler::in_scheduler_context() {
+            crate::defer_wake(self.runtime_key, RuntimeEvent::Poll);
+        }
+        task_id
+    }
+
+    pub fn cancel(&self, task_id: TaskId) {
+        let mut queue = self.spawn_queue.lock().unwrap();
+        if !queue.is_empty() {
+            let mut retained = VecDeque::with_capacity(queue.len());
+            while let Some(req) = queue.pop_front() {
+                if req.task_id != task_id {
+                    retained.push_back(req);
+                }
+            }
+            *queue = retained;
+        }
+        drop(queue);
+
+        if crate::scheduler::in_scheduler_context() {
+            crate::defer_wake(self.runtime_key, RuntimeEvent::Cancel { task_id });
+        }
+    }
+}
 
 // Thread-local storage for the currently-polling runtime and task.
 //
@@ -106,6 +270,8 @@ pub enum RuntimeEvent {
     Poll,
     /// Wake a specific task.
     Wake { task_id: TaskId },
+    /// Cancel a task.
+    Cancel { task_id: TaskId },
     /// Register a timer for a task to be woken at `deadline`.
     RegisterTimer { task_id: TaskId, deadline: SimTime },
     /// Internal event fired when the next timer deadline is reached.
@@ -132,9 +298,12 @@ struct Task {
 /// 3. Add the runtime to your simulation as a component
 /// 4. Schedule an initial `RuntimeEvent::Poll` to start execution
 pub struct DesRuntime {
-    next_task_id: u64,
+    next_task_id: Arc<AtomicU64>,
     tasks: HashMap<TaskId, Task>,
     ready_queue: VecDeque<TaskId>,
+
+    spawn_queue: Arc<Mutex<VecDeque<SpawnRequestSend>>>,
+    spawn_queue_local: Arc<Mutex<VecDeque<SpawnRequestLocal>>>,
 
     // Timer management
     timers: BTreeMap<SimTime, Vec<TaskId>>,
@@ -154,12 +323,30 @@ impl DesRuntime {
     /// Create a new async runtime.
     pub fn new() -> Self {
         Self {
-            next_task_id: 0,
+            next_task_id: Arc::new(AtomicU64::new(0)),
             tasks: HashMap::new(),
             ready_queue: VecDeque::new(),
+            spawn_queue: Arc::new(Mutex::new(VecDeque::new())),
+            spawn_queue_local: Arc::new(Mutex::new(VecDeque::new())),
             timers: BTreeMap::new(),
             next_timer_deadline: None,
             runtime_key: None,
+        }
+    }
+
+    pub fn handle(&self, runtime_key: Key<RuntimeEvent>) -> DesRuntimeHandle {
+        DesRuntimeHandle {
+            runtime_key,
+            next_task_id: self.next_task_id.clone(),
+            spawn_queue: self.spawn_queue.clone(),
+        }
+    }
+
+    pub fn local_handle(&self, runtime_key: Key<RuntimeEvent>) -> DesRuntimeLocalHandle {
+        DesRuntimeLocalHandle {
+            runtime_key,
+            next_task_id: self.next_task_id.clone(),
+            spawn_queue: self.spawn_queue_local.clone(),
         }
     }
 
@@ -172,8 +359,7 @@ impl DesRuntime {
     where
         F: Future<Output = ()> + 'static,
     {
-        let task_id = TaskId(self.next_task_id);
-        self.next_task_id += 1;
+        let task_id = TaskId(self.next_task_id.fetch_add(1, AtomicOrdering::Relaxed));
 
         self.tasks.insert(
             task_id,
@@ -237,6 +423,29 @@ impl DesRuntime {
     ))]
     fn poll_ready_tasks(&mut self, scheduler: &mut Scheduler) {
         debug!("Polling ready tasks");
+
+        // Drain any externally-enqueued spawn requests.
+        while let Some(req) = self.spawn_queue.lock().unwrap().pop_front() {
+            self.tasks.insert(
+                req.task_id,
+                Task {
+                    // Coerce `dyn Future + Send` to `dyn Future`.
+                    future: req.future,
+                    queued: true,
+                },
+            );
+            self.ready_queue.push_back(req.task_id);
+        }
+        while let Some(req) = self.spawn_queue_local.lock().unwrap().pop_front() {
+            self.tasks.insert(
+                req.task_id,
+                Task {
+                    future: req.future,
+                    queued: true,
+                },
+            );
+            self.ready_queue.push_back(req.task_id);
+        }
 
         // Snapshot polling: only poll tasks that were ready at the start of this cycle.
         // Tasks woken while polling will be queued for the next cycle.
@@ -340,6 +549,29 @@ impl DesRuntime {
         self.schedule_next_timer_tick(scheduler, self_id);
         self.poll_ready_tasks(scheduler);
     }
+
+    fn cancel_task(
+        &mut self,
+        task_id: TaskId,
+        scheduler: &mut Scheduler,
+        self_id: Key<RuntimeEvent>,
+    ) {
+        self.tasks.remove(&task_id);
+
+        // Remove from timer vectors.
+        let mut empty_deadlines = Vec::new();
+        for (deadline, tasks) in self.timers.iter_mut() {
+            tasks.retain(|t| *t != task_id);
+            if tasks.is_empty() {
+                empty_deadlines.push(*deadline);
+            }
+        }
+        for deadline in empty_deadlines {
+            self.timers.remove(&deadline);
+        }
+
+        self.schedule_next_timer_tick(scheduler, self_id);
+    }
 }
 
 impl Component for DesRuntime {
@@ -371,6 +603,10 @@ impl Component for DesRuntime {
                 debug!(?task_id, "Processing Wake event");
                 self.wake_task(*task_id);
                 self.poll_ready_tasks(scheduler);
+            }
+            RuntimeEvent::Cancel { task_id } => {
+                debug!(?task_id, "Processing Cancel event");
+                self.cancel_task(*task_id, scheduler, self_id);
             }
             RuntimeEvent::RegisterTimer { task_id, deadline } => {
                 trace!(?task_id, ?deadline, "Processing RegisterTimer event");

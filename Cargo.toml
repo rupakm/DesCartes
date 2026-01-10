@@ -4,6 +4,7 @@ members = [
     "des-components",
     "des-metrics",
     "des-viz",
+    "des-tokio",
 ]
 resolver = "2"
 

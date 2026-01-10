@@ -1,0 +1,12 @@
+[package]
+name = "des-tokio"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+des-core = { path = "../des-core" }
+tracing.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
+rand_distr.workspace = true
