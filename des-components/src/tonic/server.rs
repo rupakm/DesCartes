@@ -380,8 +380,8 @@ impl RpcService for EchoService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::{SimTransport, SimpleNetworkModel};
     use crate::tonic::MethodDescriptor;
+    use crate::transport::{SimTransport, SimpleNetworkModel};
     use des_core::Simulation;
 
     #[test]

@@ -266,7 +266,6 @@ mod tests {
     use super::*;
     use des_core::SimTime;
 
-
     #[test]
     fn test_simple_network_model() {
         let mut model = SimpleNetworkModel::with_seed(
