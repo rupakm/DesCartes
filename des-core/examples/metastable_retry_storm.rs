@@ -13,26 +13,31 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use des_core::dists::{
     ArrivalPattern, ExponentialDistribution, PoissonArrivals, ServiceTimeDistribution,
 };
 use des_core::{Component, Executor, Key, SimTime, Simulation, SimulationConfig};
+use des_explore::monitor::{Monitor, MonitorConfig, QueueId};
 
-const LAMBDA_BASE_RPS: f64 = 9.5;
+const LAMBDA_BASE_RPS: f64 = 9.3;
 const MU_RPS: f64 = 10.0;
 
 const QUEUE_CAPACITY: usize = 100;
-const TIMEOUT: Duration = Duration::from_secs(1);
+const TIMEOUT: Duration = Duration::from_secs(4);
 const MAX_RETRIES: u8 = 3;
 
-const SPIKE_START: SimTime = SimTime::from_secs(20);
-const SPIKE_END: SimTime = SimTime::from_secs(25);
+const SPIKE_START: SimTime = SimTime::from_secs(120);
+const SPIKE_END: SimTime = SimTime::from_secs(125);
 const LAMBDA_SPIKE_RPS: f64 = 30.0;
 
 const REPORT_INTERVAL: Duration = Duration::from_secs(5);
-const SIM_END: SimTime = SimTime::from_secs(200);
+const MONITOR_WINDOW: Duration = Duration::from_secs(1);
+const SIM_END: SimTime = SimTime::from_secs(400);
+
+const BACKLOG_QUEUE: QueueId = QueueId(1);
 
 #[derive(Debug, Clone, Copy)]
 struct Attempt {
@@ -61,6 +66,8 @@ enum Event {
 }
 
 struct Mm1RetryStorm {
+    monitor: Arc<Mutex<Monitor>>,
+
     // Distributions
     arrivals_base: PoissonArrivals,
     arrivals_spike: PoissonArrivals,
@@ -90,7 +97,19 @@ struct Mm1RetryStorm {
 
 impl Mm1RetryStorm {
     fn new(config: &SimulationConfig) -> Self {
+        let mut monitor_cfg = MonitorConfig::default();
+        monitor_cfg.window = MONITOR_WINDOW;
+        monitor_cfg.baseline_warmup_windows = 10;
+        monitor_cfg.recovery_hold_windows = 3;
+        monitor_cfg.baseline_epsilon = 3.0;
+        monitor_cfg.metastable_persist_windows = 20;
+        monitor_cfg.recovery_time_limit = Some(Duration::from_secs(60));
+
+        let mut monitor = Monitor::new(monitor_cfg, SimTime::zero());
+        monitor.mark_post_spike_start(SPIKE_END);
+
         Self {
+            monitor: Arc::new(Mutex::new(monitor)),
             arrivals_base: PoissonArrivals::from_config(config, LAMBDA_BASE_RPS),
             arrivals_spike: PoissonArrivals::from_config(config, LAMBDA_SPIKE_RPS),
             service: ExponentialDistribution::from_config(config, MU_RPS),
@@ -117,6 +136,15 @@ impl Mm1RetryStorm {
 
     fn in_spike(now: SimTime) -> bool {
         now >= SPIKE_START && now < SPIKE_END
+    }
+
+    fn backlog_len(&self) -> u64 {
+        self.queue.len() as u64 + u64::from(self.server_busy)
+    }
+
+    fn observe_backlog(&self, now: SimTime) {
+        let mut monitor = self.monitor.lock().unwrap();
+        monitor.observe_queue_len(now, BACKLOG_QUEUE, self.backlog_len());
     }
 
     fn schedule_next_external_arrival(
@@ -147,7 +175,10 @@ impl Mm1RetryStorm {
             return;
         };
 
+        let now = scheduler.time();
         self.server_busy = true;
+        self.observe_backlog(now);
+
         let service_time = self.service.sample();
 
         scheduler.schedule(
@@ -165,12 +196,14 @@ impl Mm1RetryStorm {
         attempt_no: u8,
         retries_left: u8,
     ) {
+        let now = scheduler.time();
+
         if self.queue.len() >= QUEUE_CAPACITY {
             self.dropped += 1;
+            self.monitor.lock().unwrap().observe_drop(now);
             return;
         }
 
-        let now = scheduler.time();
         let attempt_id = self.next_attempt_id;
         self.next_attempt_id += 1;
 
@@ -186,6 +219,7 @@ impl Mm1RetryStorm {
         );
 
         self.queue.push_back(attempt_id);
+        self.observe_backlog(now);
 
         // Client-side timeout.
         scheduler.schedule(
@@ -198,7 +232,6 @@ impl Mm1RetryStorm {
     }
 
     fn report(&self, now: SimTime) {
-        let q = self.queue.len();
         let offered = self.external_arrivals + self.retry_arrivals;
         let amp = if self.completed_in_time == 0 {
             f64::INFINITY
@@ -206,14 +239,22 @@ impl Mm1RetryStorm {
             self.retry_arrivals as f64 / self.completed_in_time as f64
         };
 
+        let status = {
+            let mut monitor = self.monitor.lock().unwrap();
+            monitor.flush_up_to(now);
+            monitor.status()
+        };
+
+        let backlog = self.backlog_len();
+        let d = status.last_distance.unwrap_or(-1.0);
+
         let mut out = std::io::stdout().lock();
         let _ = writeln!(
             out,
-            "t={:>6.1}s in_spike={} q={:>3} busy={} ext={} retry={} offered={} drop={} timeout={} ok={} late={} amp={:.2}",
+            "t={:>6.1}s in_spike={} backlog={:>3} ext={} retry={} offered={} drop={} timeout={} ok={} late={} amp={:.2} D={:.2} rec={} meta={} S={:.2}",
             now.as_duration().as_secs_f64(),
             Self::in_spike(now),
-            q,
-            self.server_busy,
+            backlog,
             self.external_arrivals,
             self.retry_arrivals,
             offered,
@@ -222,6 +263,10 @@ impl Mm1RetryStorm {
             self.completed_in_time,
             self.completed_late,
             amp,
+            d,
+            status.recovered,
+            status.metastable,
+            status.score,
         );
     }
 }
@@ -261,12 +306,16 @@ impl Component for Mm1RetryStorm {
                     return;
                 }
 
+                let now = scheduler.time();
                 attempt.active = false;
                 self.timeouts += 1;
+                self.monitor.lock().unwrap().observe_timeout(now);
 
                 if attempt.retries_left > 0 {
                     let next_attempt_no = attempt.attempt_no + 1;
                     let retries_left = attempt.retries_left - 1;
+
+                    self.monitor.lock().unwrap().observe_retry(now);
 
                     scheduler.schedule_now(
                         self_id,
@@ -279,14 +328,23 @@ impl Component for Mm1RetryStorm {
                 }
             }
             Event::ServiceComplete { attempt_id } => {
+                let now = scheduler.time();
+
                 self.server_busy = false;
+                self.observe_backlog(now);
+
                 self.completed_total += 1;
 
-                let now = scheduler.time();
                 if let Some(attempt) = self.attempts.remove(&attempt_id) {
+                    let latency = now.duration_since(attempt.arrival_time);
+                    self.monitor
+                        .lock()
+                        .unwrap()
+                        .observe_complete(now, latency, attempt.active);
+
                     if attempt.active {
                         self.completed_in_time += 1;
-                        self.total_latency_in_time += now.duration_since(attempt.arrival_time);
+                        self.total_latency_in_time += latency;
                     } else {
                         self.completed_late += 1;
                     }
@@ -307,7 +365,7 @@ impl Component for Mm1RetryStorm {
 }
 
 fn main() {
-    let mut sim = Simulation::new(SimulationConfig { seed: 123 });
+    let mut sim = Simulation::new(SimulationConfig { seed: 13 });
 
     let key = sim.add_component(Mm1RetryStorm::new(sim.config()));
 
@@ -353,6 +411,28 @@ fn main() {
     } else {
         let _ = writeln!(out, "avg_latency_success=N/A");
     }
+
+    // Flush the monitor and report recovery/metastability signals.
+    let status = {
+        let mut monitor = sim_state.monitor.lock().unwrap();
+        monitor.flush_up_to(SIM_END);
+        monitor.status()
+    };
+
+    let _ = writeln!(out, "monitor_windows_seen={}", status.windows_seen);
+    let _ = writeln!(out, "monitor_recovered={}", status.recovered);
+    let _ = writeln!(out, "monitor_metastable={}", status.metastable);
+    if let Some(dt) = status.recovery_time {
+        let _ = writeln!(out, "monitor_recovery_time={:?}", dt);
+    } else {
+        let _ = writeln!(out, "monitor_recovery_time=N/A");
+    }
+    if let Some(d) = status.last_distance {
+        let _ = writeln!(out, "monitor_last_distance={:.2}", d);
+    } else {
+        let _ = writeln!(out, "monitor_last_distance=N/A");
+    }
+    let _ = writeln!(out, "monitor_score={:.2}", status.score);
 
     let _ = writeln!(
         out,

@@ -53,6 +53,7 @@ pub mod dists;
 pub mod error;
 pub mod execute;
 pub mod logging;
+pub mod randomness;
 pub mod request;
 pub mod scheduler;
 pub mod task;
@@ -76,6 +77,7 @@ pub use logging::{
     component_span, event_span, init_detailed_simulation_logging, init_simulation_logging,
     init_simulation_logging_with_level, simulation_span, task_span,
 };
+pub use randomness::{DrawSite, RandomProvider};
 pub use request::{
     AttemptStatus, Request, RequestAttempt, RequestAttemptId, RequestId, RequestStatus, Response,
     ResponseStatus,

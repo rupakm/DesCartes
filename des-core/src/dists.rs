@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::SimulationConfig;
+use crate::{DrawSite, RandomProvider, SimulationConfig};
 use rand::SeedableRng;
 
 /// Trait for generating arrival patterns
@@ -112,6 +112,12 @@ pub struct PoissonArrivals {
     rng: rand::rngs::StdRng,
     /// Exponential distribution for inter-arrival times
     exp_dist: rand_distr::Exp<f64>,
+
+    /// Optional provider used to instrument / bias sampling.
+    provider: Option<Box<dyn RandomProvider>>,
+
+    /// Sampling site label used when delegating to `provider`.
+    site: DrawSite,
 }
 
 impl PoissonArrivals {
@@ -129,6 +135,8 @@ impl PoissonArrivals {
             rate,
             rng: rand::SeedableRng::from_entropy(),
             exp_dist,
+            provider: None,
+            site: DrawSite::new("arrival", 0),
         }
     }
 
@@ -147,9 +155,19 @@ impl PoissonArrivals {
             rate,
             rng: rand::rngs::StdRng::seed_from_u64(seed),
             exp_dist,
+            provider: None,
+            site: DrawSite::new("arrival", 0),
         }
     }
     ///
+    /// Attach a provider used for sampling instrumentation.
+    #[must_use]
+    pub fn with_provider(mut self, provider: Box<dyn RandomProvider>, site: DrawSite) -> Self {
+        self.provider = Some(provider);
+        self.site = site;
+        self
+    }
+
     /// Get the rate parameter
     pub fn rate(&self) -> f64 {
         self.rate
@@ -160,8 +178,13 @@ impl ArrivalPattern for PoissonArrivals {
     fn next_arrival_time(&mut self) -> Duration {
         use rand::Rng;
 
-        // Sample from exponential distribution to get inter-arrival time in seconds
-        let inter_arrival_seconds: f64 = self.rng.sample(self.exp_dist);
+        // Sample from exponential distribution to get inter-arrival time in seconds.
+        // When a provider is configured, delegate to it (for tracing / biasing).
+        let inter_arrival_seconds: f64 = if let Some(provider) = &mut self.provider {
+            provider.sample_exp_seconds(self.site, self.rate)
+        } else {
+            self.rng.sample(self.exp_dist)
+        };
 
         // Convert to Duration (nanoseconds)
         Duration::from_secs_f64(inter_arrival_seconds)
@@ -191,6 +214,16 @@ pub struct BurstyArrivals {
     burst_dist: Option<rand_distr::Exp<f64>>,
     /// Exponential distribution for quiet period
     quiet_dist: Option<rand_distr::Exp<f64>>,
+    /// Rate parameter for burst period
+    burst_rate: f64,
+    /// Rate parameter for quiet period
+    quiet_rate: f64,
+
+    /// Optional provider used to instrument / bias sampling.
+    provider: Option<Box<dyn RandomProvider>>,
+
+    /// Sampling site label used when delegating to `provider`.
+    site: DrawSite,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -230,6 +263,10 @@ impl BurstyArrivals {
             rng: rand::SeedableRng::from_entropy(),
             burst_dist,
             quiet_dist,
+            burst_rate,
+            quiet_rate,
+            provider: None,
+            site: DrawSite::new("bursty_arrival", 0),
         }
     }
 
@@ -268,6 +305,10 @@ impl BurstyArrivals {
             rng: rand::rngs::StdRng::seed_from_u64(seed),
             burst_dist,
             quiet_dist,
+            burst_rate,
+            quiet_rate,
+            provider: None,
+            site: DrawSite::new("bursty_arrival", 0),
         }
     }
     ///
@@ -280,6 +321,15 @@ impl BurstyArrivals {
     pub fn phase_remaining(&self) -> Duration {
         self.phase_remaining
     }
+
+    ///
+    /// Attach a provider used for sampling instrumentation.
+    #[must_use]
+    pub fn with_provider(mut self, provider: Box<dyn RandomProvider>, site: DrawSite) -> Self {
+        self.provider = Some(provider);
+        self.site = site;
+        self
+    }
 }
 
 impl ArrivalPattern for BurstyArrivals {
@@ -290,7 +340,13 @@ impl ArrivalPattern for BurstyArrivals {
         let inter_arrival = match self.current_phase {
             BurstPhase::Burst => {
                 if let Some(ref dist) = self.burst_dist {
-                    let seconds: f64 = self.rng.sample(dist);
+                    // Sample from exponential distribution to get inter-arrival time in seconds.
+                    // When a provider is configured, delegate to it (for tracing / biasing).
+                    let seconds: f64 = if let Some(provider) = &mut self.provider {
+                        provider.sample_exp_seconds(self.site, self.burst_rate)
+                    } else {
+                        self.rng.sample(dist)
+                    };
                     Duration::from_secs_f64(seconds)
                 } else {
                     // This shouldn't happen since burst_rate > 0
@@ -299,7 +355,13 @@ impl ArrivalPattern for BurstyArrivals {
             }
             BurstPhase::Quiet => {
                 if let Some(ref dist) = self.quiet_dist {
-                    let seconds: f64 = self.rng.sample(dist);
+                    // Sample from exponential distribution to get inter-arrival time in seconds.
+                    // When a provider is configured, delegate to it (for tracing / biasing).
+                    let seconds: f64 = if let Some(provider) = &mut self.provider {
+                        provider.sample_exp_seconds(self.site, self.quiet_rate)
+                    } else {
+                        self.rng.sample(dist)
+                    };
                     Duration::from_secs_f64(seconds)
                 } else {
                     // No arrivals during quiet period - return remaining quiet time
@@ -388,6 +450,12 @@ pub struct ExponentialDistribution {
     rng: rand::rngs::StdRng,
     /// Exponential distribution for service times
     exp_dist: rand_distr::Exp<f64>,
+
+    /// Optional provider used to instrument / bias sampling.
+    provider: Option<Box<dyn RandomProvider>>,
+
+    /// Sampling site label used when delegating to `provider`.
+    site: DrawSite,
 }
 
 impl ExponentialDistribution {
@@ -405,6 +473,8 @@ impl ExponentialDistribution {
             rate,
             rng: rand::SeedableRng::from_entropy(),
             exp_dist,
+            provider: None,
+            site: DrawSite::new("service", 0),
         }
     }
 
@@ -423,9 +493,19 @@ impl ExponentialDistribution {
             rate,
             rng: rand::rngs::StdRng::seed_from_u64(seed),
             exp_dist,
+            provider: None,
+            site: DrawSite::new("service", 0),
         }
     }
     ///
+    /// Attach a provider used for sampling instrumentation.
+    #[must_use]
+    pub fn with_provider(mut self, provider: Box<dyn RandomProvider>, site: DrawSite) -> Self {
+        self.provider = Some(provider);
+        self.site = site;
+        self
+    }
+
     /// Get the rate parameter
     pub fn rate(&self) -> f64 {
         self.rate
@@ -441,8 +521,13 @@ impl ServiceTimeDistribution for ExponentialDistribution {
     fn sample(&mut self) -> Duration {
         use rand::Rng;
 
-        // Sample from exponential distribution to get service time in seconds
-        let service_time_seconds: f64 = self.rng.sample(self.exp_dist);
+        // Sample from exponential distribution to get service time in seconds.
+        // When a provider is configured, delegate to it (for tracing / biasing).
+        let service_time_seconds: f64 = if let Some(provider) = &mut self.provider {
+            provider.sample_exp_seconds(self.site, self.rate)
+        } else {
+            self.rng.sample(self.exp_dist)
+        };
 
         // Convert to Duration
         Duration::from_secs_f64(service_time_seconds)
@@ -460,6 +545,11 @@ impl ServiceTimeDistribution for ExponentialDistribution {
 /// Uniform service time distribution
 ///
 /// Samples service times uniformly from a given range [min, max].
+///
+/// Note: This distribution does not currently support RandomProvider injection
+/// because the RandomProvider trait only provides sample_exp_seconds(). Adding
+/// uniform sampling would require extending the trait interface, which is
+/// out of scope for the current provider injection effort.
 ///
 /// # Requirements
 ///
@@ -613,6 +703,52 @@ mod tests {
     }
 
     #[test]
+    fn test_poisson_arrivals_provider_injection() {
+        // Mock provider that returns deterministic values
+        struct MockProvider {
+            call_count: std::cell::RefCell<usize>,
+            fixed_value: f64,
+        }
+
+        impl MockProvider {
+            fn new(fixed_value: f64) -> Self {
+                Self {
+                    call_count: std::cell::RefCell::new(0),
+                    fixed_value,
+                }
+            }
+
+            fn get_call_count(&self) -> usize {
+                *self.call_count.borrow()
+            }
+        }
+
+        impl RandomProvider for MockProvider {
+            fn sample_exp_seconds(&mut self, _site: DrawSite, _rate: f64) -> f64 {
+                *self.call_count.borrow_mut() += 1;
+                self.fixed_value
+            }
+        }
+
+        let provider = Box::new(MockProvider::new(0.123)); // Fixed inter-arrival time
+        let provider_ptr = provider.as_ref() as *const MockProvider;
+
+        let mut pattern =
+            PoissonArrivals::new(2.0).with_provider(provider, DrawSite::new("test", 1));
+
+        // Sample a few times to ensure provider is used
+        for _ in 0..3 {
+            let time = pattern.next_arrival_time();
+            assert_eq!(time, Duration::from_secs_f64(0.123));
+        }
+
+        // Verify provider was called
+        unsafe {
+            assert_eq!((*provider_ptr).get_call_count(), 3);
+        }
+    }
+
+    #[test]
     fn test_bursty_arrivals_creation() {
         let pattern = BurstyArrivals::new(
             Duration::from_secs(1), // burst duration
@@ -681,6 +817,57 @@ mod tests {
         assert!(time > Duration::ZERO);
     }
 
+    #[test]
+    fn test_bursty_arrivals_provider_injection() {
+        // Mock provider that returns deterministic values
+        struct MockProvider {
+            call_count: std::cell::RefCell<usize>,
+            fixed_value: f64,
+        }
+
+        impl MockProvider {
+            fn new(fixed_value: f64) -> Self {
+                Self {
+                    call_count: std::cell::RefCell::new(0),
+                    fixed_value,
+                }
+            }
+
+            fn get_call_count(&self) -> usize {
+                *self.call_count.borrow()
+            }
+        }
+
+        impl RandomProvider for MockProvider {
+            fn sample_exp_seconds(&mut self, _site: DrawSite, _rate: f64) -> f64 {
+                *self.call_count.borrow_mut() += 1;
+                self.fixed_value
+            }
+        }
+
+        let provider = Box::new(MockProvider::new(0.5)); // Fixed 0.5 second inter-arrival
+        let provider_ptr = provider.as_ref() as *const MockProvider;
+
+        let mut pattern = BurstyArrivals::new(
+            Duration::from_secs(1), // burst duration
+            Duration::from_secs(1), // quiet duration
+            2.0,                    // burst rate
+            1.0,                    // quiet rate
+        )
+        .with_provider(provider, DrawSite::new("test", 1));
+
+        // Sample a few times to ensure provider is used
+        for _ in 0..5 {
+            let time = pattern.next_arrival_time();
+            assert_eq!(time, Duration::from_secs_f64(0.5));
+        }
+
+        // Verify provider was called (should be called during burst phase)
+        unsafe {
+            assert!((*provider_ptr).get_call_count() > 0);
+        }
+    }
+
     // =============================================================================
     // Service Time Distribution Tests
     // =============================================================================
@@ -719,6 +906,52 @@ mod tests {
                 time < Duration::from_secs(1),
                 "Service time should be reasonable"
             );
+        }
+    }
+
+    #[test]
+    fn test_exponential_distribution_provider_injection() {
+        // Mock provider that returns deterministic values
+        struct MockProvider {
+            call_count: std::cell::RefCell<usize>,
+            fixed_value: f64,
+        }
+
+        impl MockProvider {
+            fn new(fixed_value: f64) -> Self {
+                Self {
+                    call_count: std::cell::RefCell::new(0),
+                    fixed_value,
+                }
+            }
+
+            fn get_call_count(&self) -> usize {
+                *self.call_count.borrow()
+            }
+        }
+
+        impl RandomProvider for MockProvider {
+            fn sample_exp_seconds(&mut self, _site: DrawSite, _rate: f64) -> f64 {
+                *self.call_count.borrow_mut() += 1;
+                self.fixed_value
+            }
+        }
+
+        let provider = Box::new(MockProvider::new(0.456)); // Fixed service time
+        let provider_ptr = provider.as_ref() as *const MockProvider;
+
+        let mut dist =
+            ExponentialDistribution::new(5.0).with_provider(provider, DrawSite::new("test", 1));
+
+        // Sample a few times to ensure provider is used
+        for _ in 0..3 {
+            let time = dist.sample();
+            assert_eq!(time, Duration::from_secs_f64(0.456));
+        }
+
+        // Verify provider was called
+        unsafe {
+            assert_eq!((*provider_ptr).get_call_count(), 3);
         }
     }
 
