@@ -88,8 +88,8 @@ pub use request::{
 };
 pub use scheduler::{
     current_time, defer_wake, in_scheduler_context, ClockRef, EventEntry, EventFrontierPolicy,
-    FifoFrontierPolicy, FrontierEvent, FrontierEventKind, Scheduler, SchedulerHandle,
-    UniformRandomFrontierPolicy,
+    FifoFrontierPolicy, FrontierEvent, FrontierEventKind, FrontierSignature, Scheduler,
+    SchedulerHandle, UniformRandomFrontierPolicy,
 };
 pub use task::{ClosureTask, PeriodicTask, RetryTask, Task, TaskHandle, TaskId, TimeoutTask};
 pub use time::SimTime;

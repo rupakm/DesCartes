@@ -204,6 +204,24 @@ pub struct FrontierEvent {
     pub task_id: Option<TaskId>,
 }
 
+/// Stable signature for a same-time frontier choice point.
+///
+/// This is intended for replay and (future) schedule-search tooling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontierSignature {
+    pub time_nanos: u64,
+    pub frontier_seqs: Vec<u64>,
+}
+
+impl FrontierSignature {
+    pub fn new(time: SimTime, frontier: &[FrontierEvent]) -> Self {
+        Self {
+            time_nanos: simtime_to_nanos(time),
+            frontier_seqs: frontier.iter().map(|e| e.seq).collect(),
+        }
+    }
+}
+
 /// Deterministic FIFO frontier policy (by `seq`).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FifoFrontierPolicy;

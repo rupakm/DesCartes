@@ -71,6 +71,7 @@ fn harness_records_trace_and_runs_tokio_tasks_json() {
         sim_config: SimulationConfig { seed: 7 },
         scenario: "harness_tokio_json".to_string(),
         install_tokio: true,
+        frontier: None,
         trace_path: trace_path.clone(),
         trace_format: TraceFormat::Json,
     };
@@ -146,6 +147,7 @@ fn harness_records_trace_and_runs_tokio_tasks_postcard() {
         sim_config: SimulationConfig { seed: 9 },
         scenario: "harness_tokio_postcard".to_string(),
         install_tokio: true,
+        frontier: None,
         trace_path: trace_path.clone(),
         trace_format: TraceFormat::Postcard,
     };

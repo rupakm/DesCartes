@@ -25,7 +25,7 @@ pub mod prelude {
     pub use crate::frontier::{RecordingFrontierPolicy, ReplayFrontierError, ReplayFrontierPolicy};
     pub use crate::harness::{
         format_from_extension, run_recorded, run_timed_recorded, HarnessConfig, HarnessContext,
-        HarnessError,
+        HarnessError, HarnessFrontierConfig, HarnessFrontierPolicy,
     };
     pub use crate::io::{
         read_trace_from_path, write_trace_to_path, TraceFormat, TraceIoConfig, TraceIoError,

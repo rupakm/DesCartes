@@ -40,8 +40,20 @@ impl SimTime {
     }
 
     /// Create a SimTime from a Duration
+    ///
+    /// If the duration exceeds the maximum representable SimTime (u64::MAX nanoseconds),
+    /// this method saturates to SimTime::from_nanos(u64::MAX) rather than truncating.
     pub fn from_duration(duration: Duration) -> Self {
-        SimTime(duration.as_nanos() as u64)
+        let nanos = u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
+        SimTime(nanos)
+    }
+
+    /// Try to create a SimTime from a Duration
+    ///
+    /// Returns `None` if the duration exceeds the maximum representable SimTime
+    /// (u64::MAX nanoseconds).
+    pub fn try_from_duration(duration: Duration) -> Option<Self> {
+        u64::try_from(duration.as_nanos()).ok().map(SimTime)
     }
 
     /// Convert SimTime to a Duration
@@ -261,5 +273,30 @@ mod tests {
         // This should be larger than MAX_SECS
         let max_secs = (u64::MAX as f64) / 1_000_000_000.0;
         let _ = SimTime::from(max_secs + 1.0);
+    }
+
+    #[test]
+    fn test_simtime_from_duration() {
+        // Test normal duration
+        let duration = Duration::from_nanos(1_500_000_000); // 1.5 seconds
+        let time = SimTime::from_duration(duration);
+        assert_eq!(time.as_nanos(), 1_500_000_000);
+
+        // Test saturating behavior with very large duration
+        let large_duration = Duration::from_secs(u64::MAX); // This exceeds u64 nanoseconds
+        let time = SimTime::from_duration(large_duration);
+        assert_eq!(time.as_nanos(), u64::MAX);
+    }
+
+    #[test]
+    fn test_simtime_try_from_duration() {
+        // Test normal duration
+        let duration = Duration::from_nanos(1_500_000_000); // 1.5 seconds
+        let time = SimTime::try_from_duration(duration).unwrap();
+        assert_eq!(time.as_nanos(), 1_500_000_000);
+
+        // Test None for very large duration
+        let large_duration = Duration::from_secs(u64::MAX); // This exceeds u64 nanoseconds
+        assert_eq!(SimTime::try_from_duration(large_duration), None);
     }
 }
