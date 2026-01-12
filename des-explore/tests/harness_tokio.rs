@@ -56,6 +56,12 @@ fn temp_path(suffix: &str) -> PathBuf {
     p
 }
 
+/// Smoke test for the harness + tokio integration (JSON encoding).
+///
+/// Verifies that:
+/// - a trace is written to disk and can be read back
+/// - at least one RNG draw was recorded
+/// - an async task scheduled on `des-tokio` runs to completion
 #[test]
 fn harness_records_trace_and_runs_tokio_tasks_json() {
     let trace_path = temp_path(".json");
@@ -129,6 +135,9 @@ fn harness_records_trace_and_runs_tokio_tasks_json() {
     assert_eq!(trace.meta.scenario, "harness_tokio_json");
 }
 
+/// Smoke test for the harness + tokio integration (postcard encoding).
+///
+/// Verifies that we can persist traces in a compact binary format.
 #[test]
 fn harness_records_trace_and_runs_tokio_tasks_postcard() {
     let trace_path = temp_path(".bin");

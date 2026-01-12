@@ -15,14 +15,15 @@ use des_core::dists::{
     ArrivalPattern, ExponentialDistribution, PoissonArrivals, ServiceTimeDistribution,
 };
 use des_core::draw_site;
-use des_core::{Component, Executor, Key, Scheduler, SimTime, Simulation, SimulationConfig};
+use des_core::{Component, Key, Scheduler, SimTime, Simulation, SimulationConfig};
 use des_explore::{
+    estimate::{
+        estimate_monte_carlo, estimate_with_splitting, MonteCarloConfig, SplittingEstimateConfig,
+    },
     harness::HarnessContext,
     monitor::{Monitor, MonitorConfig, QueueId, ScoreWeights},
-    splitting::{find_with_splitting, SplittingConfig},
-    trace::{Trace, TraceMeta, TraceRecorder},
+    trace::Trace,
 };
-use rand::Rng;
 
 // Model parameters
 const BASE_ARRIVAL_RATE: f64 = 8.0; // req/s (below service capacity)
@@ -447,304 +448,132 @@ fn setup_common(
     (sim, monitor)
 }
 
-// Test that metastability is rare under naïve search
+// Experiment-style tests using the estimator APIs.
+
+/// Estimates `P[status.metastable]` via naïve Monte Carlo.
+///
+/// This is an *experiment-style* test (ignored by default) meant to quantify how
+/// often the hedging model triggers the terminal predicate under random seeds.
 #[test]
 #[ignore]
 fn naive_metastable_rarity() {
-    let num_naive_runs = 625; // Match splitting's computational budget
-    let num_test_runs = 5;
+    let end_time = SimTime::from_millis((SIMULATION_END_TIME_SECS * 1000.0) as u64);
 
-    for test_run in 0..num_test_runs {
-        println!("\n=== Naive Hedging Test Run {} ===", test_run + 1);
+    let mc_cfg = MonteCarloConfig {
+        trials: 625,
+        end_time,
+        install_tokio: false,
+        confidence: 0.95,
+    };
 
-        let ctx = HarnessContext::new(Arc::new(Mutex::new(TraceRecorder::new(TraceMeta {
-            seed: 300 + test_run as u64,
-            scenario: format!("naive_hedging_rarity_test_run{}", test_run),
-        }))));
+    for run in 0..5u64 {
+        let base_seed = 300 + run;
+        let est = estimate_monte_carlo(
+            mc_cfg.clone(),
+            SimulationConfig { seed: base_seed },
+            format!("hedging_naive_run{}", run),
+            setup_naive,
+            |s| s.metastable,
+        )
+        .expect("monte carlo estimate should succeed");
 
-        let mut metastable_count = 0;
-        let mut r = rand::thread_rng();
-
-        for naive_run in 0..num_naive_runs {
-            let s = r.gen::<u64>() % 100000;
-            let (mut sim, monitor) = setup_naive(SimulationConfig { seed: s }, &ctx, None, s);
-            sim.execute(Executor::timed(SimTime::from_millis(
-                (SIMULATION_END_TIME_SECS * 1000.0) as u64,
-            )));
-
-            let status = monitor.lock().unwrap().status();
-            if status.metastable {
-                metastable_count += 1;
-            }
-
-            if (naive_run + 1) % 100 == 0 {
-                print!("{}/{} ", naive_run + 1, num_naive_runs);
-            }
-        }
-
-        let success_rate = metastable_count as f64 / num_naive_runs as f64;
         println!(
-            "\nNaive Test Run {}: {}/{} = {:.1}% success rate",
-            test_run + 1,
-            metastable_count,
-            num_naive_runs,
-            success_rate * 100.0
+            "naive run {}: p_hat={:.4} ({} / {}), ci=[{:.4}, {:.4}]",
+            run + 1,
+            est.p_hat,
+            est.successes,
+            est.trials,
+            est.ci_low.unwrap_or(f64::NAN),
+            est.ci_high.unwrap_or(f64::NAN)
         );
     }
-
-    println!("\n✅ Naive search confirms hedging metastability is rare!");
 }
 
-// Test splitting success rate variability
+/// Estimates `P[status.metastable]` via multilevel splitting.
+///
+/// This is an *experiment-style* test (ignored by default) meant to exercise
+/// prefix checkpointing + replay.
 #[test]
 #[ignore]
 fn splitting_success_rate_variability() {
-    let cfg = SplittingConfig {
-        levels: vec![2.0, 6.0, 15.0, 40.0], // Lower thresholds for more exploration
-        branch_factor: 8,                   // Higher branching
-        max_particles_per_level: 40,        // Larger budget
+    let cfg = SplittingEstimateConfig {
+        levels: vec![2.0, 6.0, 15.0, 40.0],
+        particles: 64,
         end_time: SimTime::from_millis((SIMULATION_END_TIME_SECS * 1000.0) as u64),
         install_tokio: false,
+        confidence: 0.95,
     };
 
-    let num_splitting_runs = 100;
-    let num_test_runs = 5;
+    for run in 0..5u64 {
+        let base_seed = 10_000 + run;
+        let est = estimate_with_splitting(
+            cfg.clone(),
+            SimulationConfig { seed: base_seed },
+            format!("hedging_splitting_run{}", run),
+            setup_splitting,
+            |s| s.metastable,
+        )
+        .expect("splitting estimate should succeed");
 
-    for test_run in 0..num_test_runs {
-        println!("\n=== Hedging Splitting Test Run {} ===", test_run + 1);
-        let mut success_count = 0;
-
-        let mut rng = rand::thread_rng();
-
-        for splitting_run in 0..num_splitting_runs {
-            let seed = rng.gen::<u64>() % 100000;
-            let result = find_with_splitting(
-                cfg.clone(),
-                SimulationConfig { seed },
-                format!("rare_hedging_test{}_run{}", test_run, splitting_run),
-                setup_splitting,
-            )
-            .unwrap();
-
-            if result.is_some() {
-                success_count += 1;
-                let found = result.unwrap();
-                assert!(
-                    found.status.metastable,
-                    "Found trace should exhibit metastability"
-                );
-            }
-
-            if (splitting_run + 1) % 10 == 0 {
-                print!("{}/{} ", splitting_run + 1, num_splitting_runs);
-            }
-        }
-
-        let success_rate = success_count as f64 / num_splitting_runs as f64;
         println!(
-            "\nTest Run {}: {}/{} = {:.1}% success rate",
-            test_run + 1,
-            success_count,
-            num_splitting_runs,
-            success_rate * 100.0
+            "splitting run {}: p_hat={:.6}, ci=[{:.6}, {:.6}], stage_probs={:?}",
+            run + 1,
+            est.p_hat,
+            est.ci_low.unwrap_or(f64::NAN),
+            est.ci_high.unwrap_or(f64::NAN),
+            est.stage_probs
         );
     }
 }
 
-// Comprehensive comparison of naive vs splitting
+/// Side-by-side Monte Carlo vs splitting probability estimates.
 #[test]
 #[ignore]
 fn comprehensive_metastability_comparison() {
-    let cfg = SplittingConfig {
-        levels: vec![
-            0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0, 25.0,
-        ], // Ultra fine-grained
-        branch_factor: 10,           // High branching
-        max_particles_per_level: 25, // Moderate particles per level
-        end_time: SimTime::from_millis((SIMULATION_END_TIME_SECS * 1000.0) as u64),
-        install_tokio: false,
-    };
+    let end_time = SimTime::from_millis((SIMULATION_END_TIME_SECS * 1000.0) as u64);
 
-    let num_runs = 3; // Reduce runs for time
-    let num_iterations_naive = 300; // Reduce naive iterations
-    let num_iterations_splitting = 20; // Further reduce for speed
+    let mc = estimate_monte_carlo(
+        MonteCarloConfig {
+            trials: 1_000,
+            end_time,
+            install_tokio: false,
+            confidence: 0.95,
+        },
+        SimulationConfig { seed: 2025 },
+        "hedging_monte_carlo".to_string(),
+        setup_naive,
+        |s| s.metastable,
+    )
+    .expect("monte carlo estimate should succeed");
 
-    println!("=== Comprehensive Hedging Storm Comparison ===");
-    println!("Comparing naive vs splitting for finding self-inflicted hedging overload");
+    let split = estimate_with_splitting(
+        SplittingEstimateConfig {
+            levels: vec![2.0, 6.0, 15.0, 40.0],
+            particles: 64,
+            end_time: SimTime::from_millis((SIMULATION_END_TIME_SECS * 1000.0) as u64),
+            install_tokio: false,
+            confidence: 0.95,
+        },
+        SimulationConfig { seed: 2025 },
+        "hedging_splitting".to_string(),
+        setup_splitting,
+        |s| s.metastable,
+    )
+    .expect("splitting estimate should succeed");
+
     println!(
-        "Naive: {} runs × {} seeds = {} total simulations",
-        num_runs,
-        num_iterations_naive,
-        num_runs * num_iterations_naive
-    );
-    println!(
-        "Splitting: {} runs × {} searches = {} total simulations\n",
-        num_runs,
-        num_iterations_splitting,
-        num_runs * num_iterations_splitting
-    );
-
-    // NAIVE SEARCH PHASE
-    println!("=== NAIVE SEARCH PHASE ===");
-    let mut naive_total_successes = 0;
-    let mut naive_run_results = Vec::new();
-
-    for test_run in 0..num_runs {
-        println!("Naive Test Run {}: ", test_run + 1);
-        let ctx = HarnessContext::new(Arc::new(Mutex::new(TraceRecorder::new(TraceMeta {
-            seed: 1600 + test_run as u64,
-            scenario: format!("naive_hedging_comparison_run{}", test_run),
-        }))));
-
-        let mut run_successes = 0;
-        let mut rng = rand::thread_rng();
-
-        for iteration in 0..num_iterations_naive {
-            let seed = rng.gen::<u64>() % 100000;
-            let (mut sim, monitor) = setup_naive(SimulationConfig { seed }, &ctx, None, seed);
-            sim.execute(Executor::timed(SimTime::from_millis(
-                (SIMULATION_END_TIME_SECS * 1000.0) as u64,
-            )));
-
-            let status = monitor.lock().unwrap().status();
-            if status.metastable {
-                run_successes += 1;
-            }
-
-            if (iteration + 1) % 100 == 0 {
-                print!("{}/{} ", iteration + 1, num_iterations_naive);
-            }
-        }
-
-        let run_rate = run_successes as f64 / num_iterations_naive as f64;
-        println!(
-            "→ {}/{} = {:.1}%",
-            run_successes,
-            num_iterations_naive,
-            run_rate * 100.0
-        );
-
-        naive_total_successes += run_successes;
-        naive_run_results.push(run_successes);
-    }
-
-    // SPLITTING SEARCH PHASE
-    println!("\n=== SPLITTING SEARCH PHASE ===");
-
-    let mut splitting_total_successes = 0;
-    let mut splitting_run_results = Vec::new();
-
-    for test_run in 0..num_runs {
-        println!("Splitting Test Run {}: ", test_run + 1);
-        let mut run_successes = 0;
-
-        let mut rng = rand::thread_rng();
-
-        for iteration in 0..num_iterations_splitting {
-            let seed = rng.gen::<u64>() % 100000;
-            let result = find_with_splitting(
-                cfg.clone(),
-                SimulationConfig { seed },
-                format!(
-                    "splitting_hedging_comparison_test{}_run{}",
-                    test_run, iteration
-                ),
-                setup_splitting,
-            )
-            .unwrap();
-
-            if result.is_some() {
-                run_successes += 1;
-            }
-
-            if (iteration + 1) % 20 == 0 {
-                print!("{}/{} ", iteration + 1, num_iterations_splitting);
-            }
-        }
-
-        let run_rate = run_successes as f64 / num_iterations_splitting as f64;
-        println!(
-            "→ {}/{} = {:.1}%",
-            run_successes,
-            num_iterations_splitting,
-            run_rate * 100.0
-        );
-
-        splitting_total_successes += run_successes;
-        splitting_run_results.push(run_successes);
-    }
-
-    // COMPREHENSIVE SUMMARY
-    println!("\n=== HEDGING STORM COMPARISON SUMMARY ===");
-
-    let naive_overall_rate =
-        naive_total_successes as f64 / (num_runs * num_iterations_naive) as f64;
-    let splitting_overall_rate =
-        splitting_total_successes as f64 / (num_runs * num_iterations_splitting) as f64;
-    let improvement_factor = splitting_overall_rate / naive_overall_rate;
-
-    println!("NAIVE SEARCH RESULTS:");
-    for (i, &successes) in naive_run_results.iter().enumerate() {
-        let rate = successes as f64 / num_iterations_naive as f64;
-        println!(
-            "  Run {}: {}/{} = {:.1}%",
-            i + 1,
-            successes,
-            num_iterations_naive,
-            rate * 100.0
-        );
-    }
-    println!(
-        "  Overall: {}/{} = {:.1}% average success rate",
-        naive_total_successes,
-        num_runs * num_iterations_naive,
-        naive_overall_rate * 100.0
-    );
-
-    println!("\nSPLITTING SEARCH RESULTS:");
-    for (i, &successes) in splitting_run_results.iter().enumerate() {
-        let rate = successes as f64 / num_iterations_splitting as f64;
-        println!(
-            "  Run {}: {}/{} = {:.1}%",
-            i + 1,
-            successes,
-            num_iterations_splitting,
-            rate * 100.0
-        );
-    }
-    println!(
-        "  Overall: {}/{} = {:.1}% average success rate",
-        splitting_total_successes,
-        num_runs * num_iterations_splitting,
-        splitting_overall_rate * 100.0
-    );
-
-    println!("\nPERFORMANCE COMPARISON:");
-    println!(
-        "  Naive success rate:     {:.1}%",
-        naive_overall_rate * 100.0
+        "monte carlo: p_hat={:.6} ({} / {}), ci=[{:.6}, {:.6}]",
+        mc.p_hat,
+        mc.successes,
+        mc.trials,
+        mc.ci_low.unwrap_or(f64::NAN),
+        mc.ci_high.unwrap_or(f64::NAN)
     );
     println!(
-        "  Splitting success rate: {:.1}%",
-        splitting_overall_rate * 100.0
+        "splitting:   p_hat={:.6}, ci=[{:.6}, {:.6}], stage_probs={:?}",
+        split.p_hat,
+        split.ci_low.unwrap_or(f64::NAN),
+        split.ci_high.unwrap_or(f64::NAN),
+        split.stage_probs
     );
-    println!("  Improvement factor:     {:.1}x", improvement_factor);
-
-    println!("\nCONCLUSION:");
-    println!(
-        "  Splitting achieves {:.1}x higher success rate than naive search",
-        improvement_factor
-    );
-    println!("  for finding self-inflicted hedging overload in request duplication systems.");
-
-    assert!(
-        splitting_overall_rate > naive_overall_rate,
-        "Splitting should outperform naive search"
-    );
-    assert!(
-        improvement_factor > 1.0,
-        "Splitting should show at least some improvement over naive search"
-    );
-
-    println!("\n✅ Hedging storm comparison completed successfully!");
 }

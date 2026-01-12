@@ -489,6 +489,9 @@ fn setup_simulation(
     (sim, monitor)
 }
 
+/// Experiment-style test for the admission-control scenario.
+///
+/// Currently ignored: admission control parameters are still being tuned.
 #[test]
 #[ignore]
 fn test_admission_hysteresis_exhibits_metastability() {
@@ -539,6 +542,9 @@ fn test_admission_hysteresis_exhibits_metastability() {
     );
 }
 
+/// Experiment-style Monte Carlo sweep for the admission-control scenario.
+///
+/// Currently ignored: intended for local exploration, not CI.
 #[test]
 #[ignore]
 fn test_naive_100_random_seeds() {
@@ -596,6 +602,9 @@ fn test_naive_100_random_seeds() {
     );
 }
 
+/// Experiment-style splitting run for the admission-control scenario.
+///
+/// Currently ignored: intended for local exploration, not CI.
 #[test]
 #[ignore]
 fn test_splitting_finds_metastable_admission() {
@@ -625,6 +634,9 @@ fn test_splitting_finds_metastable_admission() {
     );
 }
 
+/// Experiment-style comparison between naive search and splitting.
+///
+/// Currently ignored: intended for local exploration, not CI.
 #[test]
 #[ignore]
 fn test_naive_vs_splitting_comparison() {
@@ -767,6 +779,9 @@ fn test_naive_vs_splitting_comparison() {
     // The test passes as long as we get results (don't assert specific values since they depend on parameters)
 }
 
+/// Experiment-style parameter sweep for admission-control rarity.
+///
+/// Currently ignored: intended for local exploration, not CI.
 #[test]
 #[ignore]
 fn test_parameter_sweep_for_rare_metastability() {

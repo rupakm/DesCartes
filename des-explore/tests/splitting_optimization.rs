@@ -357,6 +357,9 @@ struct SplittingTestConfig {
     score_weights: ScoreWeights,
 }
 
+/// Experiment-style optimization sweep for splitting parameters.
+///
+/// Currently ignored: intended for local exploration, not CI.
 #[test]
 #[ignore]
 fn comprehensive_splitting_optimization() {

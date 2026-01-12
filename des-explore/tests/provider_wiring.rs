@@ -8,6 +8,9 @@ use des_core::{Simulation, SimulationConfig};
 use des_explore::rng::TracingRandomProvider;
 use des_explore::trace::{TraceEvent, TraceMeta, TraceRecorder};
 
+/// Ensures distributions delegate sampling to an injected `RandomProvider`.
+///
+/// This validates the tracing/replay integration point in `des-core` distributions.
 #[test]
 fn distributions_can_delegate_sampling_to_provider() {
     let sim = Simulation::new(SimulationConfig { seed: 123 });

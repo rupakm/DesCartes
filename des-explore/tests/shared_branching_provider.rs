@@ -50,6 +50,11 @@ fn draws(trace: &Trace) -> Vec<(u64, f64)> {
         .collect()
 }
 
+/// Ensures prefix replay works across multiple distributions.
+///
+/// This is a regression test for the "shared RNG stream" requirement:
+/// when multiple distributions draw randomness, replay must consume a single
+/// globally ordered draw stream.
 #[test]
 fn shared_branching_provider_replays_across_two_distributions() {
     let sim_config = SimulationConfig { seed: 123 };

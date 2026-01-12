@@ -89,12 +89,12 @@ where
                                 match result {
                                     Ok(response) => {
                                         println!("   ✅ [Response] Request completed with status: {}", response.status());
-                                        
+
                                         // Check if the response body echoes the request
                                         let response_body = response.body().data();
                                         let response_str = String::from_utf8_lossy(response_body);
                                         println!("   📝 [Response] Body: {}", response_str);
-                                        
+
                                         // Verify that the response echoes the request
                                         if response_str.contains("Test request body") {
                                             println!("   ✅ [Response] Successfully echoed request content!");
@@ -349,7 +349,6 @@ where
                                     Ok(response) => {
                                         *successful_responses += 1;
                                         println!("   ✅ [Response #{}] Status: {}", request_id_copy, response.status());
-                                        
                                         // Check if the response body contains our request content
                                         let response_body = response.body().data();
                                         let response_str = String::from_utf8_lossy(response_body);

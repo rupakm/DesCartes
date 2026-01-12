@@ -84,6 +84,10 @@ fn setup(
     (sim, monitor)
 }
 
+/// Smoke test for multilevel splitting bug finding.
+///
+/// Asserts that `find_with_splitting` can find a metastable trace in a tiny
+/// deterministic toy model.
 #[test]
 fn splitting_finds_metastable_trace_quickly() {
     let mut cfg = SplittingConfig::default();

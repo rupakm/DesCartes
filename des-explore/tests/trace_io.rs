@@ -35,6 +35,7 @@ fn sample_trace() -> Trace {
     trace
 }
 
+/// Roundtrip a trace through JSON encoding.
 #[test]
 fn json_roundtrip() {
     let trace = sample_trace();
@@ -64,6 +65,7 @@ fn json_roundtrip() {
     assert_eq!(read_back.events.len(), trace.events.len());
 }
 
+/// Roundtrip a trace through postcard encoding.
 #[test]
 fn postcard_roundtrip() {
     let trace = sample_trace();

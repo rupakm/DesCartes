@@ -14,14 +14,15 @@ use des_core::dists::{
     ArrivalPattern, ExponentialDistribution, PoissonArrivals, ServiceTimeDistribution,
 };
 use des_core::draw_site;
-use des_core::{Component, Executor, Key, Scheduler, SimTime, Simulation, SimulationConfig};
+use des_core::{Component, Key, Scheduler, SimTime, Simulation, SimulationConfig};
 use des_explore::{
+    estimate::{
+        estimate_monte_carlo, estimate_with_splitting, MonteCarloConfig, SplittingEstimateConfig,
+    },
     harness::HarnessContext,
     monitor::{Monitor, MonitorConfig, QueueId, ScoreWeights},
-    splitting::{find_with_splitting, SplittingConfig},
-    trace::{Trace, TraceMeta, TraceRecorder},
+    trace::Trace,
 };
-use rand::Rng;
 
 // Model parameters
 const ARRIVAL_RATE: f64 = 9.2; // req/s (slightly higher load)
@@ -393,296 +394,136 @@ fn setup_common(
 }
 
 // Phase 1: Establish that metastability is rare under naïve search
+/// Estimates `P[status.metastable]` via naïve Monte Carlo.
+///
+/// This is an *experiment-style* test (ignored by default) meant to quantify how
+/// often this model triggers the terminal predicate under random seeds.
 #[test]
 #[ignore]
 fn naive_metastable_rarity() {
-    let num_naive_runs = 100; // Run naive search 100 times per test run
-    let num_test_runs = 5; // Run the entire test 5 times
+    let end_time = SimTime::from_millis((SIMULATION_END_TIME_SECS * 1000.0) as u64);
 
-    for test_run in 0..num_test_runs {
-        println!("\n=== Naive Test Run {} ===", test_run + 1);
+    let mc_cfg = MonteCarloConfig {
+        trials: 100,
+        end_time,
+        install_tokio: false,
+        confidence: 0.95,
+    };
 
-        let ctx = HarnessContext::new(Arc::new(Mutex::new(TraceRecorder::new(TraceMeta {
-            seed: 145 + test_run as u64,
-            scenario: format!("naive_rarity_test_run{}", test_run),
-        }))));
+    for run in 0..5u64 {
+        let base_seed = 145 + run;
+        let est = estimate_monte_carlo(
+            mc_cfg.clone(),
+            SimulationConfig { seed: base_seed },
+            format!("backoff_naive_run{}", run),
+            setup_naive,
+            |s| s.metastable,
+        )
+        .expect("monte carlo estimate should succeed");
 
-        let mut metastable_count = 0;
-        let mut r = rand::thread_rng();
-
-        for naive_run in 0..num_naive_runs {
-            let s = r.gen::<u64>() % 100000; // Random seed
-            let (mut sim, monitor) = setup_naive(SimulationConfig { seed: s }, &ctx, None, s);
-            sim.execute(Executor::timed(SimTime::from_millis(
-                (SIMULATION_END_TIME_SECS * 1000.0) as u64,
-            )));
-
-            let status = monitor.lock().unwrap().status();
-            if status.metastable {
-                metastable_count += 1;
-            }
-
-            // Print progress every 10 runs
-            if (naive_run + 1) % 10 == 0 {
-                print!("{}/{} ", naive_run + 1, num_naive_runs);
-            }
-        }
-
-        let success_rate = metastable_count as f64 / num_naive_runs as f64;
         println!(
-            "\nNaive Test Run {}: {}/{} = {:.1}% success rate",
-            test_run + 1,
-            metastable_count,
-            num_naive_runs,
-            success_rate * 100.0
+            "naive run {}: p_hat={:.4} ({} / {}), ci=[{:.4}, {:.4}]",
+            run + 1,
+            est.p_hat,
+            est.successes,
+            est.trials,
+            est.ci_low.unwrap_or(f64::NAN),
+            est.ci_high.unwrap_or(f64::NAN)
         );
-
-        // With lenient monitor, metastability should be detectable but still rare compared to splitting
     }
-
-    println!("\n✅ Naive search confirms metastability is rare!");
 }
 
-// Phase 2: Comprehensive comparison of naive vs splitting approaches
+// Phase 2: Estimate probability via multilevel splitting
+/// Estimates `P[status.metastable]` via multilevel splitting.
+///
+/// This is an *experiment-style* test (ignored by default) meant to:
+/// - exercise checkpointing + replay
+/// - provide a rough estimate of a rare-event probability
 #[test]
 #[ignore]
 fn splitting_success_rate_variability() {
-    let cfg = SplittingConfig {
-        levels: vec![2.0, 8.0, 20.0, 50.0], // Even lower thresholds
-        branch_factor: 5,
-        max_particles_per_level: 20, // Much larger budget
-        end_time: SimTime::from_millis((240.0 * 1000.0) as u64), // 240s for splitting (more time)
+    let cfg = SplittingEstimateConfig {
+        levels: vec![2.0, 8.0, 20.0, 50.0],
+        particles: 64,
+        end_time: SimTime::from_millis((240.0 * 1000.0) as u64),
         install_tokio: false,
+        confidence: 0.95,
     };
 
-    let num_splitting_runs = 100; // Run splitting 100 times per test run
-    let num_test_runs = 5; // Run the entire test 5 times
+    for run in 0..5u64 {
+        let base_seed = 10_000 + run;
+        let est = estimate_with_splitting(
+            cfg.clone(),
+            SimulationConfig { seed: base_seed },
+            format!("backoff_splitting_run{}", run),
+            setup_splitting,
+            |s| s.metastable,
+        )
+        .expect("splitting estimate should succeed");
 
-    for test_run in 0..num_test_runs {
-        println!("\n=== Test Run {} ===", test_run + 1);
-        let mut success_count = 0;
-
-        // Use random seeds for each splitting run
-        let mut rng = rand::thread_rng();
-
-        for splitting_run in 0..num_splitting_runs {
-            let seed = rng.gen::<u64>() % 100000; // Random seed
-            let result = find_with_splitting(
-                cfg.clone(),
-                SimulationConfig { seed },
-                format!("rare_backoff_test{}_run{}", test_run, splitting_run),
-                setup_splitting,
-            )
-            .unwrap();
-
-            if result.is_some() {
-                success_count += 1;
-                let found = result.unwrap();
-                assert!(
-                    found.status.metastable,
-                    "Found trace should exhibit metastability"
-                );
-            }
-
-            // Print progress every 10 runs
-            if (splitting_run + 1) % 10 == 0 {
-                print!("{}/{} ", splitting_run + 1, num_splitting_runs);
-            }
-        }
-
-        let success_rate = success_count as f64 / num_splitting_runs as f64;
         println!(
-            "\nTest Run {}: {}/{} = {:.1}% success rate",
-            test_run + 1,
-            success_count,
-            num_splitting_runs,
-            success_rate * 100.0
+            "splitting run {}: p_hat={:.6}, ci=[{:.6}, {:.6}], stage_probs={:?}",
+            run + 1,
+            est.p_hat,
+            est.ci_low.unwrap_or(f64::NAN),
+            est.ci_high.unwrap_or(f64::NAN),
+            est.stage_probs
         );
     }
 }
 
-// Phase 3: Comprehensive comparison experiment
+// Phase 3: Side-by-side estimator comparison
+/// Compares a Monte Carlo probability estimate to a multilevel splitting estimate.
+///
+/// This is an *experiment-style* test (ignored by default) and is primarily a
+/// readability + API-usage example.
 #[test]
 #[ignore]
 fn comprehensive_metastability_comparison() {
-    let cfg = SplittingConfig {
-        levels: vec![2.0, 8.0, 20.0, 50.0],
-        branch_factor: 5,
-        max_particles_per_level: 20,
-        end_time: SimTime::from_millis((240.0 * 1000.0) as u64),
-        install_tokio: false,
-    };
+    let end_time = SimTime::from_millis((SIMULATION_END_TIME_SECS * 1000.0) as u64);
 
-    let num_runs = 5; // 5 test runs for each approach
-    let num_iterations_per_run = 100; // 100 iterations per test run
+    let mc = estimate_monte_carlo(
+        MonteCarloConfig {
+            trials: 1_000,
+            end_time,
+            install_tokio: false,
+            confidence: 0.95,
+        },
+        SimulationConfig { seed: 2025 },
+        "backoff_monte_carlo".to_string(),
+        setup_naive,
+        |s| s.metastable,
+    )
+    .expect("monte carlo estimate should succeed");
 
-    println!("=== Comprehensive Metastability Comparison Experiment ===");
-    println!("Running naive search and splitting search with identical monitor settings");
+    let split = estimate_with_splitting(
+        SplittingEstimateConfig {
+            levels: vec![2.0, 8.0, 20.0, 50.0],
+            particles: 64,
+            end_time: SimTime::from_millis((240.0 * 1000.0) as u64),
+            install_tokio: false,
+            confidence: 0.95,
+        },
+        SimulationConfig { seed: 2025 },
+        "backoff_splitting".to_string(),
+        setup_splitting,
+        |s| s.metastable,
+    )
+    .expect("splitting estimate should succeed");
+
     println!(
-        "Each approach: {} runs × {} iterations = {} total simulations\n",
-        num_runs,
-        num_iterations_per_run,
-        num_runs * num_iterations_per_run
-    );
-
-    // === NAIVE SEARCH PHASE ===
-    println!("=== NAIVE SEARCH PHASE ===");
-    let mut naive_total_successes = 0;
-    let mut naive_run_results = Vec::new();
-
-    for test_run in 0..num_runs {
-        println!("Naive Test Run {}: ", test_run + 1);
-        let ctx = HarnessContext::new(Arc::new(Mutex::new(TraceRecorder::new(TraceMeta {
-            seed: 1000 + test_run as u64,
-            scenario: format!("naive_comparison_run{}", test_run),
-        }))));
-
-        let mut run_successes = 0;
-        let mut rng = rand::thread_rng();
-
-        for iteration in 0..num_iterations_per_run {
-            let seed = rng.gen::<u64>() % 100000;
-            let (mut sim, monitor) = setup_naive(SimulationConfig { seed }, &ctx, None, seed);
-            sim.execute(Executor::timed(SimTime::from_millis(
-                (SIMULATION_END_TIME_SECS * 1000.0) as u64,
-            )));
-
-            let status = monitor.lock().unwrap().status();
-            if status.metastable {
-                run_successes += 1;
-            }
-
-            if (iteration + 1) % 20 == 0 {
-                print!("{}/{} ", iteration + 1, num_iterations_per_run);
-            }
-        }
-
-        let run_rate = run_successes as f64 / num_iterations_per_run as f64;
-        println!(
-            "→ {}/{} = {:.1}%",
-            run_successes,
-            num_iterations_per_run,
-            run_rate * 100.0
-        );
-
-        naive_total_successes += run_successes;
-        naive_run_results.push(run_successes);
-    }
-
-    // === SPLITTING SEARCH PHASE ===
-    println!("\n=== SPLITTING SEARCH PHASE ===");
-
-    let mut splitting_total_successes = 0;
-    let mut splitting_run_results = Vec::new();
-
-    for test_run in 0..num_runs {
-        println!("Splitting Test Run {}: ", test_run + 1);
-        let mut run_successes = 0;
-
-        let mut rng = rand::thread_rng();
-
-        for iteration in 0..num_iterations_per_run {
-            let seed = rng.gen::<u64>() % 100000;
-            let result = find_with_splitting(
-                cfg.clone(),
-                SimulationConfig { seed },
-                format!("splitting_comparison_test{}_run{}", test_run, iteration),
-                setup_splitting,
-            )
-            .unwrap();
-
-            if result.is_some() {
-                run_successes += 1;
-            }
-
-            if (iteration + 1) % 20 == 0 {
-                print!("{}/{} ", iteration + 1, num_iterations_per_run);
-            }
-        }
-
-        let run_rate = run_successes as f64 / num_iterations_per_run as f64;
-        println!(
-            "→ {}/{} = {:.1}%",
-            run_successes,
-            num_iterations_per_run,
-            run_rate * 100.0
-        );
-
-        splitting_total_successes += run_successes;
-        splitting_run_results.push(run_successes);
-    }
-
-    // === COMPREHENSIVE SUMMARY ===
-    println!("\n=== COMPREHENSIVE COMPARISON SUMMARY ===");
-
-    let naive_overall_rate =
-        naive_total_successes as f64 / (num_runs * num_iterations_per_run) as f64;
-    let splitting_overall_rate =
-        splitting_total_successes as f64 / (num_runs * num_iterations_per_run) as f64;
-    let improvement_factor = splitting_overall_rate / naive_overall_rate;
-
-    println!("NAIVE SEARCH RESULTS:");
-    for (i, &successes) in naive_run_results.iter().enumerate() {
-        let rate = successes as f64 / num_iterations_per_run as f64;
-        println!(
-            "  Run {}: {}/{} = {:.1}%",
-            i + 1,
-            successes,
-            num_iterations_per_run,
-            rate * 100.0
-        );
-    }
-    println!(
-        "  Overall: {}/{} = {:.1}% average success rate",
-        naive_total_successes,
-        num_runs * num_iterations_per_run,
-        naive_overall_rate * 100.0
-    );
-
-    println!("\nSPLITTING SEARCH RESULTS:");
-    for (i, &successes) in splitting_run_results.iter().enumerate() {
-        let rate = successes as f64 / num_iterations_per_run as f64;
-        println!(
-            "  Run {}: {}/{} = {:.1}%",
-            i + 1,
-            successes,
-            num_iterations_per_run,
-            rate * 100.0
-        );
-    }
-    println!(
-        "  Overall: {}/{} = {:.1}% average success rate",
-        splitting_total_successes,
-        num_runs * num_iterations_per_run,
-        splitting_overall_rate * 100.0
-    );
-
-    println!("\nPERFORMANCE COMPARISON:");
-    println!(
-        "  Naive success rate:     {:.1}%",
-        naive_overall_rate * 100.0
+        "monte carlo: p_hat={:.6} ({} / {}), ci=[{:.6}, {:.6}]",
+        mc.p_hat,
+        mc.successes,
+        mc.trials,
+        mc.ci_low.unwrap_or(f64::NAN),
+        mc.ci_high.unwrap_or(f64::NAN)
     );
     println!(
-        "  Splitting success rate: {:.1}%",
-        splitting_overall_rate * 100.0
+        "splitting:   p_hat={:.6}, ci=[{:.6}, {:.6}], stage_probs={:?}",
+        split.p_hat,
+        split.ci_low.unwrap_or(f64::NAN),
+        split.ci_high.unwrap_or(f64::NAN),
+        split.stage_probs
     );
-    println!("  Improvement factor:     {:.1}x", improvement_factor);
-
-    println!("\nCONCLUSION:");
-    println!(
-        "  With identical monitor settings, splitting achieves {:.1}x higher success rate",
-        improvement_factor
-    );
-    println!("  than naive random search for finding metastability in this system.");
-
-    assert!(
-        splitting_overall_rate > naive_overall_rate,
-        "Splitting should outperform naive search"
-    );
-    assert!(
-        improvement_factor > 2.0,
-        "Splitting should show significant improvement over naive search"
-    );
-
-    println!("\n✅ Comprehensive comparison experiment completed successfully!");
 }

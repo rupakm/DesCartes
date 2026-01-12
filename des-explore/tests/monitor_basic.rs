@@ -3,6 +3,7 @@ use std::time::Duration;
 use des_core::SimTime;
 use des_explore::monitor::{Monitor, MonitorConfig, QueueId};
 
+/// Ensures the monitor emits window summaries and detects recovery.
 #[test]
 fn monitor_emits_window_summaries_and_detects_recovery() {
     let mut cfg = MonitorConfig::default();
