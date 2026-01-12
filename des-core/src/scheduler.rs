@@ -53,6 +53,9 @@ use std::sync::{
 use tracing::{debug, trace};
 use uuid::Uuid;
 
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+
 use crate::task::{ClosureTask, Task, TaskExecution, TaskHandle, TaskId, TaskWrapper, TimeoutTask};
 use crate::types::EventId;
 use crate::{Key, SimTime};
@@ -171,6 +174,76 @@ impl DeferredWake {
     }
 }
 
+/// Policy for choosing among same-time frontier entries.
+///
+/// When multiple events are scheduled at the same simulation time, the scheduler
+/// forms a frontier of enabled events. The policy decides which frontier entry
+/// should run next.
+///
+/// The default policy is deterministic FIFO (by event sequence number) to
+/// preserve existing behavior.
+pub trait EventFrontierPolicy {
+    fn choose(&mut self, time: SimTime, frontier: &[FrontierEvent]) -> usize;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontierEventKind {
+    Component,
+    Task,
+}
+
+/// Lightweight, stable descriptor for an event in the same-time frontier.
+///
+/// This intentionally does not expose event payloads. It is designed for
+/// tie-breaking and traceability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrontierEvent {
+    pub seq: u64,
+    pub kind: FrontierEventKind,
+    pub component_id: Option<Uuid>,
+    pub task_id: Option<TaskId>,
+}
+
+/// Deterministic FIFO frontier policy (by `seq`).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FifoFrontierPolicy;
+
+impl EventFrontierPolicy for FifoFrontierPolicy {
+    fn choose(&mut self, _time: SimTime, frontier: &[FrontierEvent]) -> usize {
+        frontier
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, e)| e.seq)
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    }
+}
+
+/// Uniform random tie-breaker among frontier entries.
+///
+/// Deterministic given the provided seed.
+#[derive(Debug, Clone)]
+pub struct UniformRandomFrontierPolicy {
+    rng: StdRng,
+}
+
+impl UniformRandomFrontierPolicy {
+    pub fn new(seed: u64) -> Self {
+        Self {
+            rng: StdRng::seed_from_u64(seed),
+        }
+    }
+}
+
+impl EventFrontierPolicy for UniformRandomFrontierPolicy {
+    fn choose(&mut self, _time: SimTime, frontier: &[FrontierEvent]) -> usize {
+        if frontier.is_empty() {
+            return 0;
+        }
+        self.rng.gen_range(0..frontier.len())
+    }
+}
+
 /// Entry type stored in the scheduler's event queue.
 ///
 /// Events are passed to [`Components`](crate::Components) for dispatch to the
@@ -209,6 +282,23 @@ impl EventEntry {
         match self {
             EventEntry::Component(entry) => entry.event_id.0,
             EventEntry::Task(entry) => entry.event_id.0,
+        }
+    }
+
+    pub(crate) fn to_frontier_event(&self) -> FrontierEvent {
+        match self {
+            EventEntry::Component(entry) => FrontierEvent {
+                seq: self.seq(),
+                kind: FrontierEventKind::Component,
+                component_id: Some(entry.component),
+                task_id: None,
+            },
+            EventEntry::Task(entry) => FrontierEvent {
+                seq: self.seq(),
+                kind: FrontierEventKind::Task,
+                component_id: None,
+                task_id: Some(entry.task_id),
+            },
         }
     }
 
@@ -443,25 +533,38 @@ impl SchedulerHandle {
 /// the methods on [`Simulation`](crate::Simulation) rather than directly.
 pub struct Scheduler {
     next_event_id: u64,
+    id_seed: u64,
+    next_task_id: u64,
     events: BinaryHeap<EventEntry>,
     clock: Clock,
     // Task management
     pending_tasks: HashMap<TaskId, Box<dyn TaskExecution>>,
     completed_task_results: HashMap<TaskId, Box<dyn Any>>,
     cancelled_tasks: HashSet<TaskId>, // Track cancelled task IDs to prevent time advancement
+    executing_task_id: Option<TaskId>,
     // Deferred wakes from wakers during event processing
     deferred_wakes: Vec<DeferredWake>,
 }
 
 impl Default for Scheduler {
     fn default() -> Self {
+        Self::with_seed(0)
+    }
+}
+
+impl Scheduler {
+    /// Create a scheduler with a deterministic ID seed.
+    pub fn with_seed(id_seed: u64) -> Self {
         Self {
             next_event_id: 0,
+            id_seed,
+            next_task_id: 0,
             events: BinaryHeap::default(),
             clock: Arc::new(AtomicU64::new(0)),
             pending_tasks: HashMap::new(),
             completed_task_results: HashMap::new(),
             cancelled_tasks: HashSet::new(),
+            executing_task_id: None,
             deferred_wakes: Vec::new(),
         }
     }
@@ -528,8 +631,8 @@ impl Scheduler {
     /// from within event handlers. Note: This creates a new scheduler instance
     /// for isolation purposes in the tonic integration.
     pub fn handle(&self) -> SchedulerHandle {
-        // For the tonic integration, we create a new scheduler with the same time
-        let mut new_scheduler = Scheduler::default();
+        // For the tonic integration, we create a new scheduler with the same time.
+        let mut new_scheduler = Scheduler::with_seed(self.id_seed);
         new_scheduler.clock = Arc::clone(&self.clock);
         SchedulerHandle::new(Arc::new(Mutex::new(new_scheduler)))
     }
@@ -543,13 +646,8 @@ impl Scheduler {
     /// Skips cancelled task events to prevent time advancement for cancelled tasks.
     pub fn pop(&mut self) -> Option<EventEntry> {
         while let Some(event) = self.events.pop() {
-            // Check if this is a cancelled task event
-            if let EventEntry::Task(ref task_entry) = event {
-                if self.cancelled_tasks.contains(&task_entry.task_id) {
-                    // Remove from cancelled set and skip this event (don't advance time)
-                    self.cancelled_tasks.remove(&task_entry.task_id);
-                    continue;
-                }
+            if self.is_cancelled_task_event(&event) {
+                continue;
             }
 
             // Not cancelled - advance time and return this event
@@ -561,11 +659,79 @@ impl Scheduler {
         None
     }
 
+    /// Removes and returns the next scheduled event using a frontier policy.
+    ///
+    /// When multiple events are scheduled at the same simulation time, this method
+    /// forms a frontier of enabled events and delegates tie-breaking to `policy`.
+    /// Cancelled task events are skipped.
+    pub fn pop_with_policy(&mut self, policy: &mut dyn EventFrontierPolicy) -> Option<EventEntry> {
+        let first = loop {
+            let event = self.events.pop()?;
+            if self.is_cancelled_task_event(&event) {
+                continue;
+            }
+            break event;
+        };
+
+        let frontier_time = first.time();
+        let mut frontier_entries: Vec<EventEntry> = vec![first];
+
+        while let Some(peek) = self.events.peek() {
+            if peek.time() != frontier_time {
+                break;
+            }
+
+            let event = self.events.pop().expect("peeked value exists");
+            if self.is_cancelled_task_event(&event) {
+                continue;
+            }
+            frontier_entries.push(event);
+        }
+
+        let chosen_index = if frontier_entries.len() <= 1 {
+            0
+        } else {
+            let frontier_desc: Vec<FrontierEvent> = frontier_entries
+                .iter()
+                .map(EventEntry::to_frontier_event)
+                .collect();
+            policy.choose(frontier_time, &frontier_desc)
+        };
+
+        let chosen_index = chosen_index.min(frontier_entries.len().saturating_sub(1));
+        let chosen = frontier_entries.swap_remove(chosen_index);
+
+        for remaining in frontier_entries {
+            self.events.push(remaining);
+        }
+
+        self.clock
+            .store(simtime_to_nanos(frontier_time), AtomicOrdering::Relaxed);
+
+        Some(chosen)
+    }
+
+    fn is_cancelled_task_event(&mut self, event: &EventEntry) -> bool {
+        if let EventEntry::Task(task_entry) = event {
+            if self.cancelled_tasks.remove(&task_entry.task_id) {
+                return true;
+            }
+        }
+        false
+    }
+
     // Task scheduling methods
 
     /// Schedule a task to run at a specific time
     pub fn schedule_task<T: Task>(&mut self, delay: SimTime, task: T) -> TaskHandle<T::Output> {
-        let task_id = TaskId::new();
+        self.next_task_id += 1;
+        let task_uuid = crate::ids::deterministic_uuid(
+            self.id_seed,
+            crate::ids::UUID_DOMAIN_TASK,
+            self.next_task_id,
+        );
+        let task_id = TaskId(task_uuid);
+
         let wrapper = TaskWrapper::new(task, task_id);
         let time = self.time() + delay;
 
@@ -607,6 +773,14 @@ impl Scheduler {
         self.schedule_task(delay, task)
     }
 
+    /// Return the currently executing task ID, if any.
+    ///
+    /// This is primarily intended for task implementations that need to reschedule
+    /// themselves under the same ID (e.g. periodic or retry tasks).
+    pub(crate) fn executing_task_id(&self) -> Option<TaskId> {
+        self.executing_task_id
+    }
+
     /// Cancel a scheduled task
     pub fn cancel_task<T>(&mut self, handle: TaskHandle<T>) -> bool {
         let task_id = handle.id();
@@ -628,19 +802,32 @@ impl Scheduler {
             return false;
         }
 
-        if let Some(task) = self.pending_tasks.remove(&task_id) {
-            let result = task.execute(self);
+        let Some(task) = self.pending_tasks.remove(&task_id) else {
+            return false;
+        };
 
-            // Don't store results for () tasks since they're typically fire-and-forget
-            // (timeouts, periodic callbacks, retry delays, etc.) and never retrieved
-            if result.downcast_ref::<()>().is_none() {
-                self.completed_task_results.insert(task_id, result);
-            }
+        // Set the current executing task ID so tasks can reschedule themselves
+        // under the same ID (e.g. RetryTask / PeriodicTask).
+        let previous_executing_task_id = self.executing_task_id;
+        self.executing_task_id = Some(task_id);
 
-            true
-        } else {
-            false
+        let result = task.execute(self);
+
+        self.executing_task_id = previous_executing_task_id;
+
+        // If the task re-scheduled itself under the same ID, treat it as still pending
+        // and do not store an intermediate result.
+        if self.pending_tasks.contains_key(&task_id) {
+            return true;
         }
+
+        // Don't store results for () tasks since they're typically fire-and-forget
+        // (timeouts, periodic callbacks, retry delays, etc.) and never retrieved.
+        if result.downcast_ref::<()>().is_none() {
+            self.completed_task_results.insert(task_id, result);
+        }
+
+        true
     }
 
     /// Get the result of a completed task
@@ -712,7 +899,7 @@ mod test {
         let component_entry = ComponentEventEntry {
             event_id: EventId(0),
             time: SimTime::from_duration(Duration::from_secs(1)),
-            component: Uuid::now_v7(),
+            component: Uuid::from_u128(1),
             inner: Box::new(String::from("inner")),
         };
         let entry = EventEntry::Component(component_entry);
@@ -725,7 +912,7 @@ mod test {
         let make_component_entry = || ComponentEventEntry {
             event_id: EventId(0),
             time: SimTime::from_duration(Duration::from_secs(1)),
-            component: Uuid::now_v7(),
+            component: Uuid::from_u128(2),
             inner: Box::new(String::from("inner")),
         };
 
@@ -794,8 +981,8 @@ mod test {
         );
         assert!(scheduler.events.is_empty());
 
-        let component_a = Key::<EventA>::new_with_id(Uuid::now_v7());
-        let component_b = Key::<EventB>::new_with_id(Uuid::now_v7());
+        let component_a = Key::<EventA>::new_with_id(Uuid::from_u128(3));
+        let component_b = Key::<EventB>::new_with_id(Uuid::from_u128(4));
 
         scheduler.schedule(
             SimTime::from_duration(Duration::from_secs(1)),

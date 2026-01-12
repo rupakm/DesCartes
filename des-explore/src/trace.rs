@@ -69,11 +69,43 @@ pub enum DrawValue {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FrontierKind {
+    Component,
+    Task,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrontierEntry {
+    pub seq: u64,
+    pub kind: FrontierKind,
+
+    /// Debug-only identifiers (not used for replay matching).
+    #[serde(default)]
+    pub component_id: Option<String>,
+
+    /// Debug-only identifiers (not used for replay matching).
+    #[serde(default)]
+    pub task_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SchedulerDecision {
     pub time_nanos: u64,
 
     /// Index of the chosen event within the frontier.
     pub chosen_index: usize,
+
+    /// Sequence number of the chosen event (preferred for replay).
+    #[serde(default)]
+    pub chosen_seq: Option<u64>,
+
+    /// Sequence numbers of the frontier entries in the observed order.
+    #[serde(default)]
+    pub frontier_seqs: Vec<u64>,
+
+    /// Full frontier metadata for debugging.
+    #[serde(default)]
+    pub frontier: Vec<FrontierEntry>,
 }
 
 /// Trace builder used during simulation.

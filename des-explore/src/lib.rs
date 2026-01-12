@@ -4,6 +4,7 @@
 //! without changing the default behavior of `des-core`.
 
 pub mod estimate;
+pub mod frontier;
 pub mod harness;
 pub mod io;
 pub mod monitor;
@@ -21,6 +22,7 @@ pub mod prelude {
         estimate_monte_carlo, estimate_with_splitting, BernoulliEstimate, EstimateError,
         FoundCounterexample, MonteCarloConfig, SplittingEstimate, SplittingEstimateConfig,
     };
+    pub use crate::frontier::{RecordingFrontierPolicy, ReplayFrontierError, ReplayFrontierPolicy};
     pub use crate::harness::{
         format_from_extension, run_recorded, run_timed_recorded, HarnessConfig, HarnessContext,
         HarnessError,

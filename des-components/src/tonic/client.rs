@@ -122,7 +122,7 @@ where
         );
 
         // Schedule timeout
-        let client_key = Key::new_with_id(uuid::Uuid::new_v4()); // Generate a dummy key for timeout
+        let client_key: Key<RpcEvent> = Key::new();
         scheduler_handle.schedule(
             SimTime::from_duration(self.default_timeout),
             client_key,

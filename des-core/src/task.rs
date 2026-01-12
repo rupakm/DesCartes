@@ -12,6 +12,7 @@ use crate::{Scheduler, SimTime};
 use std::any::Any;
 use std::fmt;
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{debug, info, instrument, trace, warn};
 use uuid::Uuid;
 
@@ -20,9 +21,16 @@ use uuid::Uuid;
 pub struct TaskId(pub Uuid);
 
 impl TaskId {
-    /// Create a new task ID
+    /// Create a new task ID.
+    ///
+    /// This is deterministic (derived from a process-local counter) so that tests
+    /// and simulations are reproducible without relying on wall-clock UUIDs.
+    /// During normal simulation execution, task IDs are assigned by the scheduler.
     pub fn new() -> Self {
-        Self(Uuid::now_v7())
+        static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(0);
+        let counter = NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed) + 1;
+        let id = crate::ids::deterministic_uuid(0, crate::ids::UUID_DOMAIN_MANUAL_TASK, counter);
+        Self(id)
     }
 }
 
@@ -234,7 +242,7 @@ where
                         "Retry task failed - scheduling retry"
                     );
 
-                    let task_id = TaskId::new();
+                    let task_id = scheduler.executing_task_id().unwrap_or_else(TaskId::new);
                     let wrapper = TaskWrapper::new(self, task_id);
                     scheduler.schedule_task_at(
                         scheduler.time() + delay,
@@ -242,9 +250,8 @@ where
                         Box::new(wrapper),
                     );
 
-                    // Return a placeholder error - the real result will come from the retry
-                    // This is a limitation of the current design - we can't easily return
-                    // a "pending" state. For now, we'll just continue the retry chain.
+                    // The retry chain continues under the same task ID so the original
+                    // TaskHandle will observe the eventual success/failure.
                     Err(error)
                 }
             }
@@ -312,8 +319,9 @@ where
             trace!("Periodic task continuing indefinitely");
         }
 
-        // Schedule next execution
-        let task_id = TaskId::new();
+        // Schedule next execution under the same task ID so the original handle can
+        // cancel the whole periodic chain.
+        let task_id = scheduler.executing_task_id().unwrap_or_else(TaskId::new);
         let interval = self.interval;
         let wrapper = TaskWrapper::new(self, task_id);
         scheduler.schedule_task_at(scheduler.time() + interval, task_id, Box::new(wrapper));
@@ -328,7 +336,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Simulation;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -429,6 +436,8 @@ mod tests {
 
     #[test]
     fn test_retry_task_success() {
+        use crate::EventEntry;
+
         let attempt_count = Arc::new(Mutex::new(0));
         let attempt_count_clone = attempt_count.clone();
 
@@ -447,18 +456,34 @@ mod tests {
         );
 
         let mut scheduler = Scheduler::default();
-        let result = task.execute(&mut scheduler);
+        let handle = scheduler.schedule_task(SimTime::zero(), task);
 
-        // First attempt should fail
-        assert!(result.is_err());
+        // First attempt
+        let EventEntry::Task(entry) = scheduler.pop().unwrap() else {
+            panic!("expected task event");
+        };
+        assert!(scheduler.execute_task(entry.task_id));
         assert_eq!(*attempt_count.lock().unwrap(), 1);
 
-        // Should have scheduled a retry
-        assert!(scheduler.peek().is_some());
+        // Result should not be available yet (retry scheduled under same ID)
+        let intermediate: Option<Result<i32, &str>> = scheduler.get_task_result(handle);
+        assert!(intermediate.is_none());
+
+        // Second attempt
+        let EventEntry::Task(entry) = scheduler.pop().unwrap() else {
+            panic!("expected task event");
+        };
+        assert!(scheduler.execute_task(entry.task_id));
+        assert_eq!(*attempt_count.lock().unwrap(), 2);
+
+        let final_result: Option<Result<i32, &str>> = scheduler.get_task_result(handle);
+        assert_eq!(final_result, Some(Ok(42)));
     }
 
     #[test]
     fn test_retry_task_max_attempts() {
+        use crate::EventEntry;
+
         let attempt_count = Arc::new(Mutex::new(0));
         let attempt_count_clone = attempt_count.clone();
 
@@ -473,10 +498,26 @@ mod tests {
         );
 
         let mut scheduler = Scheduler::default();
-        let result: Result<i32, &'static str> = task.execute(&mut scheduler);
+        let handle = scheduler.schedule_task(SimTime::zero(), task);
 
-        // Should fail after first attempt
-        assert!(result.is_err());
+        // First attempt
+        let EventEntry::Task(entry) = scheduler.pop().unwrap() else {
+            panic!("expected task event");
+        };
+        assert!(scheduler.execute_task(entry.task_id));
         assert_eq!(*attempt_count.lock().unwrap(), 1);
+
+        let intermediate: Option<Result<i32, &'static str>> = scheduler.get_task_result(handle);
+        assert!(intermediate.is_none());
+
+        // Second attempt (max attempts reached)
+        let EventEntry::Task(entry) = scheduler.pop().unwrap() else {
+            panic!("expected task event");
+        };
+        assert!(scheduler.execute_task(entry.task_id));
+        assert_eq!(*attempt_count.lock().unwrap(), 2);
+
+        let final_result: Option<Result<i32, &'static str>> = scheduler.get_task_result(handle);
+        assert_eq!(final_result, Some(Err("Always fails")));
     }
 }

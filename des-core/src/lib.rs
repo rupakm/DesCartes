@@ -52,6 +52,7 @@ pub mod async_runtime;
 pub mod dists;
 pub mod error;
 pub mod execute;
+pub mod ids;
 pub mod logging;
 pub mod randomness;
 pub mod request;
@@ -65,7 +66,10 @@ pub mod formal;
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU64, Ordering as AtomicOrdering},
+    Arc, Mutex,
+};
 use tracing::{debug, info, instrument, trace, warn};
 
 //pub use environment::Environment;
@@ -83,8 +87,9 @@ pub use request::{
     ResponseStatus,
 };
 pub use scheduler::{
-    current_time, defer_wake, in_scheduler_context, ClockRef, EventEntry, Scheduler,
-    SchedulerHandle,
+    current_time, defer_wake, in_scheduler_context, ClockRef, EventEntry, EventFrontierPolicy,
+    FifoFrontierPolicy, FrontierEvent, FrontierEventKind, Scheduler, SchedulerHandle,
+    UniformRandomFrontierPolicy,
 };
 pub use task::{ClosureTask, PeriodicTask, RetryTask, Task, TaskHandle, TaskId, TimeoutTask};
 pub use time::SimTime;
@@ -121,11 +126,13 @@ pub struct Key<T> {
 impl<T> Key<T> {
     /// Create a new key with a generated UUID.
     ///
-    /// Note: the UUID is generated at runtime (currently `Uuid::now_v7()`).
-    /// For fully deterministic simulations, prefer generating keys from a
-    /// deterministic source and using [`Key::new_with_id`].
+    /// This is deterministic (derived from a process-local counter) so that tests
+    /// and simulations are reproducible without relying on wall-clock UUIDs.
     pub fn new() -> Self {
-        Self::new_with_id(Uuid::now_v7())
+        static NEXT_KEY_ID: AtomicU64 = AtomicU64::new(0);
+        let counter = NEXT_KEY_ID.fetch_add(1, AtomicOrdering::Relaxed) + 1;
+        let id = crate::ids::deterministic_uuid(0, crate::ids::UUID_DOMAIN_KEY, counter);
+        Self::new_with_id(id)
     }
 
     pub fn new_with_id(id: Uuid) -> Self {
@@ -189,6 +196,8 @@ where
 #[derive(Default)]
 pub struct Components {
     components: HashMap<Uuid, Box<dyn ProcessEventEntry>>,
+    next_component_id: u64,
+    id_seed: u64,
 }
 
 impl Components {
@@ -209,15 +218,33 @@ impl Components {
         }
     }
 
+    /// Registers a new component with the given ID.
+    #[must_use]
+    pub fn register_with_id<E: std::fmt::Debug + 'static, C: Component<Event = E> + 'static>(
+        &mut self,
+        id: Uuid,
+        component: C,
+    ) -> Key<E> {
+        self.components.insert(id, Box::new(component));
+        Key::new_with_id(id)
+    }
+
     /// Registers a new component and returns its ID.
+    ///
+    /// This uses a deterministic ID generator (seed + counter). For simulation-wide
+    /// determinism prefer `Simulation::add_component`, which uses the simulation seed.
     #[must_use]
     pub fn register<E: std::fmt::Debug + 'static, C: Component<Event = E> + 'static>(
         &mut self,
         component: C,
     ) -> Key<E> {
-        let id = Uuid::now_v7();
-        self.components.insert(id, Box::new(component));
-        Key::new_with_id(id)
+        self.next_component_id += 1;
+        let id = crate::ids::deterministic_uuid(
+            self.id_seed,
+            crate::ids::UUID_DOMAIN_COMPONENT,
+            self.next_component_id,
+        );
+        self.register_with_id(id, component)
     }
 
     pub fn remove<E: 'static, C: Component<Event = E> + 'static>(
@@ -250,6 +277,10 @@ impl Components {
 pub struct Simulation {
     /// Event scheduler (wrapped in Arc<Mutex<>> for interior mutability).
     scheduler: Arc<Mutex<Scheduler>>,
+    /// Same-time frontier tie-breaking policy.
+    frontier_policy: Box<dyn scheduler::EventFrontierPolicy>,
+    /// Deterministic component ID counter.
+    next_component_id: u64,
     /// Component container.
     pub components: Components,
     /// Global configuration for this simulation instance.
@@ -270,10 +301,19 @@ impl Simulation {
     #[must_use]
     pub fn new(config: SimulationConfig) -> Self {
         Self {
-            scheduler: Arc::new(Mutex::new(Scheduler::default())),
+            scheduler: Arc::new(Mutex::new(Scheduler::with_seed(config.seed))),
+            frontier_policy: Box::new(scheduler::FifoFrontierPolicy),
+            next_component_id: 0,
             components: Components::default(),
             config,
         }
+    }
+
+    /// Set the same-time event frontier tie-breaking policy.
+    ///
+    /// By default, simulations use deterministic FIFO ordering.
+    pub fn set_frontier_policy(&mut self, policy: Box<dyn scheduler::EventFrontierPolicy>) {
+        self.frontier_policy = policy;
     }
 
     /// Access the simulation configuration.
@@ -317,7 +357,7 @@ impl Simulation {
         // Pop the next event while holding the lock briefly
         let event = {
             let mut scheduler = self.scheduler.lock().unwrap();
-            scheduler.pop()
+            scheduler.pop_with_policy(self.frontier_policy.as_mut())
         };
 
         event.is_some_and(|event| {
@@ -378,11 +418,15 @@ impl Simulation {
         &mut self,
         component: C,
     ) -> Key<E> {
-        let key = self.components.register(component);
-        debug!(
-            component_id = ?key.id(),
-            "Added component to simulation"
+        self.next_component_id += 1;
+        let id = crate::ids::deterministic_uuid(
+            self.config.seed,
+            crate::ids::UUID_DOMAIN_COMPONENT,
+            self.next_component_id,
         );
+
+        let key = self.components.register_with_id(id, component);
+        debug!(component_id = ?key.id(), "Added component to simulation");
         key
     }
 
