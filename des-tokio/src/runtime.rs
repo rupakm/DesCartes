@@ -23,7 +23,25 @@ thread_local! {
 ///
 /// Panics if a runtime is already installed in this thread.
 pub fn install(sim: &mut Simulation) -> Key<RuntimeEvent> {
-    let runtime = DesRuntime::new();
+    install_with(sim, |_| {})
+}
+
+/// Install the DES async runtime into the simulation and allow configuring it
+/// before installation.
+///
+/// This is the primary opt-in hook for experimentation tooling (e.g. installing
+/// a custom ready-task scheduling policy). The default `install` behavior remains
+/// deterministic FIFO.
+///
+/// # Panics
+///
+/// Panics if a runtime is already installed in this thread.
+pub fn install_with(
+    sim: &mut Simulation,
+    configure: impl FnOnce(&mut DesRuntime),
+) -> Key<RuntimeEvent> {
+    let mut runtime = DesRuntime::new();
+    configure(&mut runtime);
 
     let scheduler = sim.scheduler_handle();
     let installed = async_runtime::install(sim, runtime);

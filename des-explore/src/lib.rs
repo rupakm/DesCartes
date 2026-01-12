@@ -8,6 +8,7 @@ pub mod frontier;
 pub mod harness;
 pub mod io;
 pub mod monitor;
+pub mod ready_task;
 pub mod replay_rng;
 pub mod rng;
 pub mod shared_replay_rng;
@@ -24,14 +25,18 @@ pub mod prelude {
     };
     pub use crate::frontier::{RecordingFrontierPolicy, ReplayFrontierError, ReplayFrontierPolicy};
     pub use crate::harness::{
-        format_from_extension, run_recorded, run_timed_recorded, HarnessConfig, HarnessContext,
-        HarnessError, HarnessFrontierConfig, HarnessFrontierPolicy,
+        format_from_extension, run_recorded, run_replayed, run_timed_recorded, run_timed_replayed,
+        HarnessConfig, HarnessContext, HarnessError, HarnessFrontierConfig, HarnessFrontierPolicy,
+        HarnessReplayError, HarnessTokioReadyConfig, HarnessTokioReadyPolicy,
     };
     pub use crate::io::{
         read_trace_from_path, write_trace_to_path, TraceFormat, TraceIoConfig, TraceIoError,
     };
     pub use crate::monitor::{
         Monitor, MonitorConfig, MonitorStatus, QueueId, ScoreWeights, WindowSummary,
+    };
+    pub use crate::ready_task::{
+        RecordingReadyTaskPolicy, ReplayReadyTaskError, ReplayReadyTaskPolicy,
     };
     pub use crate::replay_rng::{ChainedRandomProvider, ReplayRandomProvider};
     pub use crate::rng::TracingRandomProvider;

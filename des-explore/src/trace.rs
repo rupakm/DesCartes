@@ -38,10 +38,26 @@ pub enum TraceEvent {
     RandomDraw(RandomDraw),
 
     /// Scheduler decision among same-time frontier entries.
-    ///
-    /// This is a placeholder for later stages; the initial implementation only
-    /// records randomness.
     SchedulerDecision(SchedulerDecision),
+
+    /// Async runtime decision among ready tasks (tokio-level scheduling).
+    AsyncRuntimeDecision(AsyncRuntimeDecision),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AsyncRuntimeDecision {
+    pub time_nanos: u64,
+
+    /// Index chosen within the observed ready set.
+    pub chosen_index: usize,
+
+    /// Chosen task ID (preferred for replay).
+    #[serde(default)]
+    pub chosen_task_id: Option<u64>,
+
+    /// Observed ready task IDs in order.
+    #[serde(default)]
+    pub ready_task_ids: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

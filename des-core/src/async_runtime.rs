@@ -39,6 +39,8 @@
 //! Executor::timed(SimTime::from_millis(200)).execute(&mut sim);
 //! ```
 
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::future::Future;
@@ -278,6 +280,78 @@ pub enum RuntimeEvent {
     TimerTick,
 }
 
+/// Policy for choosing which ready async task to poll next.
+///
+/// This is a separate scheduling layer from the DES event queue. It only affects
+/// the order in which ready async tasks are polled within a `DesRuntime` poll
+/// cycle.
+///
+/// The default policy is deterministic FIFO, preserving existing behavior.
+pub trait ReadyTaskPolicy {
+    fn choose(&mut self, time: SimTime, ready: &[TaskId]) -> usize;
+}
+
+impl<T: ReadyTaskPolicy + ?Sized> ReadyTaskPolicy for Box<T> {
+    fn choose(&mut self, time: SimTime, ready: &[TaskId]) -> usize {
+        (**self).choose(time, ready)
+    }
+}
+
+/// Deterministic FIFO ready-task policy.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FifoReadyTaskPolicy;
+
+impl ReadyTaskPolicy for FifoReadyTaskPolicy {
+    fn choose(&mut self, _time: SimTime, _ready: &[TaskId]) -> usize {
+        0
+    }
+}
+
+/// Uniform random tie-breaker among ready async tasks.
+///
+/// Deterministic given the provided seed.
+#[derive(Debug, Clone)]
+pub struct UniformRandomReadyTaskPolicy {
+    rng: StdRng,
+}
+
+impl UniformRandomReadyTaskPolicy {
+    pub fn new(seed: u64) -> Self {
+        Self {
+            rng: StdRng::seed_from_u64(seed),
+        }
+    }
+}
+
+impl ReadyTaskPolicy for UniformRandomReadyTaskPolicy {
+    fn choose(&mut self, _time: SimTime, ready: &[TaskId]) -> usize {
+        if ready.is_empty() {
+            return 0;
+        }
+        self.rng.gen_range(0..ready.len())
+    }
+}
+
+/// Stable signature for a ready-task choice point.
+///
+/// This is intended for replay and (future) schedule-search tooling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadyTaskSignature {
+    pub time_nanos: u64,
+    pub ready_task_ids: Vec<u64>,
+}
+
+impl ReadyTaskSignature {
+    pub fn new(time: SimTime, ready: &[TaskId]) -> Self {
+        let nanos: u128 = time.as_duration().as_nanos();
+        let time_nanos = nanos.try_into().unwrap_or(u64::MAX);
+        Self {
+            time_nanos,
+            ready_task_ids: ready.iter().map(|t| t.0).collect(),
+        }
+    }
+}
+
 /// A suspended async task.
 struct Task {
     future: Pin<Box<dyn Future<Output = ()>>>,
@@ -301,6 +375,8 @@ pub struct DesRuntime {
     next_task_id: Arc<AtomicU64>,
     tasks: HashMap<TaskId, Task>,
     ready_queue: VecDeque<TaskId>,
+
+    ready_task_policy: Box<dyn ReadyTaskPolicy>,
 
     spawn_queue: Arc<Mutex<VecDeque<SpawnRequestSend>>>,
     spawn_queue_local: Arc<Mutex<VecDeque<SpawnRequestLocal>>>,
@@ -326,6 +402,8 @@ impl DesRuntime {
             next_task_id: Arc::new(AtomicU64::new(0)),
             tasks: HashMap::new(),
             ready_queue: VecDeque::new(),
+
+            ready_task_policy: Box::new(FifoReadyTaskPolicy),
             spawn_queue: Arc::new(Mutex::new(VecDeque::new())),
             spawn_queue_local: Arc::new(Mutex::new(VecDeque::new())),
             timers: BTreeMap::new(),
@@ -348,6 +426,13 @@ impl DesRuntime {
             next_task_id: self.next_task_id.clone(),
             spawn_queue: self.spawn_queue_local.clone(),
         }
+    }
+
+    /// Set the ready-task polling policy.
+    ///
+    /// By default, the runtime uses deterministic FIFO ordering.
+    pub fn set_ready_task_policy(&mut self, policy: Box<dyn ReadyTaskPolicy>) {
+        self.ready_task_policy = policy;
     }
 
     /// Spawn a new async task.
@@ -449,14 +534,21 @@ impl DesRuntime {
 
         // Snapshot polling: only poll tasks that were ready at the start of this cycle.
         // Tasks woken while polling will be queued for the next cycle.
-        let mut to_poll = self.ready_queue.len();
+        let to_poll = self.ready_queue.len();
+        let mut poll_set: Vec<TaskId> = Vec::with_capacity(to_poll);
+        for _ in 0..to_poll {
+            if let Some(task_id) = self.ready_queue.pop_front() {
+                poll_set.push(task_id);
+            }
+        }
+
         let mut completed = 0;
 
-        while to_poll > 0 {
-            let Some(task_id) = self.ready_queue.pop_front() else {
-                break;
-            };
-            to_poll -= 1;
+        while !poll_set.is_empty() {
+            let now = scheduler.time();
+            let chosen = self.ready_task_policy.choose(now, &poll_set);
+            let chosen = chosen.min(poll_set.len().saturating_sub(1));
+            let task_id = poll_set.swap_remove(chosen);
 
             // Mark as no longer queued before polling so a wake during polling can re-queue it.
             if let Some(task) = self.tasks.get_mut(&task_id) {

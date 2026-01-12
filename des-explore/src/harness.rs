@@ -1,3 +1,4 @@
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -6,7 +7,8 @@ use des_core::{
     UniformRandomFrontierPolicy,
 };
 
-use crate::frontier::{RecordingFrontierPolicy, ReplayFrontierPolicy};
+use crate::frontier::{RecordingFrontierPolicy, ReplayFrontierError, ReplayFrontierPolicy};
+use crate::ready_task::{RecordingReadyTaskPolicy, ReplayReadyTaskError, ReplayReadyTaskPolicy};
 
 use crate::io::{write_trace_to_path, TraceFormat, TraceIoConfig, TraceIoError};
 use crate::rng::TracingRandomProvider;
@@ -19,6 +21,11 @@ pub struct HarnessConfig {
 
     /// Whether to call `des_tokio::runtime::install(&mut sim)`.
     pub install_tokio: bool,
+
+    /// Optional async-runtime (tokio-level) ready-task policy configuration.
+    ///
+    /// When omitted, tokio uses deterministic FIFO polling order.
+    pub tokio_ready: Option<HarnessTokioReadyConfig>,
 
     /// Optional same-time frontier policy configuration.
     ///
@@ -42,6 +49,29 @@ pub enum HarnessFrontierPolicy {
     ///
     /// Deterministic given the provided seed.
     UniformRandom { seed: u64 },
+}
+
+#[derive(Debug, Clone)]
+pub enum HarnessTokioReadyPolicy {
+    Fifo,
+    UniformRandom { seed: u64 },
+}
+
+#[derive(Debug, Clone)]
+pub struct HarnessTokioReadyConfig {
+    pub policy: HarnessTokioReadyPolicy,
+
+    /// Record async-runtime ready-task decisions into the trace.
+    pub record_decisions: bool,
+}
+
+impl Default for HarnessTokioReadyConfig {
+    fn default() -> Self {
+        Self {
+            policy: HarnessTokioReadyPolicy::Fifo,
+            record_decisions: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +100,32 @@ pub enum HarnessError {
 
     #[error("tokio integration requested but `des-explore` was built without feature `tokio`")]
     TokioFeatureDisabled,
+
+    #[error("tokio ready-task policy configured but install_tokio=false")]
+    TokioPolicyWithoutTokio,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum HarnessReplayError {
+    #[error(transparent)]
+    Harness(#[from] HarnessError),
+
+    #[error("frontier replay mismatch: {0}")]
+    Frontier(#[from] ReplayFrontierError),
+
+    #[error("tokio ready-task replay mismatch: {0}")]
+    TokioReady(#[from] ReplayReadyTaskError),
+
+    #[error("`cfg.frontier` is not used by `run_replayed`; replay uses the input trace instead")]
+    FrontierConfigNotAllowed,
+
+    #[error(
+        "`cfg.tokio_ready` is not used by `run_replayed`; replay uses the input trace instead"
+    )]
+    TokioReadyConfigNotAllowed,
+
+    #[error("simulation panicked during replay: {message}")]
+    Panic { message: String },
 }
 
 /// Context passed to setup/run closures.
@@ -180,10 +236,38 @@ pub fn run_recorded<R>(
 
     let mut sim = setup(cfg.sim_config.clone(), &ctx);
 
+    if cfg.tokio_ready.is_some() && !cfg.install_tokio {
+        return Err(HarnessError::TokioPolicyWithoutTokio);
+    }
+
     if cfg.install_tokio {
         #[cfg(feature = "tokio")]
         {
-            des_tokio::runtime::install(&mut sim);
+            let tokio_cfg = cfg.tokio_ready.clone();
+            let recorder = ctx.recorder();
+            des_tokio::runtime::install_with(&mut sim, move |runtime| {
+                if let Some(tokio_cfg) = tokio_cfg {
+                    use des_core::async_runtime::{
+                        FifoReadyTaskPolicy, ReadyTaskPolicy, UniformRandomReadyTaskPolicy,
+                    };
+
+                    let base_policy: Box<dyn ReadyTaskPolicy> = match tokio_cfg.policy {
+                        HarnessTokioReadyPolicy::Fifo => Box::new(FifoReadyTaskPolicy),
+                        HarnessTokioReadyPolicy::UniformRandom { seed } => {
+                            Box::new(UniformRandomReadyTaskPolicy::new(seed))
+                        }
+                    };
+
+                    if tokio_cfg.record_decisions {
+                        runtime.set_ready_task_policy(Box::new(RecordingReadyTaskPolicy::new(
+                            base_policy,
+                            recorder.clone(),
+                        )));
+                    } else {
+                        runtime.set_ready_task_policy(base_policy);
+                    }
+                }
+            });
         }
 
         #[cfg(not(feature = "tokio"))]
@@ -235,6 +319,122 @@ pub fn run_timed_recorded(
     setup: impl FnOnce(SimulationConfig, &HarnessContext) -> Simulation,
 ) -> Result<Trace, HarnessError> {
     let ((), trace) = run_recorded(cfg, setup, move |sim, _ctx| {
+        sim.execute(Executor::timed(end_time));
+    })?;
+
+    Ok(trace)
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "<non-string panic payload>".to_string()
+    }
+}
+
+/// Runs a simulation, replaying scheduler decisions from an input trace.
+///
+/// This is an opt-in convenience API that installs a [`ReplayFrontierPolicy`] and
+/// returns a structured error when the run diverges.
+///
+/// The `setup` closure receives the input trace so it can also wire RNG replay via
+/// [`HarnessContext::branching_provider`] / [`HarnessContext::shared_branching_provider`].
+pub fn run_replayed<R>(
+    cfg: HarnessConfig,
+    input_trace: &Trace,
+    setup: impl FnOnce(SimulationConfig, &HarnessContext, &Trace) -> Simulation,
+    run: impl FnOnce(&mut Simulation, &HarnessContext) -> R,
+) -> Result<(R, Trace), HarnessReplayError> {
+    if cfg.frontier.is_some() {
+        return Err(HarnessReplayError::FrontierConfigNotAllowed);
+    }
+    if cfg.tokio_ready.is_some() {
+        return Err(HarnessReplayError::TokioReadyConfigNotAllowed);
+    }
+
+    let recorder = Arc::new(Mutex::new(TraceRecorder::new(TraceMeta {
+        seed: cfg.sim_config.seed,
+        scenario: cfg.scenario.clone(),
+    })));
+
+    let ctx = HarnessContext::new(recorder);
+
+    let mut sim = setup(cfg.sim_config.clone(), &ctx, input_trace);
+
+    let mut replay_tokio_ready: Option<ReplayReadyTaskPolicy> = None;
+
+    if cfg.install_tokio {
+        #[cfg(feature = "tokio")]
+        {
+            let policy = ReplayReadyTaskPolicy::from_trace_events(&input_trace.events);
+            let policy_for_runtime = policy.clone();
+            des_tokio::runtime::install_with(&mut sim, move |runtime| {
+                runtime.set_ready_task_policy(Box::new(policy_for_runtime));
+            });
+            replay_tokio_ready = Some(policy);
+        }
+
+        #[cfg(not(feature = "tokio"))]
+        {
+            return Err(HarnessError::TokioFeatureDisabled.into());
+        }
+    }
+
+    let replay_frontier = ctx.install_replay_frontier_policy(&mut sim, input_trace);
+
+    let result = match catch_unwind(AssertUnwindSafe(|| run(&mut sim, &ctx))) {
+        Ok(v) => v,
+        Err(payload) => {
+            if let Some(replay_tokio_ready) = replay_tokio_ready.as_ref() {
+                if let Some(err) = replay_tokio_ready.error() {
+                    return Err(err.into());
+                }
+            }
+
+            if let Some(err) = replay_frontier.take_error() {
+                return Err(err.into());
+            }
+
+            return Err(HarnessReplayError::Panic {
+                message: panic_message(payload),
+            });
+        }
+    };
+
+    if let Some(replay_tokio_ready) = replay_tokio_ready.as_ref() {
+        if let Some(err) = replay_tokio_ready.error() {
+            return Err(err.into());
+        }
+    }
+
+    if let Some(err) = replay_frontier.take_error() {
+        return Err(err.into());
+    }
+
+    let trace = ctx.snapshot_trace();
+    write_trace_to_path(
+        &cfg.trace_path,
+        &trace,
+        TraceIoConfig {
+            format: cfg.trace_format,
+        },
+    )
+    .map_err(HarnessError::from)?;
+
+    Ok((result, trace))
+}
+
+/// Convenience wrapper: replay with `Executor::timed(end_time)`.
+pub fn run_timed_replayed(
+    cfg: HarnessConfig,
+    end_time: SimTime,
+    input_trace: &Trace,
+    setup: impl FnOnce(SimulationConfig, &HarnessContext, &Trace) -> Simulation,
+) -> Result<Trace, HarnessReplayError> {
+    let ((), trace) = run_replayed(cfg, input_trace, setup, move |sim, _ctx| {
         sim.execute(Executor::timed(end_time));
     })?;
 
