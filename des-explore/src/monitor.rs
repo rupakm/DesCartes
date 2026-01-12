@@ -11,36 +11,34 @@ pub struct QueueId(pub u64);
 
 /// A single window summary of the monitored system trajectory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScoreWeights {
+    pub queue_mean: f64,
+    pub retry_amplification: f64,
+    pub timeout_rate_rps: f64,
+    pub drop_rate_rps: f64,
+    pub distance: f64,
+}
+
+/// Summary of metrics for a single monitoring window.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowSummary {
     pub window_start: SimTime,
     pub window_end: SimTime,
-
-    // Queueing
     pub queue_mean: f64,
     pub queue_max: u64,
-
-    // Counts
     pub completed_in_time: u64,
     pub completed_late: u64,
     pub dropped: u64,
     pub timeouts: u64,
     pub retries: u64,
-
-    // Latency (for in-time completions)
-    pub latency_mean_ms: f64,
+    pub latency_mean_ms: Option<f64>,
     pub latency_p95_ms: Option<f64>,
     pub latency_p99_ms: Option<f64>,
-
-    // Rates derived from window duration
     pub throughput_rps: f64,
     pub timeout_rate_rps: f64,
     pub retry_rate_rps: f64,
     pub drop_rate_rps: f64,
-
-    // Derived ratios
     pub retry_amplification: f64,
-
-    // Baseline distance (if baseline is enabled)
     pub distance_to_baseline: Option<f64>,
 }
 
@@ -95,20 +93,13 @@ impl Default for MonitorConfig {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ScoreWeights {
-    pub queue_mean: f64,
-    pub retry_amplification: f64,
-    pub timeout_rate_rps: f64,
-    pub distance: f64,
-}
-
 impl Default for ScoreWeights {
     fn default() -> Self {
         Self {
             queue_mean: 1.0,
             retry_amplification: 1.0,
             timeout_rate_rps: 1.0,
+            drop_rate_rps: 1.0,
             distance: 1.0,
         }
     }
@@ -464,7 +455,7 @@ impl Monitor {
             dropped: self.dropped,
             timeouts: self.timeouts,
             retries: self.retries,
-            latency_mean_ms,
+            latency_mean_ms: Some(latency_mean_ms),
             latency_p95_ms: p95,
             latency_p99_ms: p99,
             throughput_rps,
@@ -481,7 +472,7 @@ impl Monitor {
 
         let features = [
             summary.queue_mean,
-            summary.latency_mean_ms,
+            summary.latency_mean_ms.unwrap_or(0.0),
             summary.drop_rate_rps,
             summary.timeout_rate_rps,
             retry_amp_feature,
@@ -563,6 +554,7 @@ impl Monitor {
         s += self.cfg.score_weights.retry_amplification
             * w.retry_amplification.min(self.cfg.retry_amplification_cap);
         s += self.cfg.score_weights.timeout_rate_rps * w.timeout_rate_rps;
+        s += self.cfg.score_weights.drop_rate_rps * w.drop_rate_rps;
         if let Some(d) = w.distance_to_baseline {
             s += self.cfg.score_weights.distance * d;
         }
