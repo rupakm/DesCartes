@@ -1,0 +1,19 @@
+[package]
+name = "des-tonic"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+des-core = { path = "../des-core" }
+des-tokio = { path = "../des-tokio" }
+des-components = { path = "../des-components" }
+
+# Tonic types only (no tonic::transport)
+tonic = "0.12"
+bytes = "1.0"
+
+[dev-dependencies]
+rand = { workspace = true }

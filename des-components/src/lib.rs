@@ -11,7 +11,6 @@ pub mod retry_policy;
 
 pub mod server;
 pub mod simple_client;
-pub mod tonic;
 pub mod tower;
 pub mod transport;
 
@@ -30,14 +29,6 @@ pub use retry_policy::{
 };
 pub use server::{Server, ServerEvent};
 pub use simple_client::{ClientEvent, SimpleClient};
-pub use tonic::{
-    codec::{JsonCodec, ProtobufCodec},
-    ClientStats, DesTonicClient, DesTonicClientBuilder, DesTonicServer, DesTonicServerBuilder,
-    MethodDescriptor, RpcCodec, RpcEvent, RpcRequest, RpcResponse, RpcService, RpcStatus,
-    RpcStatusCode, ServerStats, SimTonicClient, SimTonicServer, TonicClientBuilder,
-    TonicClientComponent, TonicClientEvent, TonicError, TonicResult, TonicServerBuilder,
-    TonicServerComponent, TonicServerEvent, TonicTransportRouter,
-};
 pub use tower::retry::{
     exponential_backoff_layer, DesRetryLayer, DesRetryPolicy, ExponentialBackoff,
 };

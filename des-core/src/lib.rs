@@ -372,8 +372,8 @@ impl Simulation {
 
             // Set scheduler context for deferred wakes
             {
-                let mut scheduler = self.scheduler.lock().unwrap();
-                scheduler::set_scheduler_context(&mut scheduler);
+                let scheduler = self.scheduler.lock().unwrap();
+                scheduler::set_scheduler_context(&scheduler);
             }
 
             // Process the event - need mutable access to scheduler for task execution
@@ -388,7 +388,7 @@ impl Simulation {
             // Process any deferred wakes that were registered during event processing
             {
                 let mut scheduler = self.scheduler.lock().unwrap();
-                scheduler.process_deferred_wakes();
+                scheduler::drain_deferred_wakes(&mut scheduler);
             }
 
             true

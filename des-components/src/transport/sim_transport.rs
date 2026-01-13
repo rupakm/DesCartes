@@ -66,7 +66,10 @@ impl SimTransport {
         self.message_handlers.remove(&endpoint);
     }
 
-    /// Send a message through the transport
+    /// Send a message through the transport.
+    ///
+    /// This is a convenience wrapper that schedules a `TransportEvent::SendMessage` to be
+    /// processed by this `SimTransport` component.
     pub fn send_message(
         &mut self,
         source: EndpointId,
@@ -88,12 +91,11 @@ impl SimTransport {
             message_type,
         );
 
-        self.schedule_message_delivery(message, scheduler_handle, self_key)?;
-
+        scheduler_handle.schedule_now(self_key, TransportEvent::SendMessage { message });
         Ok(message_id)
     }
 
-    /// Send a message with correlation ID for request/response matching
+    /// Send a message with correlation ID for request/response matching.
     pub fn send_message_with_correlation(
         &mut self,
         source: EndpointId,
@@ -117,84 +119,20 @@ impl SimTransport {
         )
         .with_correlation_id(correlation_id);
 
-        self.schedule_message_delivery(message, scheduler_handle, self_key)?;
-
+        scheduler_handle.schedule_now(self_key, TransportEvent::SendMessage { message });
         Ok(message_id)
     }
 
-    /// Schedule message delivery through the network
-    fn schedule_message_delivery(
-        &mut self,
-        message: TransportMessage,
-        scheduler_handle: &SchedulerHandle,
-        self_key: Key<TransportEvent>,
-    ) -> Result<(), String> {
-        // Update statistics
-        self.stats.messages_sent += 1;
-        self.stats.bytes_sent += message.size() as u64;
-
-        // Check if message should be dropped
-        if self
-            .network_model
-            .should_drop_message(message.source, message.destination, &message)
-        {
-            self.stats.messages_dropped += 1;
-
-            // Schedule drop event
-            scheduler_handle.schedule_now(
-                self_key,
-                TransportEvent::MessageDropped {
-                    message,
-                    reason: "Network packet loss".to_string(),
-                },
-            );
-            return Ok(());
-        }
-
-        // Calculate total delivery time (latency + bandwidth delay)
-        let latency =
-            self.network_model
-                .calculate_latency(message.source, message.destination, &message);
-        let bandwidth_delay = self.network_model.calculate_bandwidth_delay(
-            message.source,
-            message.destination,
-            &message,
-        );
-        let total_delay = latency + bandwidth_delay;
-
-        // Schedule delivery
-        let destination = message.destination;
-        scheduler_handle.schedule(
-            SimTime::from_duration(total_delay),
-            self_key,
-            TransportEvent::MessageDelivered {
-                message,
-                destination,
-            },
-        );
-
-        Ok(())
-    }
-
     /// Handle message delivery
-    fn handle_message_delivered(
-        &mut self,
-        message: TransportMessage,
-        destination: EndpointId,
-        scheduler: &mut Scheduler,
-    ) {
+    fn handle_message_delivered(&mut self, message: TransportMessage, scheduler: &mut Scheduler) {
         self.stats.messages_delivered += 1;
         self.stats.bytes_delivered += message.size() as u64;
 
+        let destination = message.destination;
+
         // Forward to registered handler if available
         if let Some(&handler_key) = self.message_handlers.get(&destination) {
-            scheduler.schedule_now(
-                handler_key,
-                TransportEvent::MessageDelivered {
-                    message,
-                    destination,
-                },
-            );
+            scheduler.schedule_now(handler_key, TransportEvent::MessageDelivered { message });
         } else {
             // No handler registered - message is lost
             println!(
@@ -239,10 +177,18 @@ impl Component for SimTransport {
     ) {
         match event {
             TransportEvent::SendMessage { message } => {
-                // Handle message send request - assign new message ID and apply network simulation
+                // Handle message send request - assign message ID (if needed) and apply network simulation
                 let mut message_with_id = message.clone();
-                message_with_id.id = self.next_message_id;
-                self.next_message_id += 1;
+
+                if message_with_id.id == 0 {
+                    message_with_id.id = self.next_message_id;
+                    self.next_message_id += 1;
+                } else if message_with_id.id >= self.next_message_id {
+                    self.next_message_id = message_with_id.id + 1;
+                }
+
+                // The message enters the network when this event is processed.
+                message_with_id.sent_at = scheduler.time();
 
                 // Apply network simulation directly without using scheduler handle
                 self.stats.messages_sent += 1;
@@ -277,22 +223,17 @@ impl Component for SimTransport {
                     let total_delay = latency + bandwidth_delay;
 
                     // Schedule delivery
-                    let destination = message_with_id.destination;
                     scheduler.schedule(
                         SimTime::from_duration(total_delay),
                         self_id,
                         TransportEvent::MessageDelivered {
                             message: message_with_id,
-                            destination,
                         },
                     );
                 }
             }
-            TransportEvent::MessageDelivered {
-                message,
-                destination,
-            } => {
-                self.handle_message_delivered(message.clone(), *destination, scheduler);
+            TransportEvent::MessageDelivered { message } => {
+                self.handle_message_delivered(message.clone(), scheduler);
             }
             TransportEvent::MessageDropped { message, reason } => {
                 self.handle_message_dropped(message.clone(), reason.clone());
@@ -394,13 +335,12 @@ mod tests {
 
         assert_eq!(message_id, 1);
 
-        // Check stats
+        // Stats update when the send event is processed.
         {
             let transport_ref = sim
                 .get_component_mut::<TransportEvent, SimTransport>(transport_key)
                 .unwrap();
-            assert_eq!(transport_ref.stats().messages_sent, 1);
-            assert_eq!(transport_ref.stats().bytes_sent, 4);
+            assert_eq!(transport_ref.stats().messages_sent, 0);
         }
 
         // Run simulation to process the message
@@ -451,7 +391,7 @@ mod tests {
                 )
                 .unwrap();
 
-            assert_eq!(transport_ref.stats().messages_sent, 1);
+            assert_eq!(transport_ref.stats().messages_sent, 0);
         }
 
         // Run simulation

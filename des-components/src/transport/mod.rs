@@ -23,10 +23,7 @@ pub enum TransportEvent {
     /// Request to send a message through the transport
     SendMessage { message: TransportMessage },
     /// A message has been delivered to its destination
-    MessageDelivered {
-        message: TransportMessage,
-        destination: EndpointId,
-    },
+    MessageDelivered { message: TransportMessage },
     /// A message was dropped due to network conditions
     MessageDropped {
         message: TransportMessage,
