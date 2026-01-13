@@ -11,7 +11,6 @@ pub mod retry_policy;
 
 pub mod server;
 pub mod simple_client;
-pub mod tower;
 pub mod transport;
 
 // Export distribution patterns from des-core
@@ -29,14 +28,6 @@ pub use retry_policy::{
 };
 pub use server::{Server, ServerEvent};
 pub use simple_client::{ClientEvent, SimpleClient};
-pub use tower::retry::{
-    exponential_backoff_layer, DesRetryLayer, DesRetryPolicy, ExponentialBackoff,
-};
-pub use tower::{
-    DesCircuitBreaker, DesConcurrencyLimit, DesGlobalConcurrencyLimit, DesHedge,
-    DesLoadBalanceStrategy, DesLoadBalancer, DesRateLimit, DesTimeout,
-};
-pub use tower::{DesService, DesServiceBuilder, SchedulerHandle, ServiceError, SimBody};
 pub use transport::{
     EndpointId, EndpointInfo, EndpointRegistry, LatencyConfig, LatencyJitterModel, MessageType,
     NetworkModel, SharedEndpointRegistry, SimEndpointRegistry, SimTransport, SimpleNetworkModel,

@@ -1,5 +1,5 @@
 [package]
-name = "des-components"
+name = "des-tower"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,17 +8,22 @@ repository.workspace = true
 
 [dependencies]
 des-core = { path = "../des-core" }
-des-metrics = { path = "../des-metrics" }
+des-tokio = { path = "../des-tokio" }
+des-components = { path = "../des-components" }
+
 tokio = { workspace = true }
+
+bytes = "1.0"
+http = "1.0"
+http-body = "1.0"
+pin-project = "1.0"
 thiserror = { workspace = true }
-serde = { workspace = true }
-serde_json = "1.0"
+
+# tower ecosystem
+tower = { version = "0.5", features = ["full"] }
+tower-layer = "0.3"
+
 rand = { workspace = true }
-rand_distr = { workspace = true }
 rand_chacha = { workspace = true }
-uuid = { version = "1.19.0", features = ["v7", "serde", "v4"] }
 
 [dev-dependencies]
-proptest = { workspace = true }
-des-viz = { path = "../des-viz" }
-plotters = { workspace = true }

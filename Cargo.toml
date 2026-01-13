@@ -7,6 +7,7 @@ members = [
     "des-tokio",
     "des-explore",
     "des-tonic",
+    "des-tower",
 ]
 resolver = "2"
 
@@ -45,6 +46,12 @@ plotters = "0.3"
 # Testing
 proptest = "1.4"
 criterion = "0.5"
+
+# Tower ecosystem (used by des-tower)
+tower = "0.5"
+tower-layer = "0.3"
+pin-project = "1.1"
+atomic-waker = "1.1"
 
 # Metrics
 metrics = "0.24.3"
