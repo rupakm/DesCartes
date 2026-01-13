@@ -20,6 +20,7 @@ repository = "https://github.com/example/des-framework"
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1.35", features = ["rt", "time", "macros", "sync"] }
+tokio-stream = "0.1.15"
 
 # Random number generation
 rand = "0.8"

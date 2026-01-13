@@ -309,6 +309,26 @@ impl<T> Future for RecvFuture<T> {
     }
 }
 
+impl<T> tokio_stream::Stream for Receiver<T> {
+    type Item = T;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let state = &mut *self.inner.lock().unwrap();
+
+        if let Some(v) = state.queue.pop_front() {
+            state.wake_one_sender();
+            return Poll::Ready(Some(v));
+        }
+
+        if state.sender_count == 0 {
+            return Poll::Ready(None);
+        }
+
+        state.receiver_waker = Some(cx.waker().clone());
+        Poll::Pending
+    }
+}
+
 pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
     assert!(capacity > 0, "mpsc::channel capacity must be > 0");
 

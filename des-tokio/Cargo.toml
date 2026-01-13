@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 des-core = { path = "../des-core" }
 rand.workspace = true
+tokio-stream.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

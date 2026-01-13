@@ -34,6 +34,7 @@ macro_rules! site_id {
     }};
 }
 pub mod runtime_internal;
+pub mod stream;
 pub mod sync;
 pub mod task;
 pub mod thread;
