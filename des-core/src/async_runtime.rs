@@ -238,6 +238,20 @@ pub fn current_sim_time() -> Option<SimTime> {
     crate::scheduler::current_time()
 }
 
+/// Returns the async runtime key for the currently polled task.
+///
+/// Returns `None` if called outside async runtime polling.
+pub fn current_runtime_key() -> Option<Key<RuntimeEvent>> {
+    CURRENT_RUNTIME_KEY.with(|k| *k.borrow())
+}
+
+/// Returns the ID of the currently polled async task.
+///
+/// Returns `None` if called outside async runtime polling.
+pub fn current_task_id() -> Option<TaskId> {
+    CURRENT_TASK_ID.with(|t| *t.borrow())
+}
+
 fn set_poll_context(runtime_key: Key<RuntimeEvent>, task_id: TaskId) {
     CURRENT_RUNTIME_KEY.with(|k| *k.borrow_mut() = Some(runtime_key));
     CURRENT_TASK_ID.with(|t| *t.borrow_mut() = Some(task_id));

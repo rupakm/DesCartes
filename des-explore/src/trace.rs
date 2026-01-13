@@ -42,6 +42,72 @@ pub enum TraceEvent {
 
     /// Async runtime decision among ready tasks (tokio-level scheduling).
     AsyncRuntimeDecision(AsyncRuntimeDecision),
+
+    /// Concurrency primitive observation (mutex/atomic/etc.).
+    Concurrency(ConcurrencyTraceEvent),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConcurrencyTraceEvent {
+    /// Simulation time (nanos) when the event occurred, if known.
+    #[serde(default)]
+    pub time_nanos: Option<u64>,
+
+    /// Async task id (tokio-level "thread id").
+    pub task_id: u64,
+
+    pub event: ConcurrencyEventKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ConcurrencyEventKind {
+    MutexContended {
+        mutex_id: u64,
+        #[serde(default)]
+        waiter_count: usize,
+    },
+    MutexAcquire {
+        mutex_id: u64,
+    },
+    MutexRelease {
+        mutex_id: u64,
+    },
+
+    AtomicLoad {
+        site_id: u64,
+        ordering: AtomicOrdering,
+        value: u64,
+    },
+    AtomicStore {
+        site_id: u64,
+        ordering: AtomicOrdering,
+        value: u64,
+    },
+    AtomicFetchAdd {
+        site_id: u64,
+        ordering: AtomicOrdering,
+        prev: u64,
+        next: u64,
+        delta: u64,
+    },
+    AtomicCompareExchange {
+        site_id: u64,
+        success_order: AtomicOrdering,
+        failure_order: AtomicOrdering,
+        current: u64,
+        expected: u64,
+        new: u64,
+        succeeded: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AtomicOrdering {
+    Relaxed,
+    Acquire,
+    Release,
+    AcqRel,
+    SeqCst,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

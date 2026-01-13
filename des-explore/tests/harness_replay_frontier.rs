@@ -60,8 +60,133 @@ fn harness_replays_frontier_decisions() {
         scenario: "harness_replay_frontier".to_string(),
         install_tokio: false,
         tokio_ready: None,
-        frontier: None,
+        tokio_mutex: None,
+        record_concurrency: false,
+        frontier: Some(HarnessFrontierConfig {
+            policy: HarnessFrontierPolicy::UniformRandom { seed: 999 },
+            record_decisions: true,
+        }),
+        trace_path: record_path.clone(),
+        trace_format: TraceFormat::Json,
+    };
 
+    let log_for_setup = log.clone();
+    let ((), trace) = run_recorded(
+        cfg,
+        move |sim_config, _ctx| {
+            let mut sim = Simulation::new(sim_config);
+            let key = sim.add_component(Logger {
+                log: log_for_setup.clone(),
+            });
+            for i in 0..200 {
+                sim.schedule(SimTime::zero(), key, LogEvent::Push(i));
+            }
+            sim
+        },
+        move |sim, _ctx| {
+            Executor::timed(SimTime::from_millis(1)).execute(sim);
+        },
+    )
+    .unwrap();
+
+    std::fs::remove_file(&record_path).ok();
+
+    let recorded_log = log.lock().unwrap().clone();
+    assert_eq!(recorded_log.len(), 200);
+    assert!(trace
+        .events
+        .iter()
+        .any(|e| matches!(e, TraceEvent::SchedulerDecision(_))));
+
+    let replay_path = temp_path(".json");
+    let log2 = Arc::new(Mutex::new(Vec::new()));
+
+    let cfg2 = HarnessConfig {
+        sim_config: SimulationConfig { seed: 1 },
+        scenario: "harness_replay_frontier_replay".to_string(),
+        install_tokio: false,
+        tokio_ready: None,
+        tokio_mutex: None,
+        record_concurrency: false,
+        frontier: None,
+        trace_path: replay_path.clone(),
+        trace_format: TraceFormat::Json,
+    };
+
+    let log2_for_setup = log2.clone();
+    let ((), _replay_trace) = run_replayed(
+        cfg2,
+        &trace,
+        move |sim_config, _ctx, _input| {
+            let mut sim = Simulation::new(sim_config);
+            let key = sim.add_component(Logger {
+                log: log2_for_setup.clone(),
+            });
+            for i in 0..200 {
+                sim.schedule(SimTime::zero(), key, LogEvent::Push(i));
+            }
+            sim
+        },
+        move |sim, _ctx| {
+            Executor::timed(SimTime::from_millis(1)).execute(sim);
+        },
+    )
+    .unwrap();
+
+    std::fs::remove_file(&replay_path).ok();
+
+    let replayed_log = log2.lock().unwrap().clone();
+    assert_eq!(recorded_log, replayed_log);
+}
+
+#[test]
+fn harness_replay_reports_frontier_mismatch() {
+    let record_path = temp_path(".json");
+
+    let cfg = HarnessConfig {
+        sim_config: SimulationConfig { seed: 1 },
+        scenario: "harness_replay_frontier_mismatch".to_string(),
+        install_tokio: false,
+        tokio_ready: None,
+        tokio_mutex: None,
+        record_concurrency: false,
+        frontier: Some(HarnessFrontierConfig {
+            policy: HarnessFrontierPolicy::UniformRandom { seed: 999 },
+            record_decisions: true,
+        }),
+        trace_path: record_path.clone(),
+        trace_format: TraceFormat::Json,
+    };
+
+    let ((), trace) = run_recorded(
+        cfg,
+        move |sim_config, _ctx| {
+            let mut sim = Simulation::new(sim_config);
+            let key = sim.add_component(Logger {
+                log: Arc::new(Mutex::new(Vec::new())),
+            });
+            for i in 0..200 {
+                sim.schedule(SimTime::zero(), key, LogEvent::Push(i));
+            }
+            sim
+        },
+        move |sim, _ctx| {
+            Executor::timed(SimTime::from_millis(1)).execute(sim);
+        },
+    )
+    .unwrap();
+
+    std::fs::remove_file(&record_path).ok();
+
+    let replay_path = temp_path(".json");
+    let cfg2 = HarnessConfig {
+        sim_config: SimulationConfig { seed: 1 },
+        scenario: "harness_replay_frontier_mismatch_replay".to_string(),
+        install_tokio: false,
+        tokio_ready: None,
+        tokio_mutex: None,
+        record_concurrency: false,
+        frontier: None,
         trace_path: replay_path.clone(),
         trace_format: TraceFormat::Json,
     };

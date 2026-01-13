@@ -10,6 +10,12 @@ use des_core::{
 use crate::frontier::{RecordingFrontierPolicy, ReplayFrontierError, ReplayFrontierPolicy};
 use crate::ready_task::{RecordingReadyTaskPolicy, ReplayReadyTaskError, ReplayReadyTaskPolicy};
 
+#[cfg(feature = "tokio")]
+use crate::concurrency::{
+    RecordingConcurrencyRecorder, ReplayConcurrencyError, ReplayConcurrencyValidator,
+    TeeConcurrencyRecorder,
+};
+
 use crate::io::{write_trace_to_path, TraceFormat, TraceIoConfig, TraceIoError};
 use crate::rng::TracingRandomProvider;
 use crate::trace::{Trace, TraceMeta, TraceRecorder};
@@ -26,6 +32,16 @@ pub struct HarnessConfig {
     ///
     /// When omitted, tokio uses deterministic FIFO polling order.
     pub tokio_ready: Option<HarnessTokioReadyConfig>,
+
+    /// Optional tokio sync mutex waiter policy configuration.
+    ///
+    /// When omitted, tokio mutexes use deterministic FIFO waiter selection.
+    pub tokio_mutex: Option<HarnessTokioMutexConfig>,
+
+    /// Record concurrency primitive observations (mutex/atomic/etc.) into the trace.
+    ///
+    /// This is opt-in and does not affect execution ordering.
+    pub record_concurrency: bool,
 
     /// Optional same-time frontier policy configuration.
     ///
@@ -55,6 +71,25 @@ pub enum HarnessFrontierPolicy {
 pub enum HarnessTokioReadyPolicy {
     Fifo,
     UniformRandom { seed: u64 },
+}
+
+#[derive(Debug, Clone)]
+pub enum HarnessTokioMutexPolicy {
+    Fifo,
+    UniformRandom { seed: u64 },
+}
+
+#[derive(Debug, Clone)]
+pub struct HarnessTokioMutexConfig {
+    pub policy: HarnessTokioMutexPolicy,
+}
+
+impl Default for HarnessTokioMutexConfig {
+    fn default() -> Self {
+        Self {
+            policy: HarnessTokioMutexPolicy::Fifo,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -101,7 +136,7 @@ pub enum HarnessError {
     #[error("tokio integration requested but `des-explore` was built without feature `tokio`")]
     TokioFeatureDisabled,
 
-    #[error("tokio ready-task policy configured but install_tokio=false")]
+    #[error("tokio configuration requested but install_tokio=false")]
     TokioPolicyWithoutTokio,
 }
 
@@ -115,6 +150,10 @@ pub enum HarnessReplayError {
 
     #[error("tokio ready-task replay mismatch: {0}")]
     TokioReady(#[from] ReplayReadyTaskError),
+
+    #[cfg(feature = "tokio")]
+    #[error("concurrency replay mismatch: {0}")]
+    Concurrency(#[from] ReplayConcurrencyError),
 
     #[error("`cfg.frontier` is not used by `run_replayed`; replay uses the input trace instead")]
     FrontierConfigNotAllowed,
@@ -236,17 +275,43 @@ pub fn run_recorded<R>(
 
     let mut sim = setup(cfg.sim_config.clone(), &ctx);
 
-    if cfg.tokio_ready.is_some() && !cfg.install_tokio {
+    if (cfg.tokio_ready.is_some() || cfg.tokio_mutex.is_some() || cfg.record_concurrency)
+        && !cfg.install_tokio
+    {
         return Err(HarnessError::TokioPolicyWithoutTokio);
     }
 
     if cfg.install_tokio {
         #[cfg(feature = "tokio")]
         {
-            let tokio_cfg = cfg.tokio_ready.clone();
+            let tokio_ready_cfg = cfg.tokio_ready.clone();
+            let tokio_mutex_cfg = cfg.tokio_mutex.clone();
+            let record_concurrency = cfg.record_concurrency;
             let recorder = ctx.recorder();
-            des_tokio::runtime::install_with(&mut sim, move |runtime| {
-                if let Some(tokio_cfg) = tokio_cfg {
+
+            let concurrency_recorder = record_concurrency.then(|| {
+                Arc::new(RecordingConcurrencyRecorder::new(recorder.clone()))
+                    as Arc<dyn des_tokio::concurrency::ConcurrencyRecorder>
+            });
+
+            let mutex_policy: Option<Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>> =
+                tokio_mutex_cfg.map(|cfg| match cfg.policy {
+                    HarnessTokioMutexPolicy::Fifo => {
+                        Box::new(des_tokio::sync::mutex::FifoMutexWaiterPolicy)
+                            as Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>
+                    }
+                    HarnessTokioMutexPolicy::UniformRandom { seed } => Box::new(
+                        des_tokio::sync::mutex::UniformRandomMutexWaiterPolicy::new(seed),
+                    ),
+                });
+
+            let tokio_install = des_tokio::runtime::TokioInstallConfig {
+                mutex_policy,
+                concurrency_recorder,
+            };
+
+            des_tokio::runtime::install_with_tokio(&mut sim, tokio_install, move |runtime| {
+                if let Some(tokio_cfg) = tokio_ready_cfg {
                     use des_core::async_runtime::{
                         FifoReadyTaskPolicy, ReadyTaskPolicy, UniformRandomReadyTaskPolicy,
                     };
@@ -366,15 +431,64 @@ pub fn run_replayed<R>(
 
     let mut replay_tokio_ready: Option<ReplayReadyTaskPolicy> = None;
 
+    #[cfg(feature = "tokio")]
+    let mut replay_concurrency: Option<ReplayConcurrencyValidator> = None;
+
     if cfg.install_tokio {
         #[cfg(feature = "tokio")]
         {
-            let policy = ReplayReadyTaskPolicy::from_trace_events(&input_trace.events);
-            let policy_for_runtime = policy.clone();
-            des_tokio::runtime::install_with(&mut sim, move |runtime| {
-                runtime.set_ready_task_policy(Box::new(policy_for_runtime));
+            let ready_policy = ReplayReadyTaskPolicy::from_trace_events(&input_trace.events);
+            let ready_policy_for_runtime = ready_policy.clone();
+
+            let concurrency_validator =
+                ReplayConcurrencyValidator::from_trace_events(&input_trace.events);
+            let has_concurrency_events = concurrency_validator.has_expected_events();
+
+            if !has_concurrency_events {
+                let msg =
+                    "Replay trace contains no concurrency events; skipping concurrency validation";
+                tracing::warn!("{msg}");
+                eprintln!("Warning: {msg}");
+            }
+
+            let record_out = cfg.record_concurrency.then(|| {
+                Arc::new(RecordingConcurrencyRecorder::new(ctx.recorder()))
+                    as Arc<dyn des_tokio::concurrency::ConcurrencyRecorder>
             });
-            replay_tokio_ready = Some(policy);
+
+            let concurrency_recorder: Option<Arc<dyn des_tokio::concurrency::ConcurrencyRecorder>> =
+                match (has_concurrency_events, record_out) {
+                    (false, None) => None,
+                    (false, Some(r)) => Some(r),
+                    (true, None) => Some(Arc::new(concurrency_validator.clone())),
+                    (true, Some(r)) => Some(Arc::new(TeeConcurrencyRecorder::new(vec![
+                        Arc::new(concurrency_validator.clone()),
+                        r,
+                    ]))),
+                };
+
+            let mutex_policy: Option<Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>> =
+                cfg.tokio_mutex.clone().map(|cfg| match cfg.policy {
+                    HarnessTokioMutexPolicy::Fifo => {
+                        Box::new(des_tokio::sync::mutex::FifoMutexWaiterPolicy)
+                            as Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>
+                    }
+                    HarnessTokioMutexPolicy::UniformRandom { seed } => Box::new(
+                        des_tokio::sync::mutex::UniformRandomMutexWaiterPolicy::new(seed),
+                    ),
+                });
+
+            let tokio_install = des_tokio::runtime::TokioInstallConfig {
+                mutex_policy,
+                concurrency_recorder,
+            };
+
+            des_tokio::runtime::install_with_tokio(&mut sim, tokio_install, move |runtime| {
+                runtime.set_ready_task_policy(Box::new(ready_policy_for_runtime));
+            });
+
+            replay_tokio_ready = Some(ready_policy);
+            replay_concurrency = Some(concurrency_validator);
         }
 
         #[cfg(not(feature = "tokio"))]
@@ -383,7 +497,20 @@ pub fn run_replayed<R>(
         }
     }
 
-    let replay_frontier = ctx.install_replay_frontier_policy(&mut sim, input_trace);
+    let has_frontier_decisions = input_trace
+        .events
+        .iter()
+        .any(|e| matches!(e, crate::trace::TraceEvent::SchedulerDecision(_)));
+
+    let replay_frontier =
+        has_frontier_decisions.then(|| ctx.install_replay_frontier_policy(&mut sim, input_trace));
+
+    if !has_frontier_decisions {
+        let msg =
+            "Replay trace contains no DES scheduler decisions; leaving default FIFO event ordering";
+        tracing::warn!("{msg}");
+        eprintln!("Warning: {msg}");
+    }
 
     let result = match catch_unwind(AssertUnwindSafe(|| run(&mut sim, &ctx))) {
         Ok(v) => v,
@@ -394,8 +521,17 @@ pub fn run_replayed<R>(
                 }
             }
 
-            if let Some(err) = replay_frontier.take_error() {
-                return Err(err.into());
+            if let Some(replay_frontier) = replay_frontier.as_ref() {
+                if let Some(err) = replay_frontier.error() {
+                    return Err(err.into());
+                }
+            }
+
+            #[cfg(feature = "tokio")]
+            if let Some(replay_concurrency) = replay_concurrency.as_ref() {
+                if let Some(err) = replay_concurrency.error() {
+                    return Err(err.into());
+                }
             }
 
             return Err(HarnessReplayError::Panic {
@@ -410,8 +546,17 @@ pub fn run_replayed<R>(
         }
     }
 
-    if let Some(err) = replay_frontier.take_error() {
-        return Err(err.into());
+    if let Some(replay_frontier) = replay_frontier.as_ref() {
+        if let Some(err) = replay_frontier.error() {
+            return Err(err.into());
+        }
+    }
+
+    #[cfg(feature = "tokio")]
+    if let Some(replay_concurrency) = replay_concurrency.as_ref() {
+        if let Some(err) = replay_concurrency.error() {
+            return Err(err.into());
+        }
     }
 
     let trace = ctx.snapshot_trace();

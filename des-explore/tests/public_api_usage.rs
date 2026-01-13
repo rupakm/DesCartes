@@ -8,9 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use des_core::dists::{ExponentialDistribution, ServiceTimeDistribution};
-use des_core::{Component, Key, SimTime, Simulation, SimulationConfig};
+use des_core::{Component, Execute, Executor, Key, SimTime, Simulation, SimulationConfig};
 
 use des_explore::prelude::*;
+use des_explore::trace::TraceEvent;
 
 const Q: QueueId = QueueId(1);
 
@@ -144,4 +145,258 @@ fn public_splitting_usage_pattern() {
 
     assert!(est.p_hat > 0.25 && est.p_hat < 0.75, "p_hat={}", est.p_hat);
     assert_eq!(est.stage_successes.len(), 2);
+}
+
+/// Demonstrates installing a tokio-level ready-task policy and recording/replaying it.
+///
+/// This is intentionally written in the style we'd expect downstream users to copy:
+/// - uses `des_explore::prelude::*`
+/// - uses the harness for record/replay
+/// - installs tokio via the harness (not by manually calling `des_tokio::runtime::install`)
+#[test]
+fn public_tokio_ready_task_record_replay_usage_pattern() {
+    fn temp_path(suffix: &str) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "des_explore_public_tokio_ready_{}_{}{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            suffix
+        ));
+        p
+    }
+
+    let (trace, recorded) = std::thread::spawn(|| {
+        let record_path = temp_path(".json");
+        let log = Arc::new(Mutex::new(Vec::<usize>::new()));
+
+        let cfg = HarnessConfig {
+            sim_config: SimulationConfig { seed: 1 },
+            scenario: "public_tokio_ready_record".to_string(),
+            install_tokio: true,
+            tokio_ready: Some(HarnessTokioReadyConfig {
+                policy: HarnessTokioReadyPolicy::UniformRandom { seed: 123 },
+                record_decisions: true,
+            }),
+            tokio_mutex: None,
+            record_concurrency: false,
+            frontier: None,
+            trace_path: record_path.clone(),
+            trace_format: TraceFormat::Json,
+        };
+
+        let log_for_run = log.clone();
+        let ((), trace) = run_recorded(
+            cfg,
+            move |sim_config, _ctx| Simulation::new(sim_config),
+            move |sim, _ctx| {
+                for i in 0..200 {
+                    let log = log_for_run.clone();
+                    des_tokio::task::spawn(async move {
+                        log.lock().unwrap().push(i);
+                    });
+                }
+
+                Executor::timed(SimTime::from_millis(1)).execute(sim);
+            },
+        )
+        .unwrap();
+
+        std::fs::remove_file(&record_path).ok();
+
+        let recorded = log.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 200);
+        assert!(trace
+            .events
+            .iter()
+            .any(|e| matches!(e, TraceEvent::AsyncRuntimeDecision(_))));
+
+        (trace, recorded)
+    })
+    .join()
+    .unwrap();
+
+    let replayed = std::thread::spawn(move || {
+        let replay_path = temp_path(".json");
+        let log = Arc::new(Mutex::new(Vec::<usize>::new()));
+
+        let cfg = HarnessConfig {
+            sim_config: SimulationConfig { seed: 1 },
+            scenario: "public_tokio_ready_replay".to_string(),
+            install_tokio: true,
+            tokio_ready: None,
+            tokio_mutex: None,
+            record_concurrency: false,
+            frontier: None,
+            trace_path: replay_path.clone(),
+            trace_format: TraceFormat::Json,
+        };
+
+        let log_for_run = log.clone();
+        run_replayed(
+            cfg,
+            &trace,
+            move |sim_config, _ctx, _input| Simulation::new(sim_config),
+            move |sim, _ctx| {
+                for i in 0..200 {
+                    let log = log_for_run.clone();
+                    des_tokio::task::spawn(async move {
+                        log.lock().unwrap().push(i);
+                    });
+                }
+
+                Executor::timed(SimTime::from_millis(1)).execute(sim);
+            },
+        )
+        .unwrap();
+
+        std::fs::remove_file(&replay_path).ok();
+
+        let out = log.lock().unwrap().clone();
+        out
+    })
+    .join()
+    .unwrap();
+
+    assert_eq!(recorded, replayed);
+}
+
+/// Demonstrates recording/replaying concurrency events (mutex + atomics).
+///
+/// The replay run validates that the concurrency event stream matches exactly.
+#[test]
+fn public_concurrency_record_replay_usage_pattern() {
+    fn temp_path(suffix: &str) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "des_explore_public_concurrency_{}_{}{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            suffix
+        ));
+        p
+    }
+
+    let (trace, saw_concurrency) = std::thread::spawn(|| {
+        let record_path = temp_path(".json");
+
+        let cfg = HarnessConfig {
+            sim_config: SimulationConfig { seed: 1 },
+            scenario: "public_concurrency_record".to_string(),
+            install_tokio: true,
+            tokio_ready: Some(HarnessTokioReadyConfig {
+                policy: HarnessTokioReadyPolicy::Fifo,
+                record_decisions: true,
+            }),
+            tokio_mutex: None,
+            record_concurrency: true,
+            frontier: None,
+            trace_path: record_path.clone(),
+            trace_format: TraceFormat::Json,
+        };
+
+        let ((), trace) = run_recorded(
+            cfg,
+            move |sim_config, _ctx| Simulation::new(sim_config),
+            move |sim, _ctx| {
+                use std::sync::atomic::Ordering;
+                use std::sync::Arc;
+
+                let mutex_id = des_tokio::stable_id!("concurrency", "public_mutex");
+                let atomic_id = des_tokio::stable_id!("concurrency", "public_atomic");
+
+                let m = des_tokio::sync::Mutex::new_with_id(mutex_id, 0u64);
+                let a = Arc::new(des_tokio::sync::atomic::AtomicU64::new(atomic_id, 0));
+
+                for _ in 0..2 {
+                    let m1 = m.clone();
+                    let a1 = a.clone();
+                    des_tokio::thread::spawn(async move {
+                        let mut g = m1.lock().await;
+                        let _ = a1.fetch_add(1, Ordering::SeqCst);
+                        *g += 1;
+                        drop(g);
+                        des_tokio::thread::yield_now().await;
+                        let _g2 = m1.lock().await;
+                        let _ = a1.fetch_add(1, Ordering::SeqCst);
+                    });
+                }
+
+                Executor::timed(SimTime::from_millis(1)).execute(sim);
+            },
+        )
+        .unwrap();
+
+        std::fs::remove_file(&record_path).ok();
+
+        let saw = trace
+            .events
+            .iter()
+            .any(|e| matches!(e, TraceEvent::Concurrency(_)));
+
+        (trace, saw)
+    })
+    .join()
+    .unwrap();
+
+    assert!(saw_concurrency);
+
+    std::thread::spawn(move || {
+        let replay_path = temp_path(".json");
+
+        let cfg = HarnessConfig {
+            sim_config: SimulationConfig { seed: 1 },
+            scenario: "public_concurrency_replay".to_string(),
+            install_tokio: true,
+            tokio_ready: None,
+            tokio_mutex: None,
+            record_concurrency: false,
+            frontier: None,
+            trace_path: replay_path.clone(),
+            trace_format: TraceFormat::Json,
+        };
+
+        run_replayed(
+            cfg,
+            &trace,
+            move |sim_config, _ctx, _input| Simulation::new(sim_config),
+            move |sim, _ctx| {
+                use std::sync::atomic::Ordering;
+                use std::sync::Arc;
+
+                let mutex_id = des_tokio::stable_id!("concurrency", "public_mutex");
+                let atomic_id = des_tokio::stable_id!("concurrency", "public_atomic");
+
+                let m = des_tokio::sync::Mutex::new_with_id(mutex_id, 0u64);
+                let a = Arc::new(des_tokio::sync::atomic::AtomicU64::new(atomic_id, 0));
+
+                for _ in 0..2 {
+                    let m1 = m.clone();
+                    let a1 = a.clone();
+                    des_tokio::thread::spawn(async move {
+                        let mut g = m1.lock().await;
+                        let _ = a1.fetch_add(1, Ordering::SeqCst);
+                        *g += 1;
+                        drop(g);
+                        des_tokio::thread::yield_now().await;
+                        let _g2 = m1.lock().await;
+                        let _ = a1.fetch_add(1, Ordering::SeqCst);
+                    });
+                }
+
+                Executor::timed(SimTime::from_millis(1)).execute(sim);
+            },
+        )
+        .unwrap();
+
+        std::fs::remove_file(&replay_path).ok();
+    })
+    .join()
+    .unwrap();
 }

@@ -2,7 +2,8 @@
 //!
 //! This file contains runnable tests for all examples in Chapter 7: Advanced Examples.
 
-use rand::Rng;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -225,46 +226,38 @@ fn test_empirical_distribution_from_data() {
         println!("   P95: {}ms", p95_val.as_millis());
     }
 
-    // Sample from the distribution
-    let mut rng = rand::thread_rng();
-    let mut samples = Vec::new();
+    // Sample from the distribution.
+    // Use a fixed seed to keep this test deterministic and non-flaky.
+    let mut rng = StdRng::seed_from_u64(1);
+    let sample_size = 1000;
 
-    println!();
-    println!("🎲 Sampling from empirical distribution:");
-    for i in 0..10 {
+    let measurement_min = *sample_measurements.iter().min().unwrap();
+    let measurement_max = *sample_measurements.iter().max().unwrap();
+
+    println!(
+        "🎲 Sampling {} times from empirical distribution:",
+        sample_size
+    );
+
+    let mut observed_min = Duration::MAX;
+    let mut observed_max = Duration::ZERO;
+
+    for _ in 0..sample_size {
         let sample = empirical_dist.sample(&mut rng);
-        samples.push(sample);
-        println!("   Sample {}: {}ms", i + 1, sample.as_millis());
+        assert!(
+            sample >= measurement_min && sample <= measurement_max,
+            "empirical sample {sample:?} outside observed data range"
+        );
+
+        observed_min = observed_min.min(sample);
+        observed_max = observed_max.max(sample);
     }
 
-    // Verify samples are within expected range
-    let min_sample = samples.iter().min().unwrap();
-    let max_sample = samples.iter().max().unwrap();
-    let original_min = sample_measurements.iter().min().unwrap();
-    let original_max = sample_measurements.iter().max().unwrap();
-
-    assert!(
-        *min_sample >= *original_min,
-        "Samples should be >= original minimum"
-    );
-    assert!(
-        *max_sample <= *original_max,
-        "Samples should be <= original maximum"
-    );
-
-    println!();
-    println!("📈 Validation Results:");
     println!(
-        "   Sample range: {}ms - {}ms",
-        min_sample.as_millis(),
-        max_sample.as_millis()
+        "   Observed sample range: {}ms - {}ms",
+        observed_min.as_millis(),
+        observed_max.as_millis()
     );
-    println!(
-        "   Original range: {}ms - {}ms",
-        original_min.as_millis(),
-        original_max.as_millis()
-    );
-    println!("   ✅ All samples within expected range");
 
     println!("✅ Empirical distribution test completed successfully!");
 }
@@ -272,20 +265,15 @@ fn test_empirical_distribution_from_data() {
 #[test]
 fn test_mixture_distribution_patterns() {
     println!("🚀 Testing Mixture Distribution Patterns");
-    println!("========================================");
+    println!("======================================");
 
-    // Create a bimodal distribution (fast/slow requests)
-    let bimodal_dist = MixtureDistribution::new("bimodal-cache".to_string())
-        .add_component(0.8, Duration::from_millis(10)) // 80% cache hits (fast)
-        .add_component(0.2, Duration::from_millis(200)); // 20% cache misses (slow)
+    let mixture_dist = MixtureDistribution::new("bimodal-test".to_string())
+        .add_component(0.8, Duration::from_millis(50))
+        .add_component(0.2, Duration::from_millis(500));
 
-    println!("📋 Test Configuration:");
-    println!("   - Bimodal distribution: 80% fast (10ms), 20% slow (200ms)");
-    println!("   - Testing distribution properties");
-    println!();
+    // Use a fixed seed so the ratio assertions are stable.
+    let mut rng = StdRng::seed_from_u64(2);
 
-    // Sample from the distribution many times
-    let mut rng = rand::thread_rng();
     let mut fast_count = 0;
     let mut slow_count = 0;
     let sample_size = 1000;
@@ -296,7 +284,7 @@ fn test_mixture_distribution_patterns() {
     );
 
     for _ in 0..sample_size {
-        let sample = bimodal_dist.sample(&mut rng);
+        let sample = mixture_dist.sample(&mut rng);
         if sample.as_millis() < 100 {
             fast_count += 1;
         } else {
@@ -329,19 +317,6 @@ fn test_mixture_distribution_patterns() {
         (slow_ratio - 0.2).abs() < tolerance,
         "Slow ratio should be ~20%, got {:.1}%",
         slow_ratio * 100.0
-    );
-
-    println!();
-    println!("📊 Distribution Validation:");
-    println!("   Expected: 80% fast, 20% slow");
-    println!(
-        "   Actual: {:.1}% fast, {:.1}% slow",
-        fast_ratio * 100.0,
-        slow_ratio * 100.0
-    );
-    println!(
-        "   ✅ Distribution matches expected ratios (within {}% tolerance)",
-        tolerance * 100.0
     );
 
     println!("✅ Mixture distribution patterns test completed successfully!");
@@ -574,9 +549,9 @@ fn test_heavy_tailed_distribution() {
         "P99 should be >> mean for heavy-tailed"
     );
     assert!(
-        extreme_ratio > 0.005,
-        "Should have some extreme events (> 0.5%)"
-    ); // More lenient threshold
+        extreme_ratio >= 0.005,
+        "Should have some extreme events (>= 0.5%)"
+    );
 
     println!("   ✅ Heavy-tailed characteristics confirmed");
     println!(

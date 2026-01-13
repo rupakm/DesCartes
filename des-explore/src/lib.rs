@@ -3,6 +3,7 @@
 //! This crate is intentionally opt-in: it adds debugging/exploration utilities
 //! without changing the default behavior of `des-core`.
 
+pub mod concurrency;
 pub mod estimate;
 pub mod frontier;
 pub mod harness;
@@ -19,6 +20,10 @@ pub mod trace;
 
 /// Prelude for common exploration types.
 pub mod prelude {
+    #[cfg(feature = "tokio")]
+    pub use crate::concurrency::{
+        RecordingConcurrencyRecorder, ReplayConcurrencyError, ReplayConcurrencyValidator,
+    };
     pub use crate::estimate::{
         estimate_monte_carlo, estimate_with_splitting, BernoulliEstimate, EstimateError,
         FoundCounterexample, MonteCarloConfig, SplittingEstimate, SplittingEstimateConfig,
@@ -27,7 +32,8 @@ pub mod prelude {
     pub use crate::harness::{
         format_from_extension, run_recorded, run_replayed, run_timed_recorded, run_timed_replayed,
         HarnessConfig, HarnessContext, HarnessError, HarnessFrontierConfig, HarnessFrontierPolicy,
-        HarnessReplayError, HarnessTokioReadyConfig, HarnessTokioReadyPolicy,
+        HarnessReplayError, HarnessTokioMutexConfig, HarnessTokioMutexPolicy,
+        HarnessTokioReadyConfig, HarnessTokioReadyPolicy,
     };
     pub use crate::io::{
         read_trace_from_path, write_trace_to_path, TraceFormat, TraceIoConfig, TraceIoError,
