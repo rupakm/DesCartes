@@ -236,7 +236,9 @@ where
                         "Retry task failed - scheduling retry"
                     );
 
-                    let task_id = scheduler.executing_task_id().unwrap_or_else(TaskId::new);
+                    let task_id = scheduler
+                        .executing_task_id()
+                        .expect("RetryTask must run under scheduler task execution");
                     let wrapper = TaskWrapper::new(self);
                     scheduler.schedule_task_at(
                         scheduler.time() + delay,
@@ -315,7 +317,9 @@ where
 
         // Schedule next execution under the same task ID so the original handle can
         // cancel the whole periodic chain.
-        let task_id = scheduler.executing_task_id().unwrap_or_else(TaskId::new);
+        let task_id = scheduler
+            .executing_task_id()
+            .expect("PeriodicTask must run under scheduler task execution");
         let interval = self.interval;
         let wrapper = TaskWrapper::new(self);
         scheduler.schedule_task_at(scheduler.time() + interval, task_id, Box::new(wrapper));
@@ -404,15 +408,21 @@ mod tests {
             3,
         );
 
+        use crate::EventEntry;
+
         let mut scheduler = Scheduler::default();
+        let handle = scheduler.schedule_task(SimTime::zero(), task);
 
-        // Execute the task - it should schedule itself for the next execution
-        task.execute(&mut scheduler);
+        // First execution should schedule the next execution under the same task ID.
+        let EventEntry::Task(entry) = scheduler.pop().unwrap() else {
+            panic!("expected task event");
+        };
+        assert_eq!(entry.task_id, handle.id());
+        assert!(scheduler.execute_task(entry.task_id));
 
-        // The first execution should have happened
         assert_eq!(*counter.lock().unwrap(), 1);
 
-        // There should be a scheduled event for the next execution
+        // There should be a scheduled event for the next execution.
         assert!(scheduler.peek().is_some());
     }
 
