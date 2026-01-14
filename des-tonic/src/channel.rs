@@ -30,6 +30,8 @@ pub struct Channel {
     >,
 
     next_counter: Arc<Mutex<u64>>,
+
+    target_endpoint: Option<EndpointId>,
 }
 
 impl Channel {
@@ -54,11 +56,72 @@ impl Channel {
             client_endpoint,
             pending,
             next_counter: Arc::new(Mutex::new(0)),
+            target_endpoint: None,
         }
     }
 
     pub fn client_endpoint(&self) -> EndpointId {
         self.client_endpoint
+    }
+
+    /// Convenience: connect to a specific server address (tonic-style).
+    ///
+    /// This is equivalent to `transport.connect(sim, service_name, addr)`.
+    pub fn connect(
+        sim: &mut des_core::Simulation,
+        transport: &crate::Transport,
+        service_name: impl Into<String>,
+        addr: impl AsRef<str>,
+    ) -> Result<Self, Status> {
+        transport.connect(sim, service_name, addr)
+    }
+
+    pub(crate) fn connect_addr(
+        sim: &mut des_core::Simulation,
+        transport: &crate::Transport,
+        service_name: String,
+        addr: std::net::SocketAddr,
+        client_name: String,
+    ) -> Result<Self, Status> {
+        let instance_name = addr.to_string();
+        let target_endpoint = EndpointId::new(format!("{service_name}:{instance_name}"));
+
+        // Require an exact match (tonic-like: connect pins to a specific addr).
+        let found = transport
+            .endpoint_registry
+            .find_endpoints(&service_name)
+            .iter()
+            .any(|e| e.id == target_endpoint);
+
+        if !found {
+            return Err(Status::unavailable(format!(
+                "service not found at {addr} ({service_name})"
+            )));
+        }
+
+        // Install a client endpoint component to receive responses.
+        let endpoint_id = EndpointId::new(format!("client:{client_name}"));
+        let client_endpoint = ClientEndpoint::new(endpoint_id);
+        let pending = client_endpoint.pending.clone();
+        let client_key = sim.add_component(client_endpoint);
+
+        {
+            let transport_component = sim
+                .get_component_mut::<TransportEvent, SimTransport>(transport.transport_key)
+                .ok_or_else(|| Status::internal("transport component not found"))?;
+            transport_component.register_handler(endpoint_id, client_key);
+        }
+
+        let mut channel = Channel::new(
+            service_name,
+            transport.transport_key,
+            transport.endpoint_registry.clone(),
+            transport.scheduler.clone(),
+            endpoint_id,
+            pending,
+        );
+        channel.target_endpoint = Some(target_endpoint);
+        Ok(channel)
     }
 
     fn next_correlation_id(&self) -> String {
@@ -88,12 +151,34 @@ impl Channel {
         request: Request<Bytes>,
         timeout: Option<Duration>,
     ) -> Result<Response<Bytes>, Status> {
-        let target = self
-            .endpoint_registry
-            .get_endpoint_for_service(&self.service_name)
-            .ok_or_else(|| {
-                Status::unavailable(format!("service not found: {}", self.service_name))
-            })?;
+        let target = if let Some(target) = self.target_endpoint {
+            // Validate the server endpoint is still registered.
+            let ok = self
+                .endpoint_registry
+                .find_endpoints(&self.service_name)
+                .iter()
+                .any(|e| e.id == target);
+
+            if !ok {
+                return Err(Status::unavailable(format!(
+                    "service not found at fixed address: {}",
+                    self.service_name
+                )));
+            }
+
+            des_components::transport::EndpointInfo {
+                id: target,
+                service_name: self.service_name.clone(),
+                instance_name: String::new(),
+                metadata: std::collections::HashMap::new(),
+            }
+        } else {
+            self.endpoint_registry
+                .get_endpoint_for_service(&self.service_name)
+                .ok_or_else(|| {
+                    Status::unavailable(format!("service not found: {}", self.service_name))
+                })?
+        };
 
         let correlation_id = self.next_correlation_id();
 

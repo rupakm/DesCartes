@@ -79,23 +79,21 @@ pub trait Task: 'static {
 
 /// Type-erased task execution trait
 pub(crate) trait TaskExecution {
-    /// Execute the task and return type-erased result
+    /// Execute the task and return type-erased result.
     fn execute(self: Box<Self>, scheduler: &mut Scheduler) -> Box<dyn Any>;
-
-    /// Get the task ID
-    #[allow(dead_code)]
-    fn task_id(&self) -> TaskId;
 }
 
-/// Wrapper that implements TaskExecution for any Task
+/// Wrapper that implements `TaskExecution` for any `Task`.
+///
+/// Note: the scheduler already tracks task identity via the `TaskId` key used
+/// in `pending_tasks`, so the wrapper itself does not store the ID.
 pub(crate) struct TaskWrapper<T: Task> {
     task: T,
-    task_id: TaskId,
 }
 
 impl<T: Task> TaskWrapper<T> {
-    pub fn new(task: T, task_id: TaskId) -> Self {
-        Self { task, task_id }
+    pub fn new(task: T) -> Self {
+        Self { task }
     }
 }
 
@@ -103,10 +101,6 @@ impl<T: Task> TaskExecution for TaskWrapper<T> {
     fn execute(self: Box<Self>, scheduler: &mut Scheduler) -> Box<dyn Any> {
         let result = self.task.execute(scheduler);
         Box::new(result)
-    }
-
-    fn task_id(&self) -> TaskId {
-        self.task_id
     }
 }
 
@@ -243,7 +237,7 @@ where
                     );
 
                     let task_id = scheduler.executing_task_id().unwrap_or_else(TaskId::new);
-                    let wrapper = TaskWrapper::new(self, task_id);
+                    let wrapper = TaskWrapper::new(self);
                     scheduler.schedule_task_at(
                         scheduler.time() + delay,
                         task_id,
@@ -323,7 +317,7 @@ where
         // cancel the whole periodic chain.
         let task_id = scheduler.executing_task_id().unwrap_or_else(TaskId::new);
         let interval = self.interval;
-        let wrapper = TaskWrapper::new(self, task_id);
+        let wrapper = TaskWrapper::new(self);
         scheduler.schedule_task_at(scheduler.time() + interval, task_id, Box::new(wrapper));
 
         debug!(
@@ -357,24 +351,12 @@ mod tests {
     }
 
     #[test]
-    fn test_stable_task_ids() {
-        // Test that TaskWrapper returns stable task IDs
+    fn test_task_handle_exposes_stable_id() {
+        // TaskHandle should always return the same ID.
         let task_id = TaskId::new();
-        let task = ClosureTask::new(|_| 42);
-        let wrapper = TaskWrapper::new(task, task_id);
-
-        // task_id() should return the same ID every time
-        assert_eq!(wrapper.task_id(), task_id);
-        assert_eq!(wrapper.task_id(), task_id);
-        assert_eq!(wrapper.task_id(), task_id);
-
-        // Multiple calls should all return the same ID
-        let id1 = wrapper.task_id();
-        let id2 = wrapper.task_id();
-        let id3 = wrapper.task_id();
-        assert_eq!(id1, id2);
-        assert_eq!(id2, id3);
-        assert_eq!(id1, task_id);
+        let handle: TaskHandle<i32> = TaskHandle::new(task_id);
+        assert_eq!(handle.id(), task_id);
+        assert_eq!(handle.id(), task_id);
     }
 
     #[test]

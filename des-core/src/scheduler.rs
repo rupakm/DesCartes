@@ -704,7 +704,7 @@ impl Scheduler {
         );
         let task_id = TaskId(task_uuid);
 
-        let wrapper = TaskWrapper::new(task, task_id);
+        let wrapper = TaskWrapper::new(task);
         let time = self.time() + delay;
 
         self.schedule_task_at(time, task_id, Box::new(wrapper));
@@ -984,7 +984,7 @@ mod test {
         scheduler.schedule_task_at(
             SimTime::from_secs(1),
             task_id1,
-            Box::new(crate::task::TaskWrapper::new(unit_task, task_id1)),
+            Box::new(crate::task::TaskWrapper::new(unit_task)),
         );
 
         // Schedule a task that returns a value
@@ -993,7 +993,7 @@ mod test {
         scheduler.schedule_task_at(
             SimTime::from_secs(2),
             task_id2,
-            Box::new(crate::task::TaskWrapper::new(value_task, task_id2)),
+            Box::new(crate::task::TaskWrapper::new(value_task)),
         );
 
         // Execute both tasks
@@ -1020,7 +1020,7 @@ mod test {
         scheduler.schedule_task_at(
             SimTime::from_secs(10),
             task_id,
-            Box::new(crate::task::TaskWrapper::new(task, task_id)),
+            Box::new(crate::task::TaskWrapper::new(task)),
         );
 
         // Cancel the task before it executes
