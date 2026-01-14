@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use des_core::{EventFrontierPolicy, FrontierEvent, FrontierEventKind, FrontierSignature, SimTime};
 
+use crate::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
 use crate::trace::{FrontierEntry, FrontierKind, SchedulerDecision, TraceEvent, TraceRecorder};
 
 fn kind_to_trace(kind: FrontierEventKind) -> FrontierKind {
@@ -17,6 +18,96 @@ fn to_frontier_entry(event: &FrontierEvent) -> FrontierEntry {
         kind: kind_to_trace(event.kind),
         component_id: event.component_id.map(|id| id.to_string()),
         task_id: event.task_id.map(|id| id.to_string()),
+    }
+}
+
+/// Frontier policy wrapper used for schedule exploration.
+///
+/// Combines:
+/// - an optional [`DecisionScript`] override
+/// - an underlying policy `P`
+/// - trace recording of the realized decision
+#[derive(Clone)]
+pub struct ExplorationFrontierPolicy<P> {
+    inner: P,
+    script: Option<Arc<DecisionScript>>,
+    recorder: Arc<Mutex<TraceRecorder>>,
+    next_ordinal: u64,
+}
+
+impl<P> ExplorationFrontierPolicy<P> {
+    pub fn new(
+        inner: P,
+        script: Option<Arc<DecisionScript>>,
+        recorder: Arc<Mutex<TraceRecorder>>,
+    ) -> Self {
+        Self {
+            inner,
+            script,
+            recorder,
+            next_ordinal: 0,
+        }
+    }
+
+    pub fn inner_mut(&mut self) -> &mut P {
+        &mut self.inner
+    }
+}
+
+impl<P: EventFrontierPolicy> EventFrontierPolicy for ExplorationFrontierPolicy<P> {
+    fn choose(&mut self, time: SimTime, frontier: &[FrontierEvent]) -> usize {
+        let FrontierSignature {
+            time_nanos,
+            frontier_seqs,
+        } = FrontierSignature::new(time, frontier);
+
+        let ordinal = self.next_ordinal;
+        self.next_ordinal += 1;
+
+        let key = DecisionKey::new(
+            DecisionKind::Frontier,
+            time_nanos,
+            ordinal,
+            frontier_seqs.clone(),
+        );
+
+        let chosen_index = match self.script.as_ref() {
+            None => self.inner.choose(time, frontier),
+            Some(script) => match script.get(&key) {
+                Some(chosen_seq) => {
+                    if let Some(pos) = frontier_seqs.iter().position(|&s| s == chosen_seq) {
+                        pos
+                    } else {
+                        tracing::warn!(
+                            time_nanos,
+                            forced_seq = chosen_seq,
+                            frontier_seqs = ?frontier_seqs,
+                            "DecisionScript forced a frontier seq not present; falling back to base policy"
+                        );
+                        self.inner.choose(time, frontier)
+                    }
+                }
+                None => self.inner.choose(time, frontier),
+            },
+        };
+
+        let chosen_index = chosen_index.min(frontier.len().saturating_sub(1));
+        let chosen_seq = frontier.get(chosen_index).map(|e| e.seq);
+
+        let frontier_meta: Vec<FrontierEntry> = frontier.iter().map(to_frontier_entry).collect();
+
+        self.recorder
+            .lock()
+            .unwrap()
+            .record(TraceEvent::SchedulerDecision(SchedulerDecision {
+                time_nanos,
+                chosen_index,
+                chosen_seq,
+                frontier_seqs,
+                frontier: frontier_meta,
+            }));
+
+        chosen_index
     }
 }
 
@@ -204,14 +295,24 @@ impl EventFrontierPolicy for ReplayFrontierPolicy {
         }
 
         let expected_seqs = Self::expected_seqs(&decision);
-        if !expected_seqs.is_empty() && expected_seqs != actual_seqs {
-            state.error = Some(ReplayFrontierError::FrontierMismatch {
-                index,
-                time_nanos: decision.time_nanos,
-                expected: expected_seqs,
-                actual: actual_seqs,
-            });
-            return 0;
+        if !expected_seqs.is_empty() {
+            let mut expected_norm = expected_seqs.clone();
+            expected_norm.sort_unstable();
+            expected_norm.dedup();
+
+            let mut actual_norm = actual_seqs.clone();
+            actual_norm.sort_unstable();
+            actual_norm.dedup();
+
+            if expected_norm != actual_norm {
+                state.error = Some(ReplayFrontierError::FrontierMismatch {
+                    index,
+                    time_nanos: decision.time_nanos,
+                    expected: expected_seqs,
+                    actual: actual_seqs,
+                });
+                return 0;
+            }
         }
 
         if let Some(chosen_seq) = decision.chosen_seq {

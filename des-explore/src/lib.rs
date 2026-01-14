@@ -2,6 +2,26 @@
 //!
 //! This crate is intentionally opt-in: it adds debugging/exploration utilities
 //! without changing the default behavior of `des-core`.
+//!
+//! ## Quickstart (Schedule Exploration v1)
+//!
+//! The core workflow is:
+//!
+//! 1) Run a baseline simulation and record a trace:
+//! - [`harness::run_recorded`] / [`harness::run_timed_recorded`]
+//!
+//! 2) Extract scheduling decisions from that trace:
+//! - [`schedule_explore::extract_decisions`]
+//!
+//! 3) Replay a run while forcing (some) decisions:
+//! - [`harness::run_controlled`] / [`harness::run_timed_controlled`] with [`harness::HarnessControl`]
+//!
+//! 4) Search for a schedule policy that makes a predicate likely:
+//! - [`policy_search::search_policy`]
+//!
+//! Decision points supported in v1:
+//! - Same-time DES event ordering (frontier decisions)
+//! - Tokio-ready task ordering decisions (requires feature `tokio`)
 
 pub mod concurrency;
 pub mod estimate;
@@ -9,9 +29,12 @@ pub mod frontier;
 pub mod harness;
 pub mod io;
 pub mod monitor;
+pub mod policy;
+pub mod policy_search;
 pub mod ready_task;
 pub mod replay_rng;
 pub mod rng;
+pub mod schedule_explore;
 pub mod shared_replay_rng;
 pub mod shared_rng;
 pub mod splitting;
@@ -28,12 +51,16 @@ pub mod prelude {
         estimate_monte_carlo, estimate_with_splitting, BernoulliEstimate, EstimateError,
         FoundCounterexample, MonteCarloConfig, SplittingEstimate, SplittingEstimateConfig,
     };
-    pub use crate::frontier::{RecordingFrontierPolicy, ReplayFrontierError, ReplayFrontierPolicy};
+    pub use crate::frontier::{
+        ExplorationFrontierPolicy, RecordingFrontierPolicy, ReplayFrontierError,
+        ReplayFrontierPolicy,
+    };
     pub use crate::harness::{
-        format_from_extension, run_recorded, run_replayed, run_timed_recorded, run_timed_replayed,
-        HarnessConfig, HarnessContext, HarnessError, HarnessFrontierConfig, HarnessFrontierPolicy,
-        HarnessReplayError, HarnessTokioMutexConfig, HarnessTokioMutexPolicy,
-        HarnessTokioReadyConfig, HarnessTokioReadyPolicy,
+        format_from_extension, run_controlled, run_recorded, run_replayed, run_timed_controlled,
+        run_timed_recorded, run_timed_replayed, HarnessConfig, HarnessContext, HarnessControl,
+        HarnessError, HarnessFrontierConfig, HarnessFrontierPolicy, HarnessReplayError,
+        HarnessTokioMutexConfig, HarnessTokioMutexPolicy, HarnessTokioReadyConfig,
+        HarnessTokioReadyPolicy,
     };
     pub use crate::io::{
         read_trace_from_path, write_trace_to_path, TraceFormat, TraceIoConfig, TraceIoError,
@@ -41,11 +68,22 @@ pub mod prelude {
     pub use crate::monitor::{
         Monitor, MonitorConfig, MonitorStatus, QueueId, ScoreWeights, WindowSummary,
     };
+    pub use crate::policy::{ActionDistribution, TablePolicy};
+    pub use crate::policy_search::{
+        search_policy, BaseFrontierPolicy, BaseTokioReadyPolicy, FailurePhase,
+        PolicyEvaluationSummary, PolicySearchConfig, PolicySearchError, PolicySearchFailure,
+        PolicySearchObjective, PolicySearchReport,
+    };
     pub use crate::ready_task::{
-        RecordingReadyTaskPolicy, ReplayReadyTaskError, ReplayReadyTaskPolicy,
+        ExplorationReadyTaskPolicy, RecordingReadyTaskPolicy, ReplayReadyTaskError,
+        ReplayReadyTaskPolicy,
     };
     pub use crate::replay_rng::{ChainedRandomProvider, ReplayRandomProvider};
     pub use crate::rng::TracingRandomProvider;
+    pub use crate::schedule_explore::{
+        extract_decisions, DecisionChoice, DecisionKey, DecisionKind, DecisionScript,
+        ObservedDecision,
+    };
     pub use crate::shared_replay_rng::SharedChainedRandomProvider;
     pub use crate::shared_rng::SharedTracingRandomProvider;
     pub use crate::splitting::{find_with_splitting, FoundBug, SplittingConfig, SplittingError};

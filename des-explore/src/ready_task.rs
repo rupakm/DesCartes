@@ -3,7 +3,95 @@ use std::sync::{Arc, Mutex};
 use des_core::async_runtime::{ReadyTaskPolicy, ReadyTaskSignature, TaskId};
 use des_core::SimTime;
 
+use crate::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
 use crate::trace::{AsyncRuntimeDecision, TraceEvent, TraceRecorder};
+
+/// Ready-task policy wrapper used for schedule exploration.
+///
+/// Combines:
+/// - an optional [`DecisionScript`] override
+/// - an underlying policy `P`
+/// - trace recording of the realized decision
+#[derive(Clone)]
+pub struct ExplorationReadyTaskPolicy<P> {
+    inner: P,
+    script: Option<Arc<DecisionScript>>,
+    recorder: Arc<Mutex<TraceRecorder>>,
+    next_ordinal: u64,
+}
+
+impl<P> ExplorationReadyTaskPolicy<P> {
+    pub fn new(
+        inner: P,
+        script: Option<Arc<DecisionScript>>,
+        recorder: Arc<Mutex<TraceRecorder>>,
+    ) -> Self {
+        Self {
+            inner,
+            script,
+            recorder,
+            next_ordinal: 0,
+        }
+    }
+
+    pub fn inner_mut(&mut self) -> &mut P {
+        &mut self.inner
+    }
+}
+
+impl<P: ReadyTaskPolicy> ReadyTaskPolicy for ExplorationReadyTaskPolicy<P> {
+    fn choose(&mut self, time: SimTime, ready: &[TaskId]) -> usize {
+        let signature = ReadyTaskSignature::new(time, ready);
+        let ordinal = self.next_ordinal;
+        self.next_ordinal += 1;
+
+        let key = DecisionKey::new(
+            DecisionKind::TokioReady,
+            signature.time_nanos,
+            ordinal,
+            signature.ready_task_ids.clone(),
+        );
+
+        let chosen_index = match self.script.as_ref() {
+            None => self.inner.choose(time, ready),
+            Some(script) => match script.get(&key) {
+                Some(chosen_task_id) => {
+                    if let Some(pos) = signature
+                        .ready_task_ids
+                        .iter()
+                        .position(|&id| id == chosen_task_id)
+                    {
+                        pos
+                    } else {
+                        tracing::warn!(
+                            time_nanos = signature.time_nanos,
+                            forced_task_id = chosen_task_id,
+                            ready_task_ids = ?signature.ready_task_ids,
+                            "DecisionScript forced a task id not present; falling back to base policy"
+                        );
+                        self.inner.choose(time, ready)
+                    }
+                }
+                None => self.inner.choose(time, ready),
+            },
+        };
+
+        let chosen_index = chosen_index.min(ready.len().saturating_sub(1));
+        let chosen_task_id = ready.get(chosen_index).map(|t| t.0);
+
+        self.recorder
+            .lock()
+            .unwrap()
+            .record(TraceEvent::AsyncRuntimeDecision(AsyncRuntimeDecision {
+                time_nanos: signature.time_nanos,
+                chosen_index,
+                chosen_task_id,
+                ready_task_ids: signature.ready_task_ids,
+            }));
+
+        chosen_index
+    }
+}
 
 /// Wraps an existing ready-task policy and records choices into the trace.
 #[derive(Clone)]
@@ -173,16 +261,24 @@ impl ReadyTaskPolicy for ReplayReadyTaskPolicy {
             return 0;
         }
 
-        if !decision.ready_task_ids.is_empty()
-            && decision.ready_task_ids != signature.ready_task_ids
-        {
-            state.error = Some(ReplayReadyTaskError::ReadySetMismatch {
-                index,
-                time_nanos: decision.time_nanos,
-                expected: decision.ready_task_ids,
-                actual: signature.ready_task_ids,
-            });
-            return 0;
+        if !decision.ready_task_ids.is_empty() {
+            let mut expected_norm = decision.ready_task_ids.clone();
+            expected_norm.sort_unstable();
+            expected_norm.dedup();
+
+            let mut actual_norm = signature.ready_task_ids.clone();
+            actual_norm.sort_unstable();
+            actual_norm.dedup();
+
+            if expected_norm != actual_norm {
+                state.error = Some(ReplayReadyTaskError::ReadySetMismatch {
+                    index,
+                    time_nanos: decision.time_nanos,
+                    expected: decision.ready_task_ids,
+                    actual: signature.ready_task_ids,
+                });
+                return 0;
+            }
         }
 
         if let Some(chosen_task_id) = decision.chosen_task_id {

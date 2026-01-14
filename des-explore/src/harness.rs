@@ -7,8 +7,14 @@ use des_core::{
     UniformRandomFrontierPolicy,
 };
 
-use crate::frontier::{RecordingFrontierPolicy, ReplayFrontierError, ReplayFrontierPolicy};
-use crate::ready_task::{RecordingReadyTaskPolicy, ReplayReadyTaskError, ReplayReadyTaskPolicy};
+use crate::frontier::{
+    ExplorationFrontierPolicy, RecordingFrontierPolicy, ReplayFrontierError, ReplayFrontierPolicy,
+};
+use crate::ready_task::{
+    ExplorationReadyTaskPolicy, RecordingReadyTaskPolicy, ReplayReadyTaskError,
+    ReplayReadyTaskPolicy,
+};
+use crate::schedule_explore::DecisionScript;
 
 #[cfg(feature = "tokio")]
 use crate::concurrency::{
@@ -167,6 +173,21 @@ pub enum HarnessReplayError {
     Panic { message: String },
 }
 
+/// Optional "control plane" for v1 schedule exploration.
+///
+/// When `explore_frontier`/`explore_tokio_ready` are enabled, the harness installs
+/// exploration wrappers that:
+/// - consult the provided [`DecisionScript`] (if any)
+/// - otherwise delegate to the configured base policy
+/// - always record realized decisions into the output trace
+#[derive(Debug, Clone, Default)]
+pub struct HarnessControl {
+    pub decision_script: Option<Arc<DecisionScript>>,
+
+    pub explore_frontier: bool,
+    pub explore_tokio_ready: bool,
+}
+
 /// Context passed to setup/run closures.
 ///
 /// Contains the shared trace recorder, and helper constructors for trace-aware
@@ -249,6 +270,193 @@ impl HarnessContext {
     pub fn snapshot_trace(&self) -> Trace {
         self.recorder.lock().unwrap().snapshot()
     }
+}
+
+/// Runs a simulation, recording a trace to disk, while optionally controlling
+/// scheduler decisions via a [`DecisionScript`].
+///
+/// This is the v1 "run with control" primitive used by schedule exploration:
+///
+/// - If `control.explore_frontier` is enabled, install [`ExplorationFrontierPolicy`].
+/// - If `control.explore_tokio_ready` is enabled, install [`ExplorationReadyTaskPolicy`].
+/// - If `prefix` is provided, callers can replay RNG draws via
+///   [`HarnessContext::branching_provider`] / [`HarnessContext::shared_branching_provider`].
+///
+/// The returned trace always contains the realized decisions for any enabled
+/// exploration wrappers.
+pub fn run_controlled<R>(
+    cfg: HarnessConfig,
+    control: HarnessControl,
+    prefix: Option<&Trace>,
+    setup: impl FnOnce(SimulationConfig, &HarnessContext, Option<&Trace>) -> Simulation,
+    run: impl FnOnce(&mut Simulation, &HarnessContext) -> R,
+) -> Result<(R, Trace), HarnessError> {
+    let recorder = Arc::new(Mutex::new(TraceRecorder::new(TraceMeta {
+        seed: cfg.sim_config.seed,
+        scenario: cfg.scenario.clone(),
+    })));
+
+    let ctx = HarnessContext::new(recorder);
+
+    let mut sim = setup(cfg.sim_config.clone(), &ctx, prefix);
+
+    if (cfg.tokio_ready.is_some()
+        || cfg.tokio_mutex.is_some()
+        || cfg.record_concurrency
+        || control.explore_tokio_ready)
+        && !cfg.install_tokio
+    {
+        return Err(HarnessError::TokioPolicyWithoutTokio);
+    }
+
+    if cfg.install_tokio {
+        #[cfg(feature = "tokio")]
+        {
+            let tokio_ready_cfg = cfg.tokio_ready.clone();
+            let tokio_mutex_cfg = cfg.tokio_mutex.clone();
+            let record_concurrency = cfg.record_concurrency;
+            let explore_tokio_ready = control.explore_tokio_ready;
+            let script = control.decision_script.clone();
+            let recorder = ctx.recorder();
+
+            let concurrency_recorder = record_concurrency.then(|| {
+                Arc::new(RecordingConcurrencyRecorder::new(recorder.clone()))
+                    as Arc<dyn des_tokio::concurrency::ConcurrencyRecorder>
+            });
+
+            let mutex_policy: Option<Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>> =
+                tokio_mutex_cfg.map(|cfg| match cfg.policy {
+                    HarnessTokioMutexPolicy::Fifo => {
+                        Box::new(des_tokio::sync::mutex::FifoMutexWaiterPolicy)
+                            as Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>
+                    }
+                    HarnessTokioMutexPolicy::UniformRandom { seed } => Box::new(
+                        des_tokio::sync::mutex::UniformRandomMutexWaiterPolicy::new(seed),
+                    ),
+                });
+
+            let tokio_install = des_tokio::runtime::TokioInstallConfig {
+                mutex_policy,
+                concurrency_recorder,
+            };
+
+            des_tokio::runtime::install_with_tokio(&mut sim, tokio_install, move |runtime| {
+                use des_core::async_runtime::{
+                    FifoReadyTaskPolicy, ReadyTaskPolicy, UniformRandomReadyTaskPolicy,
+                };
+
+                if explore_tokio_ready {
+                    let base_policy: Box<dyn ReadyTaskPolicy> = match tokio_ready_cfg
+                        .as_ref()
+                        .map(|cfg| cfg.policy.clone())
+                    {
+                        None | Some(HarnessTokioReadyPolicy::Fifo) => Box::new(FifoReadyTaskPolicy),
+                        Some(HarnessTokioReadyPolicy::UniformRandom { seed }) => {
+                            Box::new(UniformRandomReadyTaskPolicy::new(seed))
+                        }
+                    };
+
+                    runtime.set_ready_task_policy(Box::new(ExplorationReadyTaskPolicy::new(
+                        base_policy,
+                        script.clone(),
+                        recorder.clone(),
+                    )));
+                    return;
+                }
+
+                if let Some(tokio_cfg) = tokio_ready_cfg {
+                    let base_policy: Box<dyn ReadyTaskPolicy> = match tokio_cfg.policy {
+                        HarnessTokioReadyPolicy::Fifo => Box::new(FifoReadyTaskPolicy),
+                        HarnessTokioReadyPolicy::UniformRandom { seed } => {
+                            Box::new(UniformRandomReadyTaskPolicy::new(seed))
+                        }
+                    };
+
+                    if tokio_cfg.record_decisions {
+                        runtime.set_ready_task_policy(Box::new(RecordingReadyTaskPolicy::new(
+                            base_policy,
+                            recorder.clone(),
+                        )));
+                    } else {
+                        runtime.set_ready_task_policy(base_policy);
+                    }
+                }
+            });
+        }
+
+        #[cfg(not(feature = "tokio"))]
+        {
+            return Err(HarnessError::TokioFeatureDisabled);
+        }
+    }
+
+    if control.explore_frontier {
+        let script = control.decision_script.clone();
+
+        let policy: Box<dyn EventFrontierPolicy> =
+            match cfg.frontier.clone().map(|c| c.policy) {
+                None | Some(HarnessFrontierPolicy::Fifo) => Box::new(
+                    ExplorationFrontierPolicy::new(FifoFrontierPolicy, script, ctx.recorder()),
+                ),
+                Some(HarnessFrontierPolicy::UniformRandom { seed }) => {
+                    Box::new(ExplorationFrontierPolicy::new(
+                        UniformRandomFrontierPolicy::new(seed),
+                        script,
+                        ctx.recorder(),
+                    ))
+                }
+            };
+
+        sim.set_frontier_policy(policy);
+    } else if let Some(frontier_cfg) = cfg.frontier.clone() {
+        let policy: Box<dyn EventFrontierPolicy> =
+            match (frontier_cfg.policy, frontier_cfg.record_decisions) {
+                (HarnessFrontierPolicy::Fifo, false) => Box::new(FifoFrontierPolicy),
+                (HarnessFrontierPolicy::Fifo, true) => Box::new(RecordingFrontierPolicy::new(
+                    FifoFrontierPolicy,
+                    ctx.recorder(),
+                )),
+                (HarnessFrontierPolicy::UniformRandom { seed }, false) => {
+                    Box::new(UniformRandomFrontierPolicy::new(seed))
+                }
+                (HarnessFrontierPolicy::UniformRandom { seed }, true) => {
+                    Box::new(RecordingFrontierPolicy::new(
+                        UniformRandomFrontierPolicy::new(seed),
+                        ctx.recorder(),
+                    ))
+                }
+            };
+
+        sim.set_frontier_policy(policy);
+    }
+
+    let result = run(&mut sim, &ctx);
+
+    let trace = ctx.snapshot_trace();
+    write_trace_to_path(
+        &cfg.trace_path,
+        &trace,
+        TraceIoConfig {
+            format: cfg.trace_format,
+        },
+    )?;
+
+    Ok((result, trace))
+}
+
+/// Convenience wrapper: run with `Executor::timed(end_time)`.
+pub fn run_timed_controlled(
+    cfg: HarnessConfig,
+    control: HarnessControl,
+    prefix: Option<&Trace>,
+    end_time: SimTime,
+    setup: impl FnOnce(SimulationConfig, &HarnessContext, Option<&Trace>) -> Simulation,
+) -> Result<Trace, HarnessError> {
+    let ((), trace) = run_controlled(cfg, control, prefix, setup, move |sim, _ctx| {
+        sim.execute(Executor::timed(end_time));
+    })?;
+
+    Ok(trace)
 }
 
 /// Runs a simulation, recording a trace to disk.
