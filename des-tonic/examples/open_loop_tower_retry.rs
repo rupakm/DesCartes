@@ -2,7 +2,7 @@ use bytes::Bytes;
 use des_components::transport::{
     LatencyConfig, LatencyJitterModel, SharedEndpointRegistry, SimTransport,
 };
-use des_core::{SimTime, Simulation, SimulationConfig};
+use des_core::{Executor, SimTime, Simulation, SimulationConfig};
 use des_explore::harness::{
     run_recorded, run_replayed, HarnessConfig, HarnessFrontierConfig, HarnessFrontierPolicy,
     HarnessTokioReadyConfig, HarnessTokioReadyPolicy,
