@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{
@@ -16,9 +17,28 @@ pub enum JoinError {
     Cancelled,
 }
 
+#[derive(Clone, Debug)]
+pub struct AbortHandle {
+    task_id: TaskId,
+    runtime_key: Key<RuntimeEvent>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl AbortHandle {
+    pub fn abort(&self) {
+        self.cancelled.store(true, AtomicOrdering::Release);
+        defer_wake(
+            self.runtime_key,
+            RuntimeEvent::Cancel {
+                task_id: self.task_id,
+            },
+        );
+    }
+}
+
 struct JoinState<T> {
     completed: AtomicBool,
-    cancelled: AtomicBool,
+    cancelled: Arc<AtomicBool>,
     result: Mutex<Option<T>>,
     waker: Mutex<Option<Waker>>,
 }
@@ -27,7 +47,7 @@ impl<T> JoinState<T> {
     fn new() -> Self {
         Self {
             completed: AtomicBool::new(false),
-            cancelled: AtomicBool::new(false),
+            cancelled: Arc::new(AtomicBool::new(false)),
             result: Mutex::new(None),
             waker: Mutex::new(None),
         }
@@ -66,6 +86,14 @@ impl<T> JoinHandle<T> {
             },
         );
     }
+
+    pub fn abort_handle(&self) -> AbortHandle {
+        AbortHandle {
+            task_id: self.task_id,
+            runtime_key: self.runtime_key,
+            cancelled: self.state.cancelled.clone(),
+        }
+    }
 }
 
 impl<T> Future for JoinHandle<T> {
@@ -100,6 +128,108 @@ where
     T: 'static,
 {
     spawn_local_inner(future)
+}
+
+pub struct JoinSet<T> {
+    handles: VecDeque<JoinHandle<T>>,
+}
+
+impl<T> Default for JoinSet<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> JoinSet<T> {
+    pub fn new() -> Self {
+        Self {
+            handles: VecDeque::new(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.handles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.handles.is_empty()
+    }
+
+    #[track_caller]
+    pub fn spawn<F>(&mut self, task: F) -> AbortHandle
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let jh = spawn(task);
+        let abort = jh.abort_handle();
+        self.handles.push_back(jh);
+        abort
+    }
+
+    #[track_caller]
+    pub fn spawn_local<F>(&mut self, task: F) -> AbortHandle
+    where
+        F: Future<Output = T> + 'static,
+        T: 'static,
+    {
+        let jh = crate::task::spawn_local(task);
+        let abort = jh.abort_handle();
+        self.handles.push_back(jh);
+        abort
+    }
+
+    pub async fn join_next(&mut self) -> Option<Result<T, JoinError>> {
+        std::future::poll_fn(|cx| self.poll_join_next(cx)).await
+    }
+
+    pub fn poll_join_next(&mut self, cx: &mut Context<'_>) -> Poll<Option<Result<T, JoinError>>> {
+        if self.handles.is_empty() {
+            return Poll::Ready(None);
+        }
+
+        let n = self.handles.len();
+        let mut any_pending = false;
+
+        for _ in 0..n {
+            let mut handle = self.handles.pop_front().expect("len checked");
+
+            match Pin::new(&mut handle).poll(cx) {
+                Poll::Ready(res) => {
+                    // Do not reinsert.
+                    return Poll::Ready(Some(res));
+                }
+                Poll::Pending => {
+                    any_pending = true;
+                    self.handles.push_back(handle);
+                }
+            }
+        }
+
+        if any_pending {
+            Poll::Pending
+        } else {
+            // Should not happen: if there are handles, at least one should be pending.
+            Poll::Pending
+        }
+    }
+
+    pub fn abort_all(&mut self) {
+        for jh in &self.handles {
+            jh.abort();
+        }
+    }
+
+    pub fn detach_all(&mut self) {
+        self.handles.clear();
+    }
+}
+
+impl<T> Drop for JoinSet<T> {
+    fn drop(&mut self) {
+        self.abort_all();
+        // Dropping JoinHandles detaches. Cancellation is handled by abort_all.
+    }
 }
 
 fn spawn_inner<F, T>(future: F) -> JoinHandle<T>
