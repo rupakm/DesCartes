@@ -4,7 +4,6 @@
 //! network conditions including latency, jitter, packet loss, and bandwidth limits.
 
 use crate::transport::{EndpointId, TransportMessage};
-use des_core::{SimTime, scheduler};
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use std::cmp::max;

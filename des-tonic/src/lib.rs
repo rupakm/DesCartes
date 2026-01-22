@@ -15,6 +15,7 @@ pub mod channel;
 pub mod network;
 pub mod router;
 pub mod server;
+pub mod stream;
 pub mod transport;
 mod util;
 mod wire;
@@ -22,6 +23,7 @@ mod wire;
 pub use channel::{Channel, ClientBuilder, ClientEndpoint, InstalledClient};
 pub use router::Router;
 pub use server::{InstalledServer, ServerBuilder, ServerEndpoint};
+pub use stream::{DesStreamSender, DesStreaming};
 pub use transport::Transport;
 
 pub use network::NetworkModel;

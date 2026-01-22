@@ -15,6 +15,7 @@ pub use network_model::{LatencyConfig, LatencyJitterModel, NetworkModel, SimpleN
 pub use sim_transport::SimTransport;
 
 use des_core::SimTime;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Events that can be processed by transport components
@@ -51,12 +52,16 @@ pub struct TransportMessage {
 }
 
 /// Type of transport message
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MessageType {
     /// Unary RPC request
     UnaryRequest,
     /// Unary RPC response
     UnaryResponse,
+    /// A framed message for RPC streaming.
+    ///
+    /// The payload is an opaque stream frame (encoded at a higher layer like `des-tonic`).
+    RpcStreamFrame,
     /// Streaming RPC message
     StreamMessage,
     /// Stream close signal
@@ -98,5 +103,21 @@ impl TransportMessage {
     /// Calculate time since message was sent
     pub fn age(&self, current_time: SimTime) -> Duration {
         current_time.duration_since(self.sent_at)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_type_rpc_stream_frame_serde_roundtrip() {
+        let ty = MessageType::RpcStreamFrame;
+
+        let json = serde_json::to_string(&ty).expect("serialize MessageType");
+        let decoded: MessageType = serde_json::from_str(&json).expect("deserialize MessageType");
+
+        assert_eq!(decoded, ty);
+        assert_eq!(format!("{ty:?}"), "RpcStreamFrame");
     }
 }
