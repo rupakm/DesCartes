@@ -20,15 +20,15 @@ fn socket_addr_api_connects_and_rejects_duplicate_bind() {
     let addr: SocketAddr = "127.0.0.1:50051".parse().unwrap();
 
     let _server = transport
-        .serve(&mut sim, "svc.Echo", addr.to_string(), router.clone())
+        .serve_socket_addr(&mut sim, "svc.Echo", addr, router.clone())
         .expect("serve");
 
     let dup = transport.serve(&mut sim, "svc.Echo", "http://127.0.0.1:50051", router);
     assert!(matches!(dup, Err(s) if s.code() == tonic::Code::AlreadyExists));
 
-    let channel =
-        des_tonic::Channel::connect(&mut sim, &transport, "svc.Echo", "http://127.0.0.1:50051")
-            .expect("connect");
+    let channel = transport
+        .connect_socket_addr(&mut sim, "svc.Echo", addr)
+        .expect("connect");
 
     let out: std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));

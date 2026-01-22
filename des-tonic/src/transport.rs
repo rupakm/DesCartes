@@ -2,11 +2,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use des_components::transport::{
-    NetworkModel, SharedEndpointRegistry, SimTransport, SimpleNetworkModel, TransportEvent,
+    SharedEndpointRegistry, SimTransport, SimpleNetworkModel, TransportEvent,
 };
+
+use crate::network::NetworkModel;
 use des_core::{Key, SchedulerHandle, Simulation};
 
 use tonic::Status;
+
+use std::net::SocketAddr;
 
 use crate::addr::parse_socket_addr;
 use crate::{Channel, Router, ServerBuilder};
@@ -47,23 +51,13 @@ impl Transport {
         format!("{service_name}:{}", *c)
     }
 
-    /// Install a server endpoint bound to `addr`.
-    ///
-    /// `addr` may be a plain `SocketAddr` string ("127.0.0.1:50051") or a URI-like
-    /// string ("http://127.0.0.1:50051").
-    ///
-    /// If another server is already bound at that address for the same service, this
-    /// returns `Status::already_exists`.
-    pub fn serve(
+    fn serve_addr(
         &self,
         sim: &mut Simulation,
-        service_name: impl Into<String>,
-        addr: impl AsRef<str>,
+        service_name: String,
+        addr: SocketAddr,
         router: Router,
     ) -> Result<crate::InstalledServer, Status> {
-        let service_name = service_name.into();
-        let addr = parse_socket_addr(addr.as_ref())?;
-
         let instance_name = addr.to_string();
 
         ServerBuilder::new(
@@ -86,6 +80,48 @@ impl Transport {
         })
     }
 
+    /// Install a server endpoint bound to `addr`.
+    ///
+    /// If another server is already bound at that address for the same service, this
+    /// returns `Status::already_exists`.
+    pub fn serve_socket_addr(
+        &self,
+        sim: &mut Simulation,
+        service_name: impl Into<String>,
+        addr: SocketAddr,
+        router: Router,
+    ) -> Result<crate::InstalledServer, Status> {
+        self.serve_addr(sim, service_name.into(), addr, router)
+    }
+
+    /// Install a server endpoint bound to an address string.
+    ///
+    /// `addr` may be a plain `SocketAddr` string ("127.0.0.1:50051") or a URI-like
+    /// string ("http://127.0.0.1:50051").
+    pub fn serve(
+        &self,
+        sim: &mut Simulation,
+        service_name: impl Into<String>,
+        addr: impl AsRef<str>,
+        router: Router,
+    ) -> Result<crate::InstalledServer, Status> {
+        let service_name = service_name.into();
+        let addr = parse_socket_addr(addr.as_ref())?;
+        self.serve_addr(sim, service_name, addr, router)
+    }
+
+    /// Install a client endpoint and return a channel connected to `addr`.
+    pub fn connect_socket_addr(
+        &self,
+        sim: &mut Simulation,
+        service_name: impl Into<String>,
+        addr: SocketAddr,
+    ) -> Result<Channel, Status> {
+        let service_name = service_name.into();
+        let client_name = self.next_client_endpoint_name(&service_name);
+        Channel::connect_addr(sim, self, service_name, addr, client_name)
+    }
+
     /// Install a client endpoint and return a channel connected to `addr`.
     ///
     /// `addr` may be a plain `SocketAddr` string ("127.0.0.1:50051") or a URI-like
@@ -96,10 +132,7 @@ impl Transport {
         service_name: impl Into<String>,
         addr: impl AsRef<str>,
     ) -> Result<Channel, Status> {
-        let service_name = service_name.into();
         let addr = parse_socket_addr(addr.as_ref())?;
-
-        let client_name = self.next_client_endpoint_name(&service_name);
-        Channel::connect_addr(sim, self, service_name, addr, client_name)
+        self.connect_socket_addr(sim, service_name, addr)
     }
 }

@@ -12,6 +12,7 @@
 
 mod addr;
 pub mod channel;
+pub mod network;
 pub mod router;
 pub mod server;
 pub mod transport;
@@ -22,5 +23,7 @@ pub use channel::{Channel, ClientBuilder, ClientEndpoint, InstalledClient};
 pub use router::Router;
 pub use server::{InstalledServer, ServerBuilder, ServerEndpoint};
 pub use transport::Transport;
+
+pub use network::NetworkModel;
 
 pub use tonic::{Code, Request, Response, Status};

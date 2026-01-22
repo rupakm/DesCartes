@@ -76,6 +76,18 @@ impl Channel {
         transport.connect(sim, service_name, addr)
     }
 
+    /// Convenience: connect to a specific server `SocketAddr`.
+    ///
+    /// This is equivalent to `transport.connect_socket_addr(sim, service_name, addr)`.
+    pub fn connect_socket_addr(
+        sim: &mut des_core::Simulation,
+        transport: &crate::Transport,
+        service_name: impl Into<String>,
+        addr: std::net::SocketAddr,
+    ) -> Result<Self, Status> {
+        transport.connect_socket_addr(sim, service_name, addr)
+    }
+
     pub(crate) fn connect_addr(
         sim: &mut des_core::Simulation,
         transport: &crate::Transport,

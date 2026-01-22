@@ -3,12 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use des_components::transport::{
-    LatencyConfig, LatencyJitterModel, NetworkModel, SimpleNetworkModel,
-};
 use des_core::async_runtime::current_sim_time;
 use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
-use des_tonic::{Request, Response, Router, Transport};
+use des_tonic::{network, NetworkModel, Request, Response, Router, Transport};
 
 fn run_client_server_with_transport(
     cfg: SimulationConfig,
@@ -70,22 +67,26 @@ fn client_server_can_swap_network_models_without_code_changes() {
 
     // Zero-latency baseline.
     let base_seed = cfg.seed ^ 0x1111_2222_3333_4444u64;
-    let fast = SimpleNetworkModel::with_seed(Duration::ZERO, 0.0, base_seed);
     let cfg_fast = cfg.clone();
-    let fast_lat =
-        std::thread::spawn(move || run_client_server_with_transport(cfg_fast, Box::new(fast)))
-            .join()
-            .unwrap();
+    let fast_lat = std::thread::spawn(move || {
+        run_client_server_with_transport(cfg_fast, network::ideal(base_seed))
+    })
+    .join()
+    .unwrap();
 
     let fast_avg = avg(&fast_lat);
 
     // Latency + jitter.
-    let jitter_cfg = LatencyConfig::new(Duration::from_millis(10)).with_jitter(0.5);
-    let jitter = LatencyJitterModel::with_seed(jitter_cfg, cfg.seed ^ 0xABCDEu64);
-    let jitter_lat =
-        std::thread::spawn(move || run_client_server_with_transport(cfg, Box::new(jitter)))
-            .join()
-            .unwrap();
+    let jitter_seed = cfg.seed ^ 0xABCDEu64;
+    let jitter_lat = std::thread::spawn(move || {
+        run_client_server_with_transport(
+            cfg,
+            network::latency_jitter_base(Duration::from_millis(10), 0.5, jitter_seed),
+        )
+    })
+    .join()
+    .unwrap();
+
     let jitter_avg = avg(&jitter_lat);
 
     eprintln!("fast_avg={fast_avg:?}, jitter_avg={jitter_avg:?}");
