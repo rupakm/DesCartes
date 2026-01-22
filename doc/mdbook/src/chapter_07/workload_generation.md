@@ -1,0 +1,1 @@
+# Advanced workload generation patterns

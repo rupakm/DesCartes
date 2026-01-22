@@ -50,14 +50,18 @@ With general distributions, the underlying mathematical object is closest to a *
 
 A single run can be made reproducible by recording:
 
-- **Scheduler choices**: whenever multiple same-time events are available, record which one is selected.
+- **Scheduler choices**: when multiple same-time DES events are available, record which one is selected.
+- **Tokio ready-task choices (optional)**: when multiple async tasks are ready in a single runtime poll cycle, record which task is polled next.
 - **Random choices**: record each sampled value (and/or its “source label”: arrival time, service time, etc.).
+- **Concurrency observations (optional)**: record mutex/atomic events and validate them during replay.
 - Optional: record high-level invariants, property monitors, and a compact event log.
 
 This yields a replayable “counterexample trace” with:
 - initial seed/config
 - list of scheduler decisions
+- list of async runtime decisions (if enabled)
 - list of random draws (or derived scheduled times)
+- optional concurrency event stream
 
 ---
 

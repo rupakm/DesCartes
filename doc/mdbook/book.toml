@@ -1,0 +1,34 @@
+[book]
+title = "DESCARTES User Manual"
+description = "Comprehensive guide to the DESCARTES discrete event simulation framework"
+authors = ["DESCARTES Contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = true
+
+[preprocessor.links]
+# Enable link checking
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+smart-punctuation = true
+mathjax-support = true
+additional-css = ["theme/custom.css"]
+
+[output.html.search]
+enable = true
+limit-results = 30
+teaser-word-count = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 1
+boost-paragraph = 1
+expand = true
+heading-split-level = 3
+
+[output.html.playground]
+runnable = true

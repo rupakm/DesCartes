@@ -19,6 +19,9 @@ Thumbs.db
 *.profraw
 *.profdata
 
+# Documentation (track sources, ignore generated output)
+doc/mdbook/book/
+
 # Visualization outputs
 *.png
 *.svg

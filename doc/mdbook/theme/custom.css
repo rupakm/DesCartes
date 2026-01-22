@@ -1,0 +1,303 @@
+/* Custom CSS for DESCARTES User Manual */
+
+/* Improve code block styling */
+.hljs {
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+
+/* Dark theme code blocks */
+.navy .hljs {
+    background: #161b22;
+    border: 1px solid #30363d;
+}
+
+/* Improve table styling */
+table {
+    border-collapse: collapse;
+    margin: 1.5em 0;
+    width: 100%;
+    font-size: 0.95em;
+}
+
+table th,
+table td {
+    border: 1px solid #e1e4e8;
+    padding: 12px 16px;
+    text-align: left;
+    vertical-align: top;
+}
+
+table th {
+    background-color: #f6f8fa;
+    font-weight: 600;
+    color: #24292f;
+}
+
+/* Dark theme tables */
+.navy table th,
+.navy table td {
+    border-color: #30363d;
+}
+
+.navy table th {
+    background-color: #161b22;
+    color: #f0f6fc;
+}
+
+/* Improve admonition styling */
+.admonition {
+    margin: 1.5em 0;
+    padding: 16px 20px;
+    border-left: 4px solid #0969da;
+    background-color: #f6f8fa;
+    border-radius: 0 6px 6px 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.admonition.warning {
+    border-left-color: #d1242f;
+    background-color: #fff5f5;
+}
+
+.admonition.note {
+    border-left-color: #0969da;
+    background-color: #f0f6ff;
+}
+
+.admonition.tip {
+    border-left-color: #1a7f37;
+    background-color: #f6ffed;
+}
+
+/* Dark theme admonitions */
+.navy .admonition {
+    background-color: #161b22;
+    border-left-color: #58a6ff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.navy .admonition.warning {
+    border-left-color: #f85149;
+    background-color: #2d1b1e;
+}
+
+.navy .admonition.tip {
+    border-left-color: #56d364;
+    background-color: #1b2d1b;
+}
+
+/* Improve navigation breadcrumbs */
+.nav-chapters {
+    max-width: none;
+}
+
+/* Better spacing for chapter content */
+.content {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 20px;
+    line-height: 1.6;
+}
+
+/* Chapter heading styling */
+.content h1 {
+    border-bottom: 2px solid #e1e4e8;
+    padding-bottom: 0.5em;
+    margin-bottom: 1em;
+    color: #24292f;
+}
+
+.navy .content h1 {
+    border-bottom-color: #30363d;
+    color: #f0f6fc;
+}
+
+/* Section headings */
+.content h2 {
+    margin-top: 2em;
+    margin-bottom: 1em;
+    color: #24292f;
+}
+
+.content h3 {
+    margin-top: 1.5em;
+    margin-bottom: 0.75em;
+    color: #656d76;
+}
+
+.navy .content h2,
+.navy .content h3 {
+    color: #f0f6fc;
+}
+
+.navy .content h3 {
+    color: #8b949e;
+}
+
+/* Improve search results */
+.search-results mark {
+    background-color: #fff3cd;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.navy .search-results mark {
+    background-color: #664d03;
+    color: #fff3cd;
+}
+
+/* Better code inline styling */
+code {
+    background-color: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 0.9em;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+.navy code {
+    background-color: #161b22;
+    border-color: #30363d;
+    color: #e6edf3;
+}
+
+/* Improve heading anchors */
+.header:hover .anchor {
+    opacity: 1;
+}
+
+.anchor {
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+/* Navigation guide table styling */
+.content table.nav-guide {
+    margin: 2em 0;
+    border: 2px solid #0969da;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.content table.nav-guide th {
+    background-color: #0969da;
+    color: white;
+    font-weight: 600;
+    text-align: center;
+}
+
+.navy .content table.nav-guide {
+    border-color: #58a6ff;
+}
+
+.navy .content table.nav-guide th {
+    background-color: #58a6ff;
+    color: #24292f;
+}
+
+/* Feature highlights */
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5em;
+    margin: 2em 0;
+}
+
+.feature-item {
+    padding: 1.5em;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    background-color: #f6f8fa;
+}
+
+.navy .feature-item {
+    border-color: #30363d;
+    background-color: #161b22;
+}
+
+.feature-item h3 {
+    margin-top: 0;
+    margin-bottom: 0.5em;
+    color: #0969da;
+}
+
+.navy .feature-item h3 {
+    color: #58a6ff;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    font-weight: 600;
+    margin-left: 0.5em;
+}
+
+.status-badge.tested {
+    background-color: #1a7f37;
+    color: white;
+}
+
+.status-badge.complete {
+    background-color: #0969da;
+    color: white;
+}
+
+.status-badge.realistic {
+    background-color: #8250df;
+    color: white;
+}
+
+.status-badge.progressive {
+    background-color: #d1242f;
+    color: white;
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+    .content {
+        padding: 0 15px;
+    }
+    
+    .feature-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    table {
+        font-size: 0.85em;
+    }
+    
+    table th,
+    table td {
+        padding: 8px 12px;
+    }
+}
+
+/* Print styles */
+@media print {
+    .nav-chapters,
+    .search-form,
+    .search-results {
+        display: none;
+    }
+    
+    .content {
+        max-width: none;
+        margin: 0;
+        padding: 0;
+    }
+    
+    .hljs {
+        background: white !important;
+        border: 1px solid #ccc !important;
+    }
+}
