@@ -1,12 +1,14 @@
 # DesCartes — Deterministic Discrete-Event Simulation for Rust
 
-DesCartes is a Rust workspace for building **deterministic**, **single-threaded** discrete-event simulations (DES) of distributed and concurrent systems.
+DesCartes is a Rust workspace for building **deterministic**, **single-threaded** discrete-event simulations (DES) of distributed and concurrent systems. It provides a stand-in replacement for core Rust libraries (tokio, tower, tonic, etc.) so that systems using these libraries can be simulated deterministically.
 
-The core model is:
+The core model contains:
 
+- Core data structures to create components and tasks.
 - Simulated time advances by processing scheduled events.
+- Simulation is deterministic by default (given source of randomness) and traces are recorded and replayable.
 - Async tasks (`async`/`await`) run on a simulated runtime (`des_tokio`) backed by the DES scheduler.
-- Exploration tooling is **opt-in** and does not affect default FIFO behavior.
+- Exploration tooling: systematic exploration of the state space via record/replay.
 
 ## Key Properties
 
@@ -78,10 +80,9 @@ Executor::timed(SimTime::from_duration(Duration::from_millis(20))).execute(&mut 
 
 - Default ordering is FIFO at the DES scheduler frontier and within the async runtime.
 - Any randomized policy must be explicitly installed and seeded.
-- Exploration tooling (`des-explore`) is opt-in; recording/replay is designed to make “interesting” executions reproducible.
 
 ## License
 
-This repository is intended to be dual-licensed under **MIT OR Apache-2.0** (see `Cargo.toml`).
+This repository is licensed under **Apache-2.0**. 
 
 - Apache 2.0 text: `LICENSE-APACHE`
