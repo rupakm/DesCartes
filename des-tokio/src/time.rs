@@ -132,3 +132,143 @@ where
         sleep: Box::pin(sleep(duration)),
     }
 }
+
+/// Defines the behavior of an [`Interval`] when it misses a tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissedTickBehavior {
+    /// Ticks as fast as possible until caught up.
+    Burst,
+    /// Schedule the next tick relative to the current time.
+    Delay,
+    /// Skip missed ticks and tick on the next multiple of `period` from the original schedule.
+    Skip,
+}
+
+impl Default for MissedTickBehavior {
+    fn default() -> Self {
+        Self::Burst
+    }
+}
+
+impl MissedTickBehavior {
+    fn next_timeout(&self, timeout: Instant, now: Instant, period: Duration) -> Instant {
+        match self {
+            Self::Burst => timeout + period,
+            Self::Delay => now + period,
+            Self::Skip => {
+                let period_nanos = u128::from(u64::try_from(period.as_nanos()).expect(
+                    "interval period too large for des_tokio simulated time (must fit u64 nanos)",
+                ));
+
+                let delta_nanos = (now - timeout).as_nanos();
+                let rem = delta_nanos % period_nanos;
+                let rem_u64 = u64::try_from(rem)
+                    .expect("too much time has elapsed since the interval was supposed to tick");
+
+                now + period - Duration::from_nanos(rem_u64)
+            }
+        }
+    }
+}
+
+/// Creates a new [`Interval`] that yields with interval of `period`.
+///
+/// The first tick completes immediately.
+///
+/// This is equivalent to `interval_at(Instant::now(), period)`.
+///
+/// # Panics
+///
+/// Panics if `period` is zero.
+pub fn interval(period: Duration) -> Interval {
+    interval_at(Instant::now(), period)
+}
+
+/// Creates a new [`Interval`] that yields with interval of `period` with the first
+/// tick completing at `start`.
+///
+/// # Panics
+///
+/// Panics if `period` is zero.
+pub fn interval_at(start: Instant, period: Duration) -> Interval {
+    assert!(period > Duration::ZERO, "interval period must be non-zero");
+    assert!(
+        u64::try_from(period.as_nanos()).is_ok(),
+        "interval period too large for des_tokio simulated time (must fit u64 nanos)"
+    );
+
+    Interval {
+        next: start,
+        period,
+        missed_tick_behavior: MissedTickBehavior::default(),
+    }
+}
+
+/// Interval returned by [`interval`] and [`interval_at`].
+#[derive(Debug)]
+pub struct Interval {
+    next: Instant,
+    period: Duration,
+    missed_tick_behavior: MissedTickBehavior,
+}
+
+impl Interval {
+    /// Completes when the next instant in the interval has been reached.
+    pub async fn tick(&mut self) -> Instant {
+        let timeout = self.next;
+        let now = Instant::now();
+
+        if now < timeout {
+            sleep_until(timeout).await;
+        }
+
+        let now = Instant::now();
+        let next = if now > timeout {
+            self.missed_tick_behavior
+                .next_timeout(timeout, now, self.period)
+        } else {
+            timeout + self.period
+        };
+
+        self.next = next;
+        timeout
+    }
+
+    pub fn missed_tick_behavior(&self) -> MissedTickBehavior {
+        self.missed_tick_behavior
+    }
+
+    pub fn set_missed_tick_behavior(&mut self, behavior: MissedTickBehavior) {
+        self.missed_tick_behavior = behavior;
+    }
+
+    pub fn period(&self) -> Duration {
+        self.period
+    }
+
+    /// Resets the interval to complete one period after the current time.
+    ///
+    /// This method ignores [`MissedTickBehavior`].
+    pub fn reset(&mut self) {
+        self.next = Instant::now() + self.period;
+    }
+
+    /// Resets the interval immediately.
+    ///
+    /// This method ignores [`MissedTickBehavior`].
+    pub fn reset_immediately(&mut self) {
+        self.next = Instant::now();
+    }
+
+    /// Resets the interval after `after`.
+    ///
+    /// This method ignores [`MissedTickBehavior`].
+    pub fn reset_after(&mut self, after: Duration) {
+        self.next = Instant::now() + after;
+    }
+
+    /// Resets the interval to the specified deadline.
+    pub fn reset_at(&mut self, deadline: Instant) {
+        self.next = deadline;
+    }
+}
