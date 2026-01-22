@@ -339,9 +339,148 @@ fn thread_patterns_random_schedule_are_replayable() {
     // Run each pattern across multiple deterministic schedule seeds.
     let seeds = [10u64, 11, 12, 13, 14];
 
+    let mut executions = 0usize;
+
     for p in patterns {
         for seed in seeds {
             run_pattern_record_and_replay(p, seed);
+            executions += 1;
         }
     }
+
+    println!("thread_patterns_random_schedule_are_replayable explored {executions} executions");
+}
+
+fn run_tiny_ready_order(sim: &mut Simulation) -> [u64; 2] {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Two worker tasks write their identity into the shared order buffer.
+    //
+    // Intentionally no `yield_now()` / locks / extra awaits: we want the only
+    // meaningful nondeterminism to be the initial tokio-ready choice among two
+    // runnable tasks.
+    let order = Arc::new(StdMutex::new([0u64; 2]));
+    let next = Arc::new(AtomicUsize::new(0));
+
+    for id in [1u64, 2u64] {
+        let order = order.clone();
+        let next = next.clone();
+        des_tokio::thread::spawn(async move {
+            let idx = next.fetch_add(1, Ordering::SeqCst);
+            order.lock().unwrap()[idx] = id;
+        });
+    }
+
+    Executor::timed(SimTime::from_millis(1)).execute(sim);
+
+    let out = *order.lock().unwrap();
+    out
+}
+
+#[test]
+fn thread_patterns_exhaustive_exploration_tiny_ready_order() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TRACE_ID: AtomicUsize = AtomicUsize::new(0);
+
+    fn temp_path() -> std::path::PathBuf {
+        let n = TRACE_ID.fetch_add(1, Ordering::Relaxed);
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "des_explore_thread_patterns_exhaustive_ready_order_{}_{}.json",
+            std::process::id(),
+            n
+        ));
+        p
+    }
+
+    fn run_once(script: DecisionScript) -> ([u64; 2], Trace) {
+        std::thread::spawn(move || {
+            let trace_path = temp_path();
+
+            let cfg = HarnessConfig {
+                sim_config: SimulationConfig { seed: 1 },
+                scenario: "thread_patterns_exhaustive_tiny_ready_order".to_string(),
+                install_tokio: true,
+                tokio_ready: None,
+                tokio_mutex: None,
+                record_concurrency: false,
+                frontier: None,
+                trace_path: trace_path.clone(),
+                trace_format: TraceFormat::Json,
+            };
+
+            let control = HarnessControl {
+                decision_script: (!script.is_empty()).then(|| Arc::new(script)),
+                explore_frontier: false,
+                explore_tokio_ready: true,
+            };
+
+            let (result, trace) = run_controlled(
+                cfg,
+                control,
+                None,
+                |sim_config, _ctx, _prefix| Simulation::new(sim_config),
+                |sim, _ctx| run_tiny_ready_order(sim),
+            )
+            .unwrap();
+
+            std::fs::remove_file(&trace_path).ok();
+            (result, trace)
+        })
+        .join()
+        .unwrap()
+    }
+
+    // Truly exhaustive DFS: branch on every observed multi-choice decision.
+    //
+    // This scenario is constructed so the only multi-choice decision is the first
+    // tokio-ready choice among two runnable tasks, so the exploration stays tiny.
+    let mut stack = vec![DecisionScript::new()];
+    let mut explored = 0usize;
+    let mut leaves = 0usize;
+
+    let mut observed_orders = std::collections::BTreeSet::new();
+
+    while let Some(script) = stack.pop() {
+        let (order, trace) = run_once(script.clone());
+        explored += 1;
+        observed_orders.insert(order);
+
+        let mut branched = false;
+        for d in extract_decisions(&trace) {
+            if d.key.choice_set.len() <= 1 {
+                continue;
+            }
+            if script.get(&d.key).is_some() {
+                continue;
+            }
+
+            for &choice in &d.key.choice_set {
+                let mut next = script.clone();
+                next.insert(d.key.clone(), choice);
+                stack.push(next);
+            }
+
+            branched = true;
+            break;
+        }
+
+        if !branched {
+            leaves += 1;
+        }
+
+        assert!(
+            explored <= 16,
+            "unexpectedly large exploration for tiny scenario"
+        );
+    }
+
+    println!(
+        "thread_patterns_exhaustive_exploration_tiny_ready_order explored {explored} executions ({leaves} leaves), orders={observed_orders:?}"
+    );
+
+    // We should see both possible orderings.
+    assert!(observed_orders.contains(&[1, 2]));
+    assert!(observed_orders.contains(&[2, 1]));
 }

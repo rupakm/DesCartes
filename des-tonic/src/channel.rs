@@ -151,6 +151,24 @@ impl Channel {
         request: Request<Bytes>,
         timeout: Option<Duration>,
     ) -> Result<Response<Bytes>, Status> {
+        // Tonic's dynamic balancers effectively include endpoint discovery in the overall
+        // request timeout. We mimic that by wrapping the full unary path (discovery + send
+        // + response) in a single timeout.
+        let Some(timeout) = timeout else {
+            return self.unary_inner(path, request).await;
+        };
+
+        match des_tokio::time::timeout(timeout, self.unary_inner(path, request)).await {
+            Ok(r) => r,
+            Err(_) => Err(Status::deadline_exceeded("request timed out")),
+        }
+    }
+
+    async fn unary_inner(
+        &self,
+        path: &str,
+        request: Request<Bytes>,
+    ) -> Result<Response<Bytes>, Status> {
         let target = if let Some(target) = self.target_endpoint {
             // Validate the server endpoint is still registered.
             let ok = self
@@ -173,11 +191,24 @@ impl Channel {
                 metadata: std::collections::HashMap::new(),
             }
         } else {
-            self.endpoint_registry
-                .get_endpoint_for_service(&self.service_name)
-                .ok_or_else(|| {
-                    Status::unavailable(format!("service not found: {}", self.service_name))
-                })?
+            // Dynamic discovery: wait for an endpoint to become available.
+            //
+            // This mirrors tonic's load-balanced channels where requests can remain pending
+            // while the balancer waits for endpoint updates.
+            match des_tower::wait_for_endpoint(
+                self.endpoint_registry.clone(),
+                self.service_name.clone(),
+                None,
+            )
+            .await
+            {
+                Some(ep) => ep,
+                None => {
+                    return Err(Status::deadline_exceeded(
+                        "request timed out while waiting for endpoint",
+                    ))
+                }
+            }
         };
 
         let correlation_id = self.next_correlation_id();
@@ -221,23 +252,17 @@ impl Channel {
 
         self.schedule_transport(SimTime::zero(), TransportEvent::SendMessage { message });
 
-        let result = if let Some(timeout) = timeout {
-            match des_tokio::time::timeout(timeout, rx).await {
-                Ok(r) => r,
-                Err(_) => Err(des_tokio::sync::oneshot::RecvError),
-            }
-        } else {
-            rx.await
-        };
+        // The `timeout` has already been accounted for (endpoint wait + response wait).
+        let result = rx.await;
 
         match result {
             Ok(Ok(resp)) => Ok(resp),
             Ok(Err(status)) => Err(status),
             Err(_) => {
-                // Timeout or channel closed.
+                // Receiver dropped: request cancelled (e.g. client task aborted).
                 let mut pending = self.pending.lock().unwrap();
                 pending.remove(&correlation_id);
-                Err(Status::deadline_exceeded("request timed out"))
+                Err(Status::cancelled("request cancelled"))
             }
         }
     }

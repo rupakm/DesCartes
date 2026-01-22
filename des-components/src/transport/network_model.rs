@@ -4,8 +4,10 @@
 //! network conditions including latency, jitter, packet loss, and bandwidth limits.
 
 use crate::transport::{EndpointId, TransportMessage};
+use des_core::{SimTime, scheduler};
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
+use std::cmp::max;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -27,19 +29,14 @@ pub trait NetworkModel: Send + Sync {
         message: &TransportMessage,
     ) -> bool;
 
-    /// Calculate bandwidth delay based on message size
-    fn calculate_bandwidth_delay(
-        &mut self,
-        from: EndpointId,
-        to: EndpointId,
-        message: &TransportMessage,
-    ) -> Duration;
-
     /// Reset any internal state (useful for deterministic testing)
     fn reset(&mut self);
 }
 
 /// Simple network model with configurable latency and packet loss
+/// Simple networks are FIFO by construction, since each packet is delivered a constant 
+/// base latency later. The only problem might be that multiple packets are scheduled at the same time
+/// and the DES uses a non-FIFO scheduler
 pub struct SimpleNetworkModel {
     /// Base latency between any two endpoints
     pub base_latency: Duration,
@@ -98,15 +95,6 @@ impl NetworkModel for SimpleNetworkModel {
         self.rng.gen::<f64>() < self.packet_loss_rate
     }
 
-    fn calculate_bandwidth_delay(
-        &mut self,
-        _from: EndpointId,
-        _to: EndpointId,
-        _message: &TransportMessage,
-    ) -> Duration {
-        Duration::ZERO // No bandwidth limits in simple model
-    }
-
     fn reset(&mut self) {
         use rand::SeedableRng;
         self.rng = rand_chacha::ChaCha8Rng::from_entropy();
@@ -115,6 +103,9 @@ impl NetworkModel for SimpleNetworkModel {
 
 /// Network model with latency, jitter, and per-endpoint characteristics
 pub struct LatencyJitterModel {
+    /// Tracking the earliest time messages may be sent between endpoints
+    /// to ensure FIFO semantics
+    pub queue_times: HashMap<(EndpointId, EndpointId), Duration>,
     /// Per-endpoint pair latency configuration
     latency_config: HashMap<(EndpointId, EndpointId), LatencyConfig>,
     /// Default latency configuration
@@ -179,6 +170,7 @@ impl LatencyJitterModel {
     pub fn new(default_config: LatencyConfig) -> Self {
         use rand::SeedableRng;
         Self {
+            queue_times: HashMap::new(),
             latency_config: HashMap::new(),
             default_config,
             rng: rand_chacha::ChaCha8Rng::from_entropy(),
@@ -189,6 +181,7 @@ impl LatencyJitterModel {
     pub fn with_seed(default_config: LatencyConfig, seed: u64) -> Self {
         use rand::SeedableRng;
         Self {
+            queue_times: HashMap::new(),
             latency_config: HashMap::new(),
             default_config,
             rng: rand_chacha::ChaCha8Rng::seed_from_u64(seed),
@@ -213,20 +206,42 @@ impl NetworkModel for LatencyJitterModel {
         &mut self,
         from: EndpointId,
         to: EndpointId,
-        _message: &TransportMessage,
+        message: &TransportMessage,
     ) -> Duration {
-        let config = self.get_config(from, to);
+        // Clone config values to avoid holding immutable borrow
+        let config = self.get_config(from, to).clone();
+        let key = (from, to);
+        let current_time = 
+            max(
+                *self.queue_times.get(&key).unwrap_or(&Duration::ZERO),
+                message.sent_at.as_duration()
+            );
+
         let base_ms = config.base_latency.as_millis() as f64;
 
-        if config.jitter_factor > 0.0 {
-            let jitter_std = base_ms * config.jitter_factor;
-            let normal = Normal::new(base_ms, jitter_std)
-                .unwrap_or_else(|_| Normal::new(base_ms, 1.0).unwrap());
-            let latency_ms = normal.sample(&mut self.rng).max(0.0);
-            Duration::from_millis(latency_ms as u64)
-        } else {
-            config.base_latency
-        }
+        let latency = 
+            if config.jitter_factor > 0.0 {
+                let jitter_std = base_ms * config.jitter_factor;
+                let normal = Normal::new(base_ms, jitter_std)
+                    .unwrap_or_else(|_| Normal::new(base_ms, 1.0).unwrap());
+                // the max is to ensure the latency is not 0
+                let latency_ms = normal.sample(&mut self.rng).max(base_ms/10.0);
+                Duration::from_millis(latency_ms as u64)
+            } else {
+                config.base_latency
+            };
+        let bwdelay = 
+            if config.bandwidth_bps > 0 {
+                let bytes = message.size() as u64;
+                let seconds = bytes as f64 / config.bandwidth_bps as f64;
+                Duration::from_secs_f64(seconds)
+            } else {
+                Duration::ZERO
+            };
+        
+        let total_time = current_time + latency + bwdelay;
+        self.queue_times.insert(key, total_time);
+        total_time
     }
 
     fn should_drop_message(
@@ -237,22 +252,6 @@ impl NetworkModel for LatencyJitterModel {
     ) -> bool {
         let packet_loss_rate = self.get_config(from, to).packet_loss_rate;
         self.rng.gen::<f64>() < packet_loss_rate
-    }
-
-    fn calculate_bandwidth_delay(
-        &mut self,
-        from: EndpointId,
-        to: EndpointId,
-        message: &TransportMessage,
-    ) -> Duration {
-        let config = self.get_config(from, to);
-        if config.bandwidth_bps > 0 {
-            let bytes = message.size() as u64;
-            let seconds = bytes as f64 / config.bandwidth_bps as f64;
-            Duration::from_secs_f64(seconds)
-        } else {
-            Duration::ZERO
-        }
     }
 
     fn reset(&mut self) {
@@ -332,27 +331,40 @@ mod tests {
     }
 
     #[test]
-    fn test_bandwidth_delay() {
-        let config = LatencyConfig::new(Duration::from_millis(10)).with_bandwidth(1000); // 1000 bytes per second
+    fn test_fifo_ordering() {
+        let default_config = LatencyConfig::new(Duration::from_millis(50))
+            .with_jitter(0.5)
+            .with_packet_loss(0.0);
 
-        let mut model = LatencyJitterModel::with_seed(config, 456);
+        let mut model = LatencyJitterModel::with_seed(default_config, 123);
 
         let endpoint1 = EndpointId::new("service1".to_string());
         let endpoint2 = EndpointId::new("service2".to_string());
 
-        // 500 byte message
-        let message = TransportMessage::new(
+        let m1 = TransportMessage::new(
             1,
             endpoint1,
             endpoint2,
-            vec![0; 500],
+            vec![1, 2, 3],
             SimTime::zero(),
             crate::transport::MessageType::UnaryRequest,
         );
 
-        let bandwidth_delay = model.calculate_bandwidth_delay(endpoint1, endpoint2, &message);
+        let m2 = TransportMessage::new(
+            1,
+            endpoint1,
+            endpoint2,
+            vec![1, 2, 3],
+            SimTime::from_millis(1),
+            crate::transport::MessageType::UnaryRequest,
+        );
 
-        // 500 bytes at 1000 bps = 0.5 seconds
-        assert_eq!(bandwidth_delay, Duration::from_millis(500));
+        // Test latency with jitter
+        let l1 = model.calculate_latency(endpoint1, endpoint2, &m1);
+        let l2 = model.calculate_latency(endpoint1, endpoint2, &m2);
+
+        // messages are delivered in FIFO order
+        assert!(l1 < l2);
     }
+
 }

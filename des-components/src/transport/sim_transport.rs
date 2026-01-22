@@ -215,16 +215,11 @@ impl Component for SimTransport {
                         message_with_id.destination,
                         &message_with_id,
                     );
-                    let bandwidth_delay = self.network_model.calculate_bandwidth_delay(
-                        message_with_id.source,
-                        message_with_id.destination,
-                        &message_with_id,
-                    );
-                    let total_delay = latency + bandwidth_delay;
+                    
 
                     // Schedule delivery
                     scheduler.schedule(
-                        SimTime::from_duration(total_delay),
+                        SimTime::from_duration(latency),
                         self_id,
                         TransportEvent::MessageDelivered {
                             message: message_with_id,

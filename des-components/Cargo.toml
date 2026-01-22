@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 des-core = { path = "../des-core" }
 des-metrics = { path = "../des-metrics" }
+des-tokio = { path = "../des-tokio" }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }

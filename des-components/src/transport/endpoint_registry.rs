@@ -7,6 +7,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use des_tokio::sync::notify::Notify;
+
 /// Unique identifier for a service endpoint
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EndpointId {
@@ -218,6 +220,7 @@ impl EndpointRegistry for SimEndpointRegistry {
 /// Thread-safe wrapper for endpoint registry
 pub struct SharedEndpointRegistry {
     inner: Arc<Mutex<SimEndpointRegistry>>,
+    notify: Notify,
 }
 
 impl Default for SharedEndpointRegistry {
@@ -231,17 +234,26 @@ impl SharedEndpointRegistry {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(SimEndpointRegistry::new())),
+            notify: Notify::new(),
         }
     }
 
     /// Register an endpoint (thread-safe)
     pub fn register_endpoint(&self, endpoint: EndpointInfo) -> Result<(), String> {
-        self.inner.lock().unwrap().register_endpoint(endpoint)
+        let res = self.inner.lock().unwrap().register_endpoint(endpoint);
+        if res.is_ok() {
+            self.notify.notify_waiters();
+        }
+        res
     }
 
     /// Unregister an endpoint (thread-safe)
     pub fn unregister_endpoint(&self, endpoint_id: EndpointId) -> Result<(), String> {
-        self.inner.lock().unwrap().unregister_endpoint(endpoint_id)
+        let res = self.inner.lock().unwrap().unregister_endpoint(endpoint_id);
+        if res.is_ok() {
+            self.notify.notify_waiters();
+        }
+        res
     }
 
     /// Find endpoints for a service (thread-safe)
@@ -256,12 +268,18 @@ impl SharedEndpointRegistry {
             .unwrap()
             .get_endpoint_for_service(service_name)
     }
+
+    /// Wait until any endpoint registry change occurs.
+    pub async fn changed(&self) {
+        self.notify.notified().await
+    }
 }
 
 impl Clone for SharedEndpointRegistry {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
+            notify: self.notify.clone(),
         }
     }
 }

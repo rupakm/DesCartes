@@ -172,6 +172,7 @@ use thiserror::Error;
 
 // Re-export all the layers and services
 pub mod circuit_breaker;
+pub mod discovery;
 pub mod hedge;
 pub mod limit;
 pub mod load_balancer;
@@ -181,6 +182,7 @@ pub mod timeout;
 
 pub use circuit_breaker::{DesCircuitBreaker, DesCircuitBreakerLayer};
 pub use des_core::SchedulerHandle;
+pub use discovery::wait_for_endpoint;
 pub use hedge::{DesHedge, DesHedgeLayer};
 pub use limit::{
     DesConcurrencyLimit, DesConcurrencyLimitLayer, DesGlobalConcurrencyLimit,

@@ -10,6 +10,7 @@ repository.workspace = true
 des-core = { path = "../des-core" }
 des-tokio = { path = "../des-tokio" }
 des-components = { path = "../des-components" }
+des-tower = { path = "../des-tower" }
 
 # Tonic types only (no tonic::transport)
 tonic = "0.12"
@@ -20,7 +21,6 @@ rand = { workspace = true }
 
 # Example-only dependencies
 # (kept as dev-deps so des-tonic library stays minimal)
-des-tower = { path = "../des-tower" }
 des-explore = { path = "../des-explore" }
 
 # These are used directly by the example (Rust requires direct deps).
