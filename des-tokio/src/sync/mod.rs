@@ -5,6 +5,7 @@ pub mod notify;
 pub mod oneshot;
 pub mod rwlock;
 pub mod semaphore;
+pub mod watch;
 
 pub(crate) mod batch_semaphore;
 
