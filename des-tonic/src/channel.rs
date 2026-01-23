@@ -1,4 +1,4 @@
-use crate::stream::DesStreamSender;
+use crate::stream::{DesStreamSender, DesStreaming};
 use crate::wire::{
     decode_stream_frame, decode_unary_response, encode_stream_frame, encode_unary_request,
     StreamDirection, StreamFrameKind, StreamFrameWire, UnaryRequestWire,
@@ -159,8 +159,7 @@ impl Channel {
 
     /// Generate a deterministic stream identifier.
     ///
-    /// Reserved for future streaming RPC support.
-    #[allow(dead_code)]
+    /// Generate a deterministic stream identifier.
     fn next_stream_id(&self) -> String {
         let mut c = self.next_counter.lock().unwrap();
         *c += 1;
@@ -281,9 +280,11 @@ impl Channel {
                 ClientStreamState {
                     mode: ClientStreamMode::ClientStreaming,
                     next_expected_s2c: 0,
+                    saw_s2c_open: false,
                     reorder: BTreeMap::new(),
                     response_tx: Some(response_tx),
                     response_payload: None,
+                    stream_tx: None,
                 },
             );
         }
@@ -443,6 +444,191 @@ impl Channel {
         Ok((sender, response_future))
     }
 
+    /// Open a server-streaming RPC.
+    ///
+    /// Sends a single request message and returns a stream of response messages.
+    pub async fn server_streaming(
+        &self,
+        path: &str,
+        request: Request<Bytes>,
+        timeout: Option<Duration>,
+    ) -> Result<Response<DesStreaming<Bytes>>, Status> {
+        let target = if let Some(target) = self.target_endpoint {
+            let ok = self
+                .endpoint_registry
+                .find_endpoints(&self.service_name)
+                .iter()
+                .any(|e| e.id == target);
+
+            if !ok {
+                return Err(Status::unavailable(format!(
+                    "service not found at fixed address: {}",
+                    self.service_name
+                )));
+            }
+
+            des_components::transport::EndpointInfo {
+                id: target,
+                service_name: self.service_name.clone(),
+                instance_name: String::new(),
+                metadata: std::collections::HashMap::new(),
+            }
+        } else {
+            let fut = des_tower::wait_for_endpoint(
+                self.endpoint_registry.clone(),
+                self.service_name.clone(),
+                None,
+            );
+
+            let ep = match timeout {
+                None => fut.await,
+                Some(t) => match des_tokio::time::timeout(t, fut).await {
+                    Ok(r) => r,
+                    Err(_) => {
+                        return Err(Status::deadline_exceeded(
+                            "request timed out while waiting for endpoint",
+                        ));
+                    }
+                },
+            };
+
+            match ep {
+                Some(ep) => ep,
+                None => {
+                    return Err(Status::deadline_exceeded(
+                        "request timed out while waiting for endpoint",
+                    ))
+                }
+            }
+        };
+
+        let stream_id = self.next_stream_id();
+        let (tx, rx) = des_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
+
+        {
+            let mut pending = self.pending_streams.lock().unwrap();
+            pending.insert(
+                stream_id.clone(),
+                ClientStreamState {
+                    mode: ClientStreamMode::ServerStreaming,
+                    next_expected_s2c: 0,
+                    saw_s2c_open: false,
+                    reorder: BTreeMap::new(),
+                    response_tx: None,
+                    response_payload: None,
+                    stream_tx: Some(tx),
+                },
+            );
+        }
+
+        // Send Open.
+        let open = StreamFrameWire {
+            stream_id: stream_id.clone(),
+            direction: StreamDirection::ClientToServer,
+            seq: 0,
+            kind: StreamFrameKind::Open,
+            method: Some(path.to_string()),
+            metadata: Vec::new(),
+            payload: Bytes::new(),
+            status_ok: true,
+            status_code: tonic::Code::Ok,
+            status_message: String::new(),
+        };
+
+        let open_msg = TransportMessage::new(
+            0,
+            self.client_endpoint,
+            target.id,
+            encode_stream_frame(&open).to_vec(),
+            util::now(&self.scheduler),
+            MessageType::RpcStreamFrame,
+        )
+        .with_correlation_id(stream_id.clone());
+
+        self.schedule_transport(
+            SimTime::zero(),
+            TransportEvent::SendMessage { message: open_msg },
+        );
+
+        // Send request payload as Data(seq=1) and then Close(seq=2).
+        let req_payload = request.into_inner();
+
+        let data = StreamFrameWire {
+            stream_id: stream_id.clone(),
+            direction: StreamDirection::ClientToServer,
+            seq: 1,
+            kind: StreamFrameKind::Data,
+            method: None,
+            metadata: Vec::new(),
+            payload: req_payload,
+            status_ok: true,
+            status_code: tonic::Code::Ok,
+            status_message: String::new(),
+        };
+
+        let data_msg = TransportMessage::new(
+            0,
+            self.client_endpoint,
+            target.id,
+            encode_stream_frame(&data).to_vec(),
+            util::now(&self.scheduler),
+            MessageType::RpcStreamFrame,
+        )
+        .with_correlation_id(stream_id.clone());
+
+        self.schedule_transport(
+            SimTime::zero(),
+            TransportEvent::SendMessage { message: data_msg },
+        );
+
+        let close = StreamFrameWire {
+            stream_id: stream_id.clone(),
+            direction: StreamDirection::ClientToServer,
+            seq: 2,
+            kind: StreamFrameKind::Close,
+            method: None,
+            metadata: Vec::new(),
+            payload: Bytes::new(),
+            status_ok: true,
+            status_code: tonic::Code::Ok,
+            status_message: String::new(),
+        };
+
+        let close_msg = TransportMessage::new(
+            0,
+            self.client_endpoint,
+            target.id,
+            encode_stream_frame(&close).to_vec(),
+            util::now(&self.scheduler),
+            MessageType::RpcStreamFrame,
+        )
+        .with_correlation_id(stream_id.clone());
+
+        self.schedule_transport(
+            SimTime::zero(),
+            TransportEvent::SendMessage { message: close_msg },
+        );
+
+        // Optional overall timeout: best-effort cancellation and local termination.
+        if let Some(timeout) = timeout {
+            let channel = self.clone();
+            des_tokio::task::spawn_local(async move {
+                des_tokio::time::sleep(timeout).await;
+                let mut pending = channel.pending_streams.lock().unwrap();
+                let Some(mut state) = pending.remove(&stream_id) else {
+                    return;
+                };
+                if let Some(tx) = state.stream_tx.take() {
+                    let _ = tx
+                        .send(Err(Status::deadline_exceeded("stream timed out")))
+                        .await;
+                }
+            });
+        }
+
+        Ok(Response::new(DesStreaming::new(rx)))
+    }
+
     async fn unary_inner(
         &self,
         path: &str,
@@ -551,14 +737,26 @@ impl Channel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientStreamMode {
     ClientStreaming,
+    ServerStreaming,
 }
 
 pub(crate) struct ClientStreamState {
     mode: ClientStreamMode,
+
+    /// Next expected sequence number for S->C frames.
     next_expected_s2c: u64,
+
+    /// Whether we've observed an explicit or implicit S->C open.
+    saw_s2c_open: bool,
+
     reorder: BTreeMap<u64, StreamFrameWire>,
+
+    // --- client-streaming response ---
     response_tx: Option<des_tokio::sync::oneshot::Sender<Result<Response<Bytes>, Status>>>,
     response_payload: Option<Bytes>,
+
+    // --- server-streaming response ---
+    stream_tx: Option<des_tokio::sync::mpsc::Sender<Result<Bytes, Status>>>,
 }
 
 pub struct InstalledClient {
@@ -711,19 +909,40 @@ impl des_core::Component for ClientEndpoint {
                     }
                 }
                 MessageType::RpcStreamFrame => {
+                    const MAX_REORDER_FRAMES: usize = 64;
+
                     let stream_id = match &message.correlation_id {
                         Some(c) => c.clone(),
                         None => return,
                     };
 
                     let bytes = Bytes::from(message.payload.clone());
-                    let frame = match decode_stream_frame(bytes) {
+                    let mut frame = match decode_stream_frame(bytes) {
                         Ok(f) => f,
-                        Err(_status) => return,
+                        Err(status) => {
+                            // Fail-fast: resolve any pending waiter and cleanup.
+                            let mut pending = self.pending_streams.lock().unwrap();
+                            if let Some(mut state) = pending.remove(&stream_id) {
+                                match state.mode {
+                                    ClientStreamMode::ClientStreaming => {
+                                        if let Some(tx) = state.response_tx.take() {
+                                            let _ = tx.send(Err(status));
+                                        }
+                                    }
+                                    ClientStreamMode::ServerStreaming => {
+                                        if let Some(tx) = state.stream_tx.take() {
+                                            let _ = tx.try_send(Err(status));
+                                        }
+                                    }
+                                }
+                            }
+                            return;
+                        }
                     };
 
+                    // `TransportMessage.correlation_id` is authoritative for routing.
                     if frame.stream_id != stream_id {
-                        return;
+                        frame.stream_id = stream_id.clone();
                     }
 
                     if frame.direction != StreamDirection::ServerToClient {
@@ -735,34 +954,119 @@ impl des_core::Component for ClientEndpoint {
                         return;
                     };
 
-                    // Reorder by seq and drain in-order.
+                    if state.reorder.len() >= MAX_REORDER_FRAMES {
+                        match state.mode {
+                            ClientStreamMode::ClientStreaming => {
+                                if let Some(tx) = state.response_tx.take() {
+                                    let _ = tx.send(Err(Status::resource_exhausted(
+                                        "stream reorder buffer exceeded",
+                                    )));
+                                }
+                            }
+                            ClientStreamMode::ServerStreaming => {
+                                if let Some(tx) = state.stream_tx.take() {
+                                    let _ = tx.try_send(Err(Status::resource_exhausted(
+                                        "stream reorder buffer exceeded",
+                                    )));
+                                }
+                            }
+                        }
+                        pending.remove(&stream_id);
+                        return;
+                    }
+
                     state.reorder.insert(frame.seq, frame);
+
+                    // If the peer doesn't send an explicit S->C Open (seq=0), accept a
+                    // "Data/Close begins at seq=1" convention to avoid deadlocks.
+                    if !state.saw_s2c_open
+                        && state.next_expected_s2c == 0
+                        && !state.reorder.contains_key(&0)
+                        && state.reorder.contains_key(&1)
+                    {
+                        state.saw_s2c_open = true;
+                        state.next_expected_s2c = 1;
+                    }
 
                     while let Some(next) = state.reorder.remove(&state.next_expected_s2c) {
                         state.next_expected_s2c += 1;
 
                         match next.kind {
                             StreamFrameKind::Open => {
-                                // No-op for now.
+                                state.saw_s2c_open = true;
                             }
                             StreamFrameKind::Data => match state.mode {
                                 ClientStreamMode::ClientStreaming => {
+                                    if !state.saw_s2c_open {
+                                        if let Some(tx) = state.response_tx.take() {
+                                            let _ = tx.send(Err(Status::internal(
+                                                "stream protocol violation: data before open",
+                                            )));
+                                        }
+                                        pending.remove(&stream_id);
+                                        break;
+                                    }
+
+                                    if state.response_payload.is_some() {
+                                        if let Some(tx) = state.response_tx.take() {
+                                            let _ = tx.send(Err(Status::internal(
+                                                "stream protocol violation: multiple response data frames",
+                                            )));
+                                        }
+                                        pending.remove(&stream_id);
+                                        break;
+                                    }
+
                                     state.response_payload = Some(next.payload);
+                                }
+                                ClientStreamMode::ServerStreaming => {
+                                    if !state.saw_s2c_open {
+                                        if let Some(tx) = state.stream_tx.take() {
+                                            let _ = tx.try_send(Err(Status::internal(
+                                                "stream protocol violation: data before open",
+                                            )));
+                                        }
+                                        pending.remove(&stream_id);
+                                        break;
+                                    }
+
+                                    if let Some(tx) = &state.stream_tx {
+                                        if tx.try_send(Ok(next.payload)).is_err() {
+                                            // Backpressure: terminate the stream.
+                                            pending.remove(&stream_id);
+                                            break;
+                                        }
+                                    }
                                 }
                             },
                             StreamFrameKind::Close => {
-                                if let Some(tx) = state.response_tx.take() {
-                                    if next.status_ok {
-                                        let payload = state
-                                            .response_payload
-                                            .take()
-                                            .unwrap_or_else(Bytes::new);
-                                        let resp = Response::new(payload);
-                                        let _ = tx.send(Ok(resp));
-                                    } else {
-                                        let status =
-                                            Status::new(next.status_code, next.status_message);
-                                        let _ = tx.send(Err(status));
+                                match state.mode {
+                                    ClientStreamMode::ClientStreaming => {
+                                        if let Some(tx) = state.response_tx.take() {
+                                            if next.status_ok {
+                                                let payload = state
+                                                    .response_payload
+                                                    .take()
+                                                    .unwrap_or_else(Bytes::new);
+                                                let resp = Response::new(payload);
+                                                let _ = tx.send(Ok(resp));
+                                            } else {
+                                                let status = Status::new(
+                                                    next.status_code,
+                                                    next.status_message,
+                                                );
+                                                let _ = tx.send(Err(status));
+                                            }
+                                        }
+                                    }
+                                    ClientStreamMode::ServerStreaming => {
+                                        if next.status_ok {
+                                            state.stream_tx.take();
+                                        } else if let Some(tx) = state.stream_tx.take() {
+                                            let status =
+                                                Status::new(next.status_code, next.status_message);
+                                            let _ = tx.try_send(Err(status));
+                                        }
                                     }
                                 }
 
@@ -770,9 +1074,22 @@ impl des_core::Component for ClientEndpoint {
                                 break;
                             }
                             StreamFrameKind::Cancel => {
-                                if let Some(tx) = state.response_tx.take() {
-                                    let _ = tx.send(Err(Status::cancelled("stream cancelled")));
+                                match state.mode {
+                                    ClientStreamMode::ClientStreaming => {
+                                        if let Some(tx) = state.response_tx.take() {
+                                            let _ =
+                                                tx.send(Err(Status::cancelled("stream cancelled")));
+                                        }
+                                    }
+                                    ClientStreamMode::ServerStreaming => {
+                                        if let Some(tx) = state.stream_tx.take() {
+                                            let _ = tx.try_send(Err(Status::cancelled(
+                                                "stream cancelled",
+                                            )));
+                                        }
+                                    }
                                 }
+
                                 pending.remove(&stream_id);
                                 break;
                             }
