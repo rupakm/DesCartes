@@ -7,7 +7,7 @@ use bytes::Bytes;
 use des_components::transport::{
     EndpointId, MessageType, SharedEndpointRegistry, SimTransport, TransportEvent, TransportMessage,
 };
-use des_core::{defer_wake, scheduler::in_scheduler_context, Key, SchedulerHandle, SimTime};
+use des_core::{defer_wake_after, scheduler::in_scheduler_context, Key, SchedulerHandle, SimTime};
 
 use crate::util;
 use std::collections::{BTreeMap, HashMap};
@@ -173,13 +173,8 @@ impl Channel {
 
     fn schedule_transport(&self, delay: SimTime, event: TransportEvent) {
         if in_scheduler_context() {
-            // Safe: defer_wake should not lock the scheduler.
-            if delay != SimTime::zero() {
-                // defer_wake only supports "now" semantics; fall back to scheduler handle.
-                self.scheduler.schedule(delay, self.transport_key, event);
-            } else {
-                defer_wake(self.transport_key, event);
-            }
+            // Safe: does not lock the scheduler.
+            defer_wake_after(delay, self.transport_key, event);
         } else {
             self.scheduler.schedule(delay, self.transport_key, event);
         }

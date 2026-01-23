@@ -66,8 +66,8 @@ thread_local! {
 
     /// Deferred events scheduled by wakers during event processing.
     ///
-    /// These are drained (and scheduled at the current simulation time) after the
-    /// current event finishes processing.
+    /// These are drained after the current event finishes processing and scheduled
+    /// relative to the simulation time at the drain point.
     static DEFERRED_WAKES: RefCell<Vec<DeferredWake>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -76,11 +76,24 @@ thread_local! {
 /// This is used by async wakers and other logic that needs to schedule work from
 /// within event processing without re-locking the scheduler mutex.
 ///
+/// This is a convenience wrapper for [`defer_wake_after`] with `delay = 0`.
+///
 /// Note: This function does not access the scheduler directly. Deferred wakes are
 /// drained by `Simulation::step()` after the current event is processed.
 pub fn defer_wake<E: fmt::Debug + 'static>(component: Key<E>, event: E) {
+    defer_wake_after(SimTime::zero(), component, event);
+}
+
+/// Defer an event to be scheduled at `current_time + delay`.
+///
+/// This is the cancellation-safe, deadlock-free way to schedule work from within
+/// event processing or async task polling.
+///
+/// This is the general form of [`defer_wake`], supporting non-zero delays.
+pub fn defer_wake_after<E: fmt::Debug + 'static>(delay: SimTime, component: Key<E>, event: E) {
     DEFERRED_WAKES.with(|buf| {
-        buf.borrow_mut().push(DeferredWake::new(component, event));
+        buf.borrow_mut()
+            .push(DeferredWake::new(delay, component, event));
     });
 }
 
@@ -130,10 +143,10 @@ struct DeferredWake {
 }
 
 impl DeferredWake {
-    fn new<E: fmt::Debug + 'static>(component: Key<E>, event: E) -> Self {
+    fn new<E: fmt::Debug + 'static>(delay: SimTime, component: Key<E>, event: E) -> Self {
         Self {
             schedule_fn: Box::new(move |scheduler: &mut Scheduler| {
-                scheduler.schedule_now(component, event);
+                scheduler.schedule(delay, component, event);
             }),
         }
     }
