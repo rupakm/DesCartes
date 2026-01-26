@@ -1,5 +1,57 @@
 use des_tokio::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use tonic::Status;
+
+pub fn channel<T>(cap: usize) -> (Sender<T>, DesStreaming<T>) {
+    let (tx, rx) = mpsc::channel::<Result<T, Status>>(cap);
+    (
+        Sender {
+            inner: Arc::new(Mutex::new(Some(tx))),
+        },
+        DesStreaming::new(rx),
+    )
+}
+
+/// Typed sender for streaming RPCs.
+///
+/// This wraps an internal `mpsc::Sender<Result<T, Status>>` so callers can send
+/// either normal stream items or an explicit error.
+#[derive(Debug, Clone)]
+pub struct Sender<T> {
+    inner: Arc<Mutex<Option<mpsc::Sender<Result<T, Status>>>>>,
+}
+
+impl<T> Sender<T> {
+    pub async fn send(&self, item: T) -> Result<(), ()> {
+        let tx = {
+            let guard = self.inner.lock().unwrap();
+            guard.as_ref().cloned()
+        };
+
+        let Some(tx) = tx else {
+            return Err(());
+        };
+
+        tx.send(Ok(item)).await.map_err(|_| ())
+    }
+
+    pub async fn send_err(&self, status: Status) -> Result<(), ()> {
+        let tx = {
+            let guard = self.inner.lock().unwrap();
+            guard.as_ref().cloned()
+        };
+
+        let Some(tx) = tx else {
+            return Err(());
+        };
+
+        tx.send(Err(status)).await.map_err(|_| ())
+    }
+
+    pub fn close(&self) {
+        let _ = self.inner.lock().unwrap().take();
+    }
+}
 
 /// A simulation-friendly streaming receiver.
 ///
@@ -67,5 +119,54 @@ impl<T> DesStreamSender<T> {
 impl<T> From<mpsc::Sender<T>> for DesStreamSender<T> {
     fn from(inner: mpsc::Sender<T>) -> Self {
         Self::new(inner)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
+    use tonic::Code;
+
+    #[test]
+    fn typed_stream_channel_sends_ok_and_err() {
+        let mut sim = Simulation::new(SimulationConfig { seed: 1 });
+        des_tokio::runtime::install(&mut sim);
+
+        let out: std::sync::Arc<std::sync::Mutex<Vec<Result<u32, Code>>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let out2 = out.clone();
+
+        des_tokio::task::spawn_local(async move {
+            let (tx, mut rx) = channel::<u32>(4);
+            tx.send(7).await.unwrap();
+            tx.send_err(Status::new(Code::InvalidArgument, "nope"))
+                .await
+                .unwrap();
+            tx.close();
+
+            if let Some(item) = rx.next().await {
+                out2.lock()
+                    .unwrap()
+                    .push(item.map_err(|s| s.code()));
+            }
+            if let Some(item) = rx.next().await {
+                out2.lock()
+                    .unwrap()
+                    .push(item.map_err(|s| s.code()));
+            }
+            if let Some(item) = rx.next().await {
+                out2.lock()
+                    .unwrap()
+                    .push(item.map_err(|s| s.code()));
+            }
+        });
+
+        Executor::timed(SimTime::from_millis(1)).execute(&mut sim);
+
+        assert_eq!(
+            *out.lock().unwrap(),
+            vec![Ok(7), Err(Code::InvalidArgument)]
+        );
     }
 }

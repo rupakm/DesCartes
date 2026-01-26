@@ -7,7 +7,9 @@ members = [
     "des-tokio",
     "des-explore",
     "des-tonic",
+    "des-tonic-build",
     "des-tower",
+    "des-tonic-codegen-test",
 ]
 resolver = "2"
 
@@ -35,6 +37,10 @@ anyhow = "1.0"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# Protobuf
+# Keep aligned with tonic's prost major/minor to avoid duplicate versions.
+prost = "0.12"
 
 # Logging and tracing
 tracing = "0.1.44"

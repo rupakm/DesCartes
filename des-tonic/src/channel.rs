@@ -1,4 +1,5 @@
 use crate::stream::{DesStreamSender, DesStreaming};
+use crate::{stream, ClientResponseFuture};
 use crate::wire::{
     decode_stream_frame, decode_unary_response, encode_stream_frame, encode_unary_request,
     StreamDirection, StreamFrameKind, StreamFrameWire, UnaryRequestWire,
@@ -19,6 +20,8 @@ use tonic::{
     metadata::{KeyAndValueRef, MetadataMap},
     Request, Response, Status,
 };
+
+use prost::Message;
 
 pub type ClientStreamingResponseFuture =
     Pin<Box<dyn Future<Output = Result<Response<Bytes>, Status>> + 'static>>;
@@ -198,6 +201,27 @@ impl Channel {
             Ok(r) => r,
             Err(_) => Err(Status::deadline_exceeded("request timed out")),
         }
+    }
+
+    pub async fn unary_prost<Req, Resp>(
+        &self,
+        path: &'static str,
+        request: Request<Req>,
+        timeout: Option<Duration>,
+    ) -> Result<Response<Resp>, Status>
+    where
+        Req: Message,
+        Resp: Message + Default,
+    {
+        let (metadata, extensions, msg) = request.into_parts();
+        let req_bytes = Request::from_parts(metadata, extensions, Bytes::from(msg.encode_to_vec()));
+
+        let resp = self.unary(path, req_bytes, timeout).await?;
+        let (metadata, payload, extensions) = resp.into_parts();
+
+        let decoded = Resp::decode(payload)
+            .map_err(|e| Status::internal(format!("prost decode error: {e}")))?;
+        Ok(Response::from_parts(metadata, decoded, extensions))
     }
 
     /// Open a client-streaming RPC.
@@ -439,6 +463,46 @@ impl Channel {
         Ok((sender, response_future))
     }
 
+    pub async fn client_streaming_prost<Req, Resp>(
+        &self,
+        path: &'static str,
+        timeout: Option<Duration>,
+    ) -> Result<(stream::Sender<Req>, ClientResponseFuture<Resp>), Status>
+    where
+        Req: Message + 'static,
+        Resp: Message + Default,
+    {
+        let (bytes_sender, resp_fut) = self.client_streaming(path, timeout).await?;
+        let (sender, mut typed_in) = stream::channel::<Req>(16);
+
+        des_tokio::task::spawn_local(async move {
+            while let Some(item) = typed_in.next().await {
+                match item {
+                    Ok(msg) => {
+                        let _ = bytes_sender
+                            .send(Bytes::from(msg.encode_to_vec()))
+                            .await;
+                    }
+                    Err(_status) => {
+                        // There is no request-stream error signaling on the wire yet.
+                        break;
+                    }
+                }
+            }
+            bytes_sender.close();
+        });
+
+        let typed_fut: ClientResponseFuture<Resp> = Box::pin(async move {
+            let resp = resp_fut.await?;
+            let (metadata, payload, extensions) = resp.into_parts();
+            let decoded = Resp::decode(payload)
+                .map_err(|e| Status::internal(format!("prost decode error: {e}")))?;
+            Ok(Response::from_parts(metadata, decoded, extensions))
+        });
+
+        Ok((sender, typed_fut))
+    }
+
     /// Open a server-streaming RPC.
     ///
     /// Sends a single request message and returns a stream of response messages.
@@ -624,6 +688,344 @@ impl Channel {
         Ok(Response::new(DesStreaming::new(rx)))
     }
 
+    pub async fn server_streaming_prost<Req, Resp>(
+        &self,
+        path: &'static str,
+        request: Request<Req>,
+        timeout: Option<Duration>,
+    ) -> Result<Response<DesStreaming<Resp>>, Status>
+    where
+        Req: Message,
+        Resp: Message + Default + 'static,
+    {
+        let (metadata, extensions, msg) = request.into_parts();
+        let req_bytes = Request::from_parts(metadata, extensions, Bytes::from(msg.encode_to_vec()));
+        let resp = self.server_streaming(path, req_bytes, timeout).await?;
+        let (metadata, mut stream_bytes, extensions) = resp.into_parts();
+
+        let (tx, stream_typed) = stream::channel::<Resp>(16);
+        des_tokio::task::spawn_local(async move {
+            while let Some(item) = stream_bytes.next().await {
+                match item {
+                    Ok(bytes) => match Resp::decode(bytes) {
+                        Ok(msg) => {
+                            if tx.send(msg).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx
+                                .send_err(Status::internal(format!(
+                                    "prost decode error: {e}"
+                                )))
+                                .await;
+                            break;
+                        }
+                    },
+                    Err(status) => {
+                        let _ = tx.send_err(status).await;
+                        break;
+                    }
+                }
+            }
+            tx.close();
+        });
+
+        Ok(Response::from_parts(metadata, stream_typed, extensions))
+    }
+
+    /// Open a bidirectional-streaming RPC.
+    ///
+    /// Returns a sender for outbound request messages and a response stream.
+    pub async fn bidirectional_streaming(
+        &self,
+        path: &str,
+        timeout: Option<Duration>,
+    ) -> Result<(DesStreamSender<Bytes>, Response<DesStreaming<Bytes>>), Status> {
+        let target = if let Some(target) = self.target_endpoint {
+            let ok = self
+                .endpoint_registry
+                .find_endpoints(&self.service_name)
+                .iter()
+                .any(|e| e.id == target);
+
+            if !ok {
+                return Err(Status::unavailable(format!(
+                    "service not found at fixed address: {}",
+                    self.service_name
+                )));
+            }
+
+            des_components::transport::EndpointInfo {
+                id: target,
+                service_name: self.service_name.clone(),
+                instance_name: String::new(),
+                metadata: std::collections::HashMap::new(),
+            }
+        } else {
+            let fut = des_tower::wait_for_endpoint(
+                self.endpoint_registry.clone(),
+                self.service_name.clone(),
+                None,
+            );
+
+            let ep = match timeout {
+                None => fut.await,
+                Some(t) => match des_tokio::time::timeout(t, fut).await {
+                    Ok(r) => r,
+                    Err(_) => {
+                        return Err(Status::deadline_exceeded(
+                            "request timed out while waiting for endpoint",
+                        ));
+                    }
+                },
+            };
+
+            match ep {
+                Some(ep) => ep,
+                None => {
+                    return Err(Status::deadline_exceeded(
+                        "request timed out while waiting for endpoint",
+                    ))
+                }
+            }
+        };
+
+        let stream_id = self.next_stream_id();
+
+        let (request_tx, mut request_rx) = des_tokio::sync::mpsc::channel::<Bytes>(16);
+        let sender = DesStreamSender::new(request_tx);
+
+        let (stream_tx, stream_rx) = des_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
+
+        {
+            let mut pending = self.pending_streams.lock().unwrap();
+            pending.insert(
+                stream_id.clone(),
+                ClientStreamState {
+                    mode: ClientStreamMode::BidiStreaming,
+                    next_expected_s2c: 0,
+                    saw_s2c_open: false,
+                    reorder: BTreeMap::new(),
+                    response_tx: None,
+                    response_payload: None,
+                    stream_tx: Some(stream_tx),
+                },
+            );
+        }
+
+        // Send Open.
+        let open = StreamFrameWire {
+            stream_id: stream_id.clone(),
+            direction: StreamDirection::ClientToServer,
+            seq: 0,
+            kind: StreamFrameKind::Open,
+            method: Some(path.to_string()),
+            metadata: Vec::new(),
+            payload: Bytes::new(),
+            status_ok: true,
+            status_code: tonic::Code::Ok,
+            status_message: String::new(),
+        };
+
+        let open_msg = TransportMessage::new(
+            0,
+            self.client_endpoint,
+            target.id,
+            encode_stream_frame(&open).to_vec(),
+            util::now(&self.scheduler),
+            MessageType::RpcStreamFrame,
+        )
+        .with_correlation_id(stream_id.clone());
+
+        self.schedule_transport(
+            SimTime::zero(),
+            TransportEvent::SendMessage { message: open_msg },
+        );
+
+        // Forward request items.
+        let channel = self.clone();
+        let stream_id_for_task = stream_id.clone();
+        let target_id_for_task = target.id;
+        des_tokio::task::spawn_local(async move {
+            let mut seq = 1u64;
+            while let Some(payload) = request_rx.recv().await {
+                let frame = StreamFrameWire {
+                    stream_id: stream_id_for_task.clone(),
+                    direction: StreamDirection::ClientToServer,
+                    seq,
+                    kind: StreamFrameKind::Data,
+                    method: None,
+                    metadata: Vec::new(),
+                    payload,
+                    status_ok: true,
+                    status_code: tonic::Code::Ok,
+                    status_message: String::new(),
+                };
+
+                let msg = TransportMessage::new(
+                    0,
+                    channel.client_endpoint,
+                    target_id_for_task,
+                    encode_stream_frame(&frame).to_vec(),
+                    util::now(&channel.scheduler),
+                    MessageType::RpcStreamFrame,
+                )
+                .with_correlation_id(stream_id_for_task.clone());
+
+                channel.schedule_transport(
+                    SimTime::zero(),
+                    TransportEvent::SendMessage { message: msg },
+                );
+
+                seq += 1;
+            }
+
+            let close = StreamFrameWire {
+                stream_id: stream_id_for_task.clone(),
+                direction: StreamDirection::ClientToServer,
+                seq,
+                kind: StreamFrameKind::Close,
+                method: None,
+                metadata: Vec::new(),
+                payload: Bytes::new(),
+                status_ok: true,
+                status_code: tonic::Code::Ok,
+                status_message: String::new(),
+            };
+
+            let msg = TransportMessage::new(
+                0,
+                channel.client_endpoint,
+                target_id_for_task,
+                encode_stream_frame(&close).to_vec(),
+                util::now(&channel.scheduler),
+                MessageType::RpcStreamFrame,
+            )
+            .with_correlation_id(stream_id_for_task);
+
+            channel.schedule_transport(
+                SimTime::zero(),
+                TransportEvent::SendMessage { message: msg },
+            );
+        });
+
+        // Optional overall timeout: best-effort cancellation and local termination.
+        if let Some(timeout) = timeout {
+            let channel = self.clone();
+            let stream_id_for_timer = stream_id.clone();
+            let target_id = target.id;
+            des_tokio::task::spawn_local(async move {
+                des_tokio::time::sleep(timeout).await;
+
+                let mut pending = channel.pending_streams.lock().unwrap();
+                let Some(mut state) = pending.remove(&stream_id_for_timer) else {
+                    return;
+                };
+
+                if let Some(tx) = state.stream_tx.take() {
+                    let _ = tx
+                        .send(Err(Status::deadline_exceeded("stream timed out")))
+                        .await;
+                }
+
+                let cancel = StreamFrameWire {
+                    stream_id: stream_id_for_timer.clone(),
+                    direction: StreamDirection::ClientToServer,
+                    seq: 0,
+                    kind: StreamFrameKind::Cancel,
+                    method: None,
+                    metadata: Vec::new(),
+                    payload: Bytes::new(),
+                    status_ok: false,
+                    status_code: tonic::Code::Cancelled,
+                    status_message: "deadline exceeded".to_string(),
+                };
+
+                let msg = TransportMessage::new(
+                    0,
+                    channel.client_endpoint,
+                    target_id,
+                    encode_stream_frame(&cancel).to_vec(),
+                    util::now(&channel.scheduler),
+                    MessageType::RpcStreamFrame,
+                )
+                .with_correlation_id(stream_id_for_timer);
+
+                channel.schedule_transport(
+                    SimTime::zero(),
+                    TransportEvent::SendMessage { message: msg },
+                );
+            });
+        }
+
+        Ok((sender, Response::new(DesStreaming::new(stream_rx))))
+    }
+
+    pub async fn bidirectional_streaming_prost<Req, Resp>(
+        &self,
+        path: &'static str,
+        timeout: Option<Duration>,
+    ) -> Result<(stream::Sender<Req>, Response<DesStreaming<Resp>>), Status>
+    where
+        Req: Message + 'static,
+        Resp: Message + Default + 'static,
+    {
+        let (bytes_sender, resp) = self.bidirectional_streaming(path, timeout).await?;
+        let (sender, mut typed_in) = stream::channel::<Req>(16);
+
+        des_tokio::task::spawn_local(async move {
+            while let Some(item) = typed_in.next().await {
+                match item {
+                    Ok(msg) => {
+                        let _ = bytes_sender
+                            .send(Bytes::from(msg.encode_to_vec()))
+                            .await;
+                    }
+                    Err(_status) => {
+                        // There is no request-stream error signaling on the wire yet.
+                        break;
+                    }
+                }
+            }
+            bytes_sender.close();
+        });
+
+        let (metadata, mut stream_bytes, extensions) = resp.into_parts();
+        let (tx, stream_typed) = stream::channel::<Resp>(16);
+        des_tokio::task::spawn_local(async move {
+            while let Some(item) = stream_bytes.next().await {
+                match item {
+                    Ok(bytes) => match Resp::decode(bytes) {
+                        Ok(msg) => {
+                            if tx.send(msg).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx
+                                .send_err(Status::internal(format!(
+                                    "prost decode error: {e}"
+                                )))
+                                .await;
+                            break;
+                        }
+                    },
+                    Err(status) => {
+                        let _ = tx.send_err(status).await;
+                        break;
+                    }
+                }
+            }
+            tx.close();
+        });
+
+        Ok((
+            sender,
+            Response::from_parts(metadata, stream_typed, extensions),
+        ))
+    }
+
     async fn unary_inner(
         &self,
         path: &str,
@@ -733,6 +1135,7 @@ impl Channel {
 pub(crate) enum ClientStreamMode {
     ClientStreaming,
     ServerStreaming,
+    BidiStreaming,
 }
 
 pub(crate) struct ClientStreamState {
@@ -924,7 +1327,8 @@ impl des_core::Component for ClientEndpoint {
                                             let _ = tx.send(Err(status));
                                         }
                                     }
-                                    ClientStreamMode::ServerStreaming => {
+                                    ClientStreamMode::ServerStreaming
+                                    | ClientStreamMode::BidiStreaming => {
                                         if let Some(tx) = state.stream_tx.take() {
                                             let _ = tx.try_send(Err(status));
                                         }
@@ -958,7 +1362,7 @@ impl des_core::Component for ClientEndpoint {
                                     )));
                                 }
                             }
-                            ClientStreamMode::ServerStreaming => {
+                            ClientStreamMode::ServerStreaming | ClientStreamMode::BidiStreaming => {
                                 if let Some(tx) = state.stream_tx.take() {
                                     let _ = tx.try_send(Err(Status::resource_exhausted(
                                         "stream reorder buffer exceeded",
@@ -1014,7 +1418,8 @@ impl des_core::Component for ClientEndpoint {
 
                                     state.response_payload = Some(next.payload);
                                 }
-                                ClientStreamMode::ServerStreaming => {
+                                ClientStreamMode::ServerStreaming
+                                | ClientStreamMode::BidiStreaming => {
                                     if !state.saw_s2c_open {
                                         if let Some(tx) = state.stream_tx.take() {
                                             let _ = tx.try_send(Err(Status::internal(
@@ -1054,7 +1459,8 @@ impl des_core::Component for ClientEndpoint {
                                             }
                                         }
                                     }
-                                    ClientStreamMode::ServerStreaming => {
+                                    ClientStreamMode::ServerStreaming
+                                    | ClientStreamMode::BidiStreaming => {
                                         if next.status_ok {
                                             state.stream_tx.take();
                                         } else if let Some(tx) = state.stream_tx.take() {
@@ -1076,7 +1482,8 @@ impl des_core::Component for ClientEndpoint {
                                                 tx.send(Err(Status::cancelled("stream cancelled")));
                                         }
                                     }
-                                    ClientStreamMode::ServerStreaming => {
+                                    ClientStreamMode::ServerStreaming
+                                    | ClientStreamMode::BidiStreaming => {
                                         if let Some(tx) = state.stream_tx.take() {
                                             let _ = tx.try_send(Err(Status::cancelled(
                                                 "stream cancelled",

@@ -1,0 +1,20 @@
+[package]
+name = "des-tonic-codegen-test"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+build = "build.rs"
+
+[dependencies]
+des-core = { path = "../des-core" }
+des-tokio = { path = "../des-tokio" }
+des-tonic = { path = "../des-tonic" }
+
+prost = { workspace = true }
+tonic = "0.12"
+
+[build-dependencies]
+des-tonic-build = { path = "../des-tonic-build" }

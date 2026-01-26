@@ -38,6 +38,7 @@ pub struct ServerEndpoint {
 enum ServerStreamState {
     ClientStreaming(ServerClientStreamState),
     ServerStreaming(ServerServerStreamState),
+    BidiStreaming(ServerBidiStreamState),
 }
 
 struct ServerClientStreamState {
@@ -58,6 +59,12 @@ struct ServerServerStreamState {
     method: String,
 }
 
+struct ServerBidiStreamState {
+    next_expected_c2s: u64,
+    reorder: BTreeMap<u64, StreamFrameWire>,
+    inbound_tx: Option<des_tokio::sync::mpsc::Sender<Result<Bytes, Status>>>,
+}
+
 impl ServerClientStreamState {
     fn push_frame(&mut self, frame: StreamFrameWire) {
         self.reorder.insert(frame.seq, frame);
@@ -65,6 +72,12 @@ impl ServerClientStreamState {
 }
 
 impl ServerServerStreamState {
+    fn push_frame(&mut self, frame: StreamFrameWire) {
+        self.reorder.insert(frame.seq, frame);
+    }
+}
+
+impl ServerBidiStreamState {
     fn push_frame(&mut self, frame: StreamFrameWire) {
         self.reorder.insert(frame.seq, frame);
     }
@@ -299,6 +312,173 @@ impl Component for ServerEndpoint {
                                 return;
                             }
 
+                            if let Some(h) = self.router.bidi_streaming(&method).map(Arc::clone) {
+                                let (in_tx, in_rx) =
+                                    des_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
+
+                                self.streams.insert(
+                                    stream_id.clone(),
+                                    ServerStreamState::BidiStreaming(ServerBidiStreamState {
+                                        // Open consumes seq=0.
+                                        next_expected_c2s: 1,
+                                        reorder: BTreeMap::new(),
+                                        inbound_tx: Some(in_tx),
+                                    }),
+                                );
+
+                                let stream_id_for_task = stream_id.clone();
+                                let transport_key = self.transport_key;
+                                let server_ep = self.endpoint_id;
+                                let client_ep = message.source;
+                                let scheduler_handle = self.scheduler.clone();
+                                let delay = self.processing_delay;
+
+                                let open_metadata = frame.metadata.clone();
+                                let method_for_task = method.clone();
+
+                                des_tokio::task::spawn_local(async move {
+                                    if delay > Duration::ZERO {
+                                        des_tokio::time::sleep(delay).await;
+                                    }
+
+                                    let mut req = Request::new(DesStreaming::new(in_rx));
+                                    {
+                                        let meta: &mut MetadataMap = req.metadata_mut();
+                                        for (k, v) in open_metadata {
+                                            if let (Ok(k), Ok(v)) = (
+                                                k.parse::<tonic::metadata::MetadataKey<
+                                                    tonic::metadata::Ascii,
+                                                >>(
+                                                ),
+                                                v.parse::<tonic::metadata::MetadataValue<
+                                                    tonic::metadata::Ascii,
+                                                >>(
+                                                ),
+                                            ) {
+                                                meta.insert(k, v);
+                                            }
+                                        }
+                                    }
+
+                                    let result: Result<Response<DesStreaming<Bytes>>, Status> =
+                                        h(req).await;
+
+                                    let send_frame = |frame: StreamFrameWire| {
+                                        let msg = TransportMessage::new(
+                                            0,
+                                            server_ep,
+                                            client_ep,
+                                            encode_stream_frame(&frame).to_vec(),
+                                            util::now(&scheduler_handle),
+                                            MessageType::RpcStreamFrame,
+                                        )
+                                        .with_correlation_id(stream_id_for_task.clone());
+
+                                        if des_core::scheduler::in_scheduler_context() {
+                                            des_core::defer_wake(
+                                                transport_key,
+                                                TransportEvent::SendMessage { message: msg },
+                                            );
+                                        } else {
+                                            scheduler_handle.schedule(
+                                                SimTime::zero(),
+                                                transport_key,
+                                                TransportEvent::SendMessage { message: msg },
+                                            );
+                                        }
+                                    };
+
+                                    // Open S->C.
+                                    send_frame(StreamFrameWire {
+                                        stream_id: stream_id_for_task.clone(),
+                                        direction: StreamDirection::ServerToClient,
+                                        seq: 0,
+                                        kind: StreamFrameKind::Open,
+                                        method: Some(method_for_task.clone()),
+                                        metadata: Vec::new(),
+                                        payload: Bytes::new(),
+                                        status_ok: true,
+                                        status_code: tonic::Code::Ok,
+                                        status_message: String::new(),
+                                    });
+
+                                    match result {
+                                        Ok(resp) => {
+                                            let mut stream = resp.into_inner();
+                                            let mut seq = 1u64;
+
+                                            while let Some(item) = stream.next().await {
+                                                match item {
+                                                    Ok(bytes) => {
+                                                        send_frame(StreamFrameWire {
+                                                            stream_id: stream_id_for_task.clone(),
+                                                            direction:
+                                                                StreamDirection::ServerToClient,
+                                                            seq,
+                                                            kind: StreamFrameKind::Data,
+                                                            method: None,
+                                                            metadata: Vec::new(),
+                                                            payload: bytes,
+                                                            status_ok: true,
+                                                            status_code: tonic::Code::Ok,
+                                                            status_message: String::new(),
+                                                        });
+                                                        seq += 1;
+                                                    }
+                                                    Err(status) => {
+                                                        send_frame(StreamFrameWire {
+                                                            stream_id: stream_id_for_task.clone(),
+                                                            direction:
+                                                                StreamDirection::ServerToClient,
+                                                            seq,
+                                                            kind: StreamFrameKind::Close,
+                                                            method: None,
+                                                            metadata: Vec::new(),
+                                                            payload: Bytes::new(),
+                                                            status_ok: false,
+                                                            status_code: status.code(),
+                                                            status_message: status
+                                                                .message()
+                                                                .to_string(),
+                                                        });
+                                                        return;
+                                                    }
+                                                }
+                                            }
+
+                                            send_frame(StreamFrameWire {
+                                                stream_id: stream_id_for_task.clone(),
+                                                direction: StreamDirection::ServerToClient,
+                                                seq,
+                                                kind: StreamFrameKind::Close,
+                                                method: None,
+                                                metadata: Vec::new(),
+                                                payload: Bytes::new(),
+                                                status_ok: true,
+                                                status_code: tonic::Code::Ok,
+                                                status_message: String::new(),
+                                            });
+                                        }
+                                        Err(status) => {
+                                            send_frame(StreamFrameWire {
+                                                stream_id: stream_id_for_task.clone(),
+                                                direction: StreamDirection::ServerToClient,
+                                                seq: 1,
+                                                kind: StreamFrameKind::Close,
+                                                method: None,
+                                                metadata: Vec::new(),
+                                                payload: Bytes::new(),
+                                                status_ok: false,
+                                                status_code: status.code(),
+                                                status_message: status.message().to_string(),
+                                            });
+                                        }
+                                    }
+                                });
+
+                                return;
+                            }
+
                             if let Some(h) = self.router.server_streaming(&method).map(Arc::clone) {
                                 self.streams.insert(
                                     stream_id.clone(),
@@ -499,6 +679,51 @@ impl Component for ServerEndpoint {
 
                             match state {
                                 ServerStreamState::ClientStreaming(state) => {
+                                    let mut remove_stream = false;
+
+                                    if state.reorder.len() >= MAX_REORDER_FRAMES {
+                                        state.inbound_tx.take();
+                                        remove_stream = true;
+                                    } else {
+                                        state.push_frame(frame);
+
+                                        while let Some(next) =
+                                            state.reorder.remove(&state.next_expected_c2s)
+                                        {
+                                            state.next_expected_c2s += 1;
+
+                                            match next.kind {
+                                                StreamFrameKind::Open => {}
+                                                StreamFrameKind::Data => {
+                                                    if let Some(tx) = &state.inbound_tx {
+                                                        if tx.try_send(Ok(next.payload)).is_err() {
+                                                            state.inbound_tx.take();
+                                                            remove_stream = true;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                StreamFrameKind::Close => {
+                                                    state.inbound_tx.take();
+                                                }
+                                                StreamFrameKind::Cancel => {
+                                                    state.inbound_tx.take();
+                                                    remove_stream = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+
+                                        if state.inbound_tx.is_none() && state.reorder.is_empty() {
+                                            remove_stream = true;
+                                        }
+                                    }
+
+                                    if remove_stream {
+                                        self.streams.remove(&stream_id);
+                                    }
+                                }
+                                ServerStreamState::BidiStreaming(state) => {
                                     let mut remove_stream = false;
 
                                     if state.reorder.len() >= MAX_REORDER_FRAMES {

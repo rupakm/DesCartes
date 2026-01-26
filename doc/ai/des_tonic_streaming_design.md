@@ -620,3 +620,12 @@ If you want the smoothest incremental path:
 3) bidi
 
 Reason: client streaming exercises inbound stream assembly and handler EOF, but avoids full-duplex complexities.
+
+---
+
+## 12) Typed Stubs / Codegen
+
+This document focuses on the streaming transport + runtime semantics.
+
+For tonic-like *generated* client/server stubs on top of `des-tonic` (prost-based, no HTTP/2), see:
+- `doc/ai/des_tonic_codegen_design.md`

@@ -13,6 +13,7 @@
 mod addr;
 pub mod channel;
 pub mod network;
+mod request;
 pub mod router;
 pub mod server;
 pub mod stream;
@@ -26,6 +27,21 @@ pub use server::{InstalledServer, ServerBuilder, ServerEndpoint};
 pub use stream::{DesStreamSender, DesStreaming};
 pub use transport::Transport;
 
+pub use request::IntoRequest;
+
+pub type ClientResponseFuture<T> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<tonic::Response<T>, tonic::Status>> + 'static>,
+>;
+
 pub use network::NetworkModel;
 
 pub use tonic::{Code, Request, Response, Status};
+
+pub use async_trait::async_trait;
+
+#[macro_export]
+macro_rules! include_proto {
+    ($package:tt) => {
+        include!(concat!(env!("OUT_DIR"), "/", $package, ".rs"));
+    };
+}

@@ -1,0 +1,11 @@
+[package]
+name = "des-tonic-build"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+prost-build = "0.12"
+heck = "0.5"

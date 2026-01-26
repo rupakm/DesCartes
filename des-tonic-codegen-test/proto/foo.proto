@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package codegen_test;
+
+service Foo {
+  rpc Unary(Num) returns (Num);
+  rpc ServerStream(Num) returns (stream Num);
+  rpc ClientStream(stream Num) returns (Num);
+  rpc Bidi(stream Num) returns (stream Num);
+}
+
+message Num {
+  int32 v = 1;
+}
