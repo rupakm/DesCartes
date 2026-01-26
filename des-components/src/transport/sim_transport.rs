@@ -215,7 +215,6 @@ impl Component for SimTransport {
                         message_with_id.destination,
                         &message_with_id,
                     );
-                    
 
                     // Schedule delivery
                     scheduler.schedule(

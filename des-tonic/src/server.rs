@@ -19,6 +19,35 @@ use tonic::{
     Code, Request, Response, Status,
 };
 
+fn send_stream_frame_from_task(
+    scheduler_handle: &SchedulerHandle,
+    transport_key: Key<TransportEvent>,
+    server_ep: EndpointId,
+    client_ep: EndpointId,
+    stream_id: &str,
+    frame: StreamFrameWire,
+) {
+    let msg = TransportMessage::new(
+        0,
+        server_ep,
+        client_ep,
+        encode_stream_frame(&frame).to_vec(),
+        util::now(scheduler_handle),
+        MessageType::RpcStreamFrame,
+    )
+    .with_correlation_id(stream_id.to_string());
+
+    if des_core::scheduler::in_scheduler_context() {
+        des_core::defer_wake(transport_key, TransportEvent::SendMessage { message: msg });
+    } else {
+        scheduler_handle.schedule(
+            SimTime::zero(),
+            transport_key,
+            TransportEvent::SendMessage { message: msg },
+        );
+    }
+}
+
 /// A server endpoint is a `des-core` component that receives `TransportEvent`s and
 /// dispatches unary RPCs to a `Router`.
 pub struct ServerEndpoint {
@@ -36,9 +65,9 @@ pub struct ServerEndpoint {
 }
 
 enum ServerStreamState {
-    ClientStreaming(ServerClientStreamState),
-    ServerStreaming(ServerServerStreamState),
-    BidiStreaming(ServerBidiStreamState),
+    Client(ServerClientStreamState),
+    Server(ServerServerStreamState),
+    Bidi(ServerBidiStreamState),
 }
 
 struct ServerClientStreamState {
@@ -101,12 +130,36 @@ impl ServerEndpoint {
 impl Component for ServerEndpoint {
     type Event = TransportEvent;
 
+    #[allow(clippy::single_match)]
     fn process_event(
         &mut self,
         _self_id: Key<Self::Event>,
         event: &Self::Event,
         scheduler: &mut Scheduler,
     ) {
+        let send_stream_frame = |scheduler: &mut Scheduler,
+                                 transport_key: Key<TransportEvent>,
+                                 server_ep: EndpointId,
+                                 client_ep: EndpointId,
+                                 stream_id: &str,
+                                 frame: StreamFrameWire| {
+            let msg = TransportMessage::new(
+                0,
+                server_ep,
+                client_ep,
+                encode_stream_frame(&frame).to_vec(),
+                scheduler.time(),
+                MessageType::RpcStreamFrame,
+            )
+            .with_correlation_id(stream_id.to_string());
+
+            scheduler.schedule(
+                SimTime::zero(),
+                transport_key,
+                TransportEvent::SendMessage { message: msg },
+            );
+        };
+
         match event {
             TransportEvent::MessageDelivered { message } => match message.message_type {
                 MessageType::UnaryRequest => {
@@ -262,33 +315,25 @@ impl Component for ServerEndpoint {
                                       client_ep: EndpointId,
                                       stream_id: &str,
                                       status: Status| {
-                        let close = StreamFrameWire {
-                            stream_id: stream_id.to_string(),
-                            direction: StreamDirection::ServerToClient,
-                            seq: 1,
-                            kind: StreamFrameKind::Close,
-                            method: None,
-                            metadata: Vec::new(),
-                            payload: Bytes::new(),
-                            status_ok: false,
-                            status_code: status.code(),
-                            status_message: status.message().to_string(),
-                        };
-                        let msg = TransportMessage::new(
-                            0,
+                        send_stream_frame(
+                            scheduler,
+                            transport_key,
                             server_ep,
                             client_ep,
-                            encode_stream_frame(&close).to_vec(),
-                            scheduler.time(),
-                            MessageType::RpcStreamFrame,
+                            stream_id,
+                            StreamFrameWire {
+                                stream_id: stream_id.to_string(),
+                                direction: StreamDirection::ServerToClient,
+                                seq: 1,
+                                kind: StreamFrameKind::Close,
+                                method: None,
+                                metadata: Vec::new(),
+                                payload: Bytes::new(),
+                                status_ok: false,
+                                status_code: status.code(),
+                                status_message: status.message().to_string(),
+                            },
                         )
-                        .with_correlation_id(stream_id.to_string());
-
-                        scheduler.schedule(
-                            SimTime::zero(),
-                            transport_key,
-                            TransportEvent::SendMessage { message: msg },
-                        );
                     };
 
                     match frame.kind {
@@ -318,7 +363,7 @@ impl Component for ServerEndpoint {
 
                                 self.streams.insert(
                                     stream_id.clone(),
-                                    ServerStreamState::BidiStreaming(ServerBidiStreamState {
+                                    ServerStreamState::Bidi(ServerBidiStreamState {
                                         // Open consumes seq=0.
                                         next_expected_c2s: 1,
                                         reorder: BTreeMap::new(),
@@ -364,28 +409,14 @@ impl Component for ServerEndpoint {
                                         h(req).await;
 
                                     let send_frame = |frame: StreamFrameWire| {
-                                        let msg = TransportMessage::new(
-                                            0,
+                                        send_stream_frame_from_task(
+                                            &scheduler_handle,
+                                            transport_key,
                                             server_ep,
                                             client_ep,
-                                            encode_stream_frame(&frame).to_vec(),
-                                            util::now(&scheduler_handle),
-                                            MessageType::RpcStreamFrame,
+                                            &stream_id_for_task,
+                                            frame,
                                         )
-                                        .with_correlation_id(stream_id_for_task.clone());
-
-                                        if des_core::scheduler::in_scheduler_context() {
-                                            des_core::defer_wake(
-                                                transport_key,
-                                                TransportEvent::SendMessage { message: msg },
-                                            );
-                                        } else {
-                                            scheduler_handle.schedule(
-                                                SimTime::zero(),
-                                                transport_key,
-                                                TransportEvent::SendMessage { message: msg },
-                                            );
-                                        }
                                     };
 
                                     // Open S->C.
@@ -482,7 +513,7 @@ impl Component for ServerEndpoint {
                             if let Some(h) = self.router.server_streaming(&method).map(Arc::clone) {
                                 self.streams.insert(
                                     stream_id.clone(),
-                                    ServerStreamState::ServerStreaming(ServerServerStreamState {
+                                    ServerStreamState::Server(ServerServerStreamState {
                                         handler: h,
                                         // Open consumes seq=0.
                                         next_expected_c2s: 1,
@@ -506,7 +537,7 @@ impl Component for ServerEndpoint {
 
                                 self.streams.insert(
                                     stream_id.clone(),
-                                    ServerStreamState::ClientStreaming(ServerClientStreamState {
+                                    ServerStreamState::Client(ServerClientStreamState {
                                         // Open consumes seq=0.
                                         next_expected_c2s: 1,
                                         reorder: BTreeMap::new(),
@@ -678,7 +709,7 @@ impl Component for ServerEndpoint {
                             };
 
                             match state {
-                                ServerStreamState::ClientStreaming(state) => {
+                                ServerStreamState::Client(state) => {
                                     let mut remove_stream = false;
 
                                     if state.reorder.len() >= MAX_REORDER_FRAMES {
@@ -723,7 +754,7 @@ impl Component for ServerEndpoint {
                                         self.streams.remove(&stream_id);
                                     }
                                 }
-                                ServerStreamState::BidiStreaming(state) => {
+                                ServerStreamState::Bidi(state) => {
                                     let mut remove_stream = false;
 
                                     if state.reorder.len() >= MAX_REORDER_FRAMES {
@@ -768,7 +799,7 @@ impl Component for ServerEndpoint {
                                         self.streams.remove(&stream_id);
                                     }
                                 }
-                                ServerStreamState::ServerStreaming(state) => {
+                                ServerStreamState::Server(state) => {
                                     if state.reorder.len() >= MAX_REORDER_FRAMES {
                                         self.streams.remove(&stream_id);
                                         return;
@@ -884,32 +915,14 @@ impl Component for ServerEndpoint {
                                             };
 
                                             let send_frame = |frame: StreamFrameWire| {
-                                                let msg = TransportMessage::new(
-                                                    0,
+                                                send_stream_frame_from_task(
+                                                    &scheduler_handle,
+                                                    transport_key,
                                                     server_ep,
                                                     client_ep,
-                                                    encode_stream_frame(&frame).to_vec(),
-                                                    util::now(&scheduler_handle),
-                                                    MessageType::RpcStreamFrame,
+                                                    &stream_id_for_task,
+                                                    frame,
                                                 )
-                                                .with_correlation_id(stream_id_for_task.clone());
-
-                                                if des_core::scheduler::in_scheduler_context() {
-                                                    des_core::defer_wake(
-                                                        transport_key,
-                                                        TransportEvent::SendMessage {
-                                                            message: msg,
-                                                        },
-                                                    );
-                                                } else {
-                                                    scheduler_handle.schedule(
-                                                        SimTime::zero(),
-                                                        transport_key,
-                                                        TransportEvent::SendMessage {
-                                                            message: msg,
-                                                        },
-                                                    );
-                                                }
                                             };
 
                                             send_frame(open);

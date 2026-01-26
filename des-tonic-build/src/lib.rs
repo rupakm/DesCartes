@@ -7,6 +7,12 @@ pub struct Builder {
     compile_well_known_types: bool,
 }
 
+impl Default for Builder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Builder {
     pub fn new() -> Self {
         let out_dir = std::env::var_os("OUT_DIR")
@@ -63,15 +69,14 @@ impl prost_build::ServiceGenerator for DesTonicServiceGenerator {
         for method in &service.methods {
             let const_name = format!("METHOD_{}", method.proto_name.to_shouty_snake_case());
             let path = format!("/{}/{}", fq_service, method.proto_name);
-            buf.push_str(&format!("pub const {}: &str = \"{}\";\n", const_name, path));
+            buf.push_str(&format!("pub const {const_name}: &str = \"{path}\";\n"));
         }
 
-        buf.push_str(&format!("\npub mod {}_server {{\n", service_snake));
+        buf.push_str(&format!("\npub mod {service_snake}_server {{\n"));
         buf.push_str("    use super::*;\n\n");
         buf.push_str("    #[::des_tonic::async_trait]\n");
         buf.push_str(&format!(
-            "    pub trait {}: Send + Sync + 'static {{\n",
-            service_name
+            "    pub trait {service_name}: Send + Sync + 'static {{\n"
         ));
 
         for method in &service.methods {
@@ -81,37 +86,34 @@ impl prost_build::ServiceGenerator for DesTonicServiceGenerator {
 
             let (req_ty, resp_ty) = match (method.client_streaming, method.server_streaming) {
                 (false, false) => (
-                    format!("::tonic::Request<{}>", req),
-                    format!("::tonic::Response<{}>", resp),
+                    format!("::tonic::Request<{req}>"),
+                    format!("::tonic::Response<{resp}>"),
                 ),
                 (false, true) => (
-                    format!("::tonic::Request<{}>", req),
-                    format!("::tonic::Response<::des_tonic::DesStreaming<{}>>", resp),
+                    format!("::tonic::Request<{req}>"),
+                    format!("::tonic::Response<::des_tonic::DesStreaming<{resp}>>"),
                 ),
                 (true, false) => (
-                    format!("::tonic::Request<::des_tonic::DesStreaming<{}>>", req),
-                    format!("::tonic::Response<{}>", resp),
+                    format!("::tonic::Request<::des_tonic::DesStreaming<{req}>>"),
+                    format!("::tonic::Response<{resp}>"),
                 ),
                 (true, true) => (
-                    format!("::tonic::Request<::des_tonic::DesStreaming<{}>>", req),
-                    format!("::tonic::Response<::des_tonic::DesStreaming<{}>>", resp),
+                    format!("::tonic::Request<::des_tonic::DesStreaming<{req}>>"),
+                    format!("::tonic::Response<::des_tonic::DesStreaming<{resp}>>"),
                 ),
             };
 
             buf.push_str(&format!(
-                "        async fn {}(&self, request: {}) -> Result<{}, ::tonic::Status>;\n\n",
-                method_snake, req_ty, resp_ty
+                "        async fn {method_snake}(&self, request: {req_ty}) -> Result<{resp_ty}, ::tonic::Status>;\n\n",
             ));
         }
 
         buf.push_str("    }\n\n");
         buf.push_str(&format!(
-            "    pub struct {}Server<T> {{\n        inner: ::std::sync::Arc<T>,\n    }}\n\n",
-            service_name
+            "    pub struct {service_name}Server<T> {{\n        inner: ::std::sync::Arc<T>,\n    }}\n\n"
         ));
         buf.push_str(&format!(
-            "    impl<T: {}> {}Server<T> {{\n",
-            service_name, service_name
+            "    impl<T: {service_name}> {service_name}Server<T> {{\n"
         ));
         buf.push_str("        pub fn new(inner: T) -> Self {\n");
         buf.push_str("            Self { inner: ::std::sync::Arc::new(inner) }\n");
@@ -130,8 +132,7 @@ impl prost_build::ServiceGenerator for DesTonicServiceGenerator {
             };
 
             buf.push_str(&format!(
-                "                .{}({}, self.inner.clone(), |svc, req| async move {{\n                    svc.{}(req).await\n                }})\n",
-                add, const_name, method_snake
+                "                .{add}({const_name}, self.inner.clone(), |svc, req| async move {{\n                    svc.{method_snake}(req).await\n                }})\n",
             ));
         }
 
@@ -140,18 +141,17 @@ impl prost_build::ServiceGenerator for DesTonicServiceGenerator {
         buf.push_str("    }\n");
         buf.push_str("}\n");
 
-        buf.push_str(&format!("\npub mod {}_client {{\n", service_snake));
+        buf.push_str(&format!("\npub mod {service_snake}_client {{\n"));
         buf.push_str("    use super::*;\n\n");
         buf.push_str("    #[derive(Clone)]\n");
         buf.push_str(&format!(
-            "    pub struct {}Client {{\n        inner: ::des_tonic::Channel,\n        timeout: ::std::option::Option<::std::time::Duration>,\n    }}\n\n",
-            service_name
+            "    pub struct {service_name}Client {{\n        inner: ::des_tonic::Channel,\n        timeout: ::std::option::Option<::std::time::Duration>,\n    }}\n\n"
         ));
 
-        buf.push_str(&format!("    impl {}Client {{\n", service_name));
-        buf.push_str(&format!(
-            "        pub fn new(inner: ::des_tonic::Channel) -> Self {{\n            Self {{ inner, timeout: None }}\n        }}\n\n"
-        ));
+        buf.push_str(&format!("    impl {service_name}Client {{\n"));
+        buf.push_str(
+            "        pub fn new(inner: ::des_tonic::Channel) -> Self {\n            Self { inner, timeout: None }\n        }\n\n",
+        );
         buf.push_str(
             "        pub fn with_timeout(mut self, timeout: ::std::time::Duration) -> Self {\n            self.timeout = Some(timeout);\n            self\n        }\n\n",
         );
@@ -165,45 +165,37 @@ impl prost_build::ServiceGenerator for DesTonicServiceGenerator {
             match (method.client_streaming, method.server_streaming) {
                 (false, false) => {
                     buf.push_str(&format!(
-                        "        pub async fn {}(&self, request: impl ::des_tonic::IntoRequest<{}>) -> Result<::tonic::Response<{}>, ::tonic::Status> {{\n",
-                        method_snake, req, resp
+                        "        pub async fn {method_snake}(&self, request: impl ::des_tonic::IntoRequest<{req}>) -> Result<::tonic::Response<{resp}>, ::tonic::Status> {{\n",
                     ));
                     buf.push_str(&format!(
-                        "            self.inner.unary_prost({}, request.into_request(), self.timeout).await\n",
-                        const_name
+                        "            self.inner.unary_prost({const_name}, request.into_request(), self.timeout).await\n",
                     ));
                     buf.push_str("        }\n\n");
                 }
                 (false, true) => {
                     buf.push_str(&format!(
-                        "        pub async fn {}(&self, request: impl ::des_tonic::IntoRequest<{}>) -> Result<::tonic::Response<::des_tonic::DesStreaming<{}>>, ::tonic::Status> {{\n",
-                        method_snake, req, resp
+                        "        pub async fn {method_snake}(&self, request: impl ::des_tonic::IntoRequest<{req}>) -> Result<::tonic::Response<::des_tonic::DesStreaming<{resp}>>, ::tonic::Status> {{\n",
                     ));
                     buf.push_str(&format!(
-                        "            self.inner.server_streaming_prost({}, request.into_request(), self.timeout).await\n",
-                        const_name
+                        "            self.inner.server_streaming_prost({const_name}, request.into_request(), self.timeout).await\n",
                     ));
                     buf.push_str("        }\n\n");
                 }
                 (true, false) => {
                     buf.push_str(&format!(
-                        "        pub async fn {}(&self) -> Result<(::des_tonic::stream::Sender<{}>, ::des_tonic::ClientResponseFuture<{}>), ::tonic::Status> {{\n",
-                        method_snake, req, resp
+                        "        pub async fn {method_snake}(&self) -> Result<(::des_tonic::stream::Sender<{req}>, ::des_tonic::ClientResponseFuture<{resp}>), ::tonic::Status> {{\n",
                     ));
                     buf.push_str(&format!(
-                        "            self.inner.client_streaming_prost({}, self.timeout).await\n",
-                        const_name
+                        "            self.inner.client_streaming_prost({const_name}, self.timeout).await\n",
                     ));
                     buf.push_str("        }\n\n");
                 }
                 (true, true) => {
                     buf.push_str(&format!(
-                        "        pub async fn {}(&self) -> Result<(::des_tonic::stream::Sender<{}>, ::tonic::Response<::des_tonic::DesStreaming<{}>>), ::tonic::Status> {{\n",
-                        method_snake, req, resp
+                        "        pub async fn {method_snake}(&self) -> Result<(::des_tonic::stream::Sender<{req}>, ::tonic::Response<::des_tonic::DesStreaming<{resp}>>), ::tonic::Status> {{\n",
                     ));
                     buf.push_str(&format!(
-                        "            self.inner.bidirectional_streaming_prost({}, self.timeout).await\n",
-                        const_name
+                        "            self.inner.bidirectional_streaming_prost({const_name}, self.timeout).await\n",
                     ));
                     buf.push_str("        }\n\n");
                 }

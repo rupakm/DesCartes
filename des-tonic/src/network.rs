@@ -8,7 +8,6 @@ use des_components::transport::{LatencyJitterModel, SimpleNetworkModel};
 ///
 /// These helpers let callers install common network models without importing
 /// `des-components` types directly.
-
 /// Simple deterministic network model with constant latency and packet loss.
 pub fn simple(base_latency: Duration, packet_loss_rate: f64, seed: u64) -> Box<dyn NetworkModel> {
     Box::new(SimpleNetworkModel::with_seed(

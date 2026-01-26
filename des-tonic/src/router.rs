@@ -82,7 +82,11 @@ impl Router {
 
                 let resp = f(svc, req).await?;
                 let (metadata, msg, extensions) = resp.into_parts();
-                Ok(Response::from_parts(metadata, Bytes::from(msg.encode_to_vec()), extensions))
+                Ok(Response::from_parts(
+                    metadata,
+                    Bytes::from(msg.encode_to_vec()),
+                    extensions,
+                ))
             }
         })
     }
@@ -211,7 +215,11 @@ impl Router {
                 let req = Request::from_parts(metadata, extensions, typed_stream);
                 let resp = f(svc, req).await?;
                 let (metadata, msg, extensions) = resp.into_parts();
-                Ok(Response::from_parts(metadata, Bytes::from(msg.encode_to_vec()), extensions))
+                Ok(Response::from_parts(
+                    metadata,
+                    Bytes::from(msg.encode_to_vec()),
+                    extensions,
+                ))
             }
         })
     }

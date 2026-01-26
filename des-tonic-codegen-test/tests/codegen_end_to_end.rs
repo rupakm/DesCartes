@@ -118,7 +118,7 @@ fn codegen_end_to_end() {
         let bidi_out_task = bidi_out.clone();
 
         des_tokio::task::spawn_local(async move {
-            let mut client = client;
+            let client = client;
             let unary = client.unary(pb::Num { v: 41 }).await.unwrap().into_inner();
             *unary_out_task.lock().unwrap() = Some(unary.v);
 

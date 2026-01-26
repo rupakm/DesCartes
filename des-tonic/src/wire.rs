@@ -172,9 +172,9 @@ pub fn encode_unary_request(msg: &UnaryRequestWire) -> Bytes {
 }
 
 pub fn decode_unary_request(mut bytes: Bytes) -> Result<UnaryRequestWire, Status> {
-    let method = get_string(&mut bytes).map_err(|e| Status::internal(e))?;
-    let metadata = get_kv(&mut bytes).map_err(|e| Status::internal(e))?;
-    let payload = get_bytes(&mut bytes).map_err(|e| Status::internal(e))?;
+    let method = get_string(&mut bytes).map_err(Status::internal)?;
+    let metadata = get_kv(&mut bytes).map_err(Status::internal)?;
+    let payload = get_bytes(&mut bytes).map_err(Status::internal)?;
     Ok(UnaryRequestWire {
         method,
         metadata,
@@ -197,11 +197,11 @@ pub fn decode_unary_response(mut bytes: Bytes) -> Result<UnaryResponseWire, Stat
         return Err(Status::internal("truncated"));
     }
     let ok = bytes.get_u8() != 0;
-    let code_u32 = get_u32(&mut bytes).map_err(|e| Status::internal(e))?;
+    let code_u32 = get_u32(&mut bytes).map_err(Status::internal)?;
     let code = Code::from_i32(code_u32 as i32);
-    let message = get_string(&mut bytes).map_err(|e| Status::internal(e))?;
-    let metadata = get_kv(&mut bytes).map_err(|e| Status::internal(e))?;
-    let payload = get_bytes(&mut bytes).map_err(|e| Status::internal(e))?;
+    let message = get_string(&mut bytes).map_err(Status::internal)?;
+    let metadata = get_kv(&mut bytes).map_err(Status::internal)?;
+    let payload = get_bytes(&mut bytes).map_err(Status::internal)?;
 
     Ok(UnaryResponseWire {
         ok,
@@ -239,7 +239,7 @@ pub fn encode_stream_frame(frame: &StreamFrameWire) -> Bytes {
     put_kv(&mut buf, &frame.metadata);
     put_bytes(&mut buf, &frame.payload);
 
-    if frame.kind == StreamFrameKind::Close {
+    if frame.kind == StreamFrameKind::Close || frame.kind == StreamFrameKind::Cancel {
         buf.put_u8(if frame.status_ok { 1 } else { 0 });
         put_u32(&mut buf, frame.status_code as u32);
         put_string(&mut buf, &frame.status_message);
@@ -280,15 +280,16 @@ pub fn decode_stream_frame(mut bytes: Bytes) -> Result<StreamFrameWire, Status> 
     let metadata = get_kv(&mut bytes).map_err(Status::internal)?;
     let payload = get_bytes(&mut bytes).map_err(Status::internal)?;
 
-    let (status_ok, status_code, status_message) = if kind == StreamFrameKind::Close {
-        let status_ok = get_u8(&mut bytes).map_err(Status::internal)? != 0;
-        let code_u32 = get_u32(&mut bytes).map_err(Status::internal)?;
-        let status_code = Code::from_i32(code_u32 as i32);
-        let status_message = get_string(&mut bytes).map_err(Status::internal)?;
-        (status_ok, status_code, status_message)
-    } else {
-        (true, Code::Ok, String::new())
-    };
+    let (status_ok, status_code, status_message) =
+        if kind == StreamFrameKind::Close || kind == StreamFrameKind::Cancel {
+            let status_ok = get_u8(&mut bytes).map_err(Status::internal)? != 0;
+            let code_u32 = get_u32(&mut bytes).map_err(Status::internal)?;
+            let status_code = Code::from_i32(code_u32 as i32);
+            let status_message = get_string(&mut bytes).map_err(Status::internal)?;
+            (status_ok, status_code, status_message)
+        } else {
+            (true, Code::Ok, String::new())
+        };
 
     Ok(StreamFrameWire {
         stream_id,
@@ -372,9 +373,9 @@ mod tests {
             method: None,
             metadata: Vec::new(),
             payload: Bytes::new(),
-            status_ok: true,
-            status_code: Code::Ok,
-            status_message: String::new(),
+            status_ok: false,
+            status_code: Code::Cancelled,
+            status_message: "deadline exceeded".to_string(),
         });
     }
 

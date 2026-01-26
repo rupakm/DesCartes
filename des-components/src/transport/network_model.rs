@@ -33,7 +33,7 @@ pub trait NetworkModel: Send + Sync {
 }
 
 /// Simple network model with configurable latency and packet loss
-/// Simple networks are FIFO by construction, since each packet is delivered a constant 
+/// Simple networks are FIFO by construction, since each packet is delivered a constant
 /// base latency later. The only problem might be that multiple packets are scheduled at the same time
 /// and the DES uses a non-FIFO scheduler
 pub struct SimpleNetworkModel {
@@ -210,34 +210,31 @@ impl NetworkModel for LatencyJitterModel {
         // Clone config values to avoid holding immutable borrow
         let config = self.get_config(from, to).clone();
         let key = (from, to);
-        let current_time = 
-            max(
-                *self.queue_times.get(&key).unwrap_or(&Duration::ZERO),
-                message.sent_at.as_duration()
-            );
+        let current_time = max(
+            *self.queue_times.get(&key).unwrap_or(&Duration::ZERO),
+            message.sent_at.as_duration(),
+        );
 
         let base_ms = config.base_latency.as_millis() as f64;
 
-        let latency = 
-            if config.jitter_factor > 0.0 {
-                let jitter_std = base_ms * config.jitter_factor;
-                let normal = Normal::new(base_ms, jitter_std)
-                    .unwrap_or_else(|_| Normal::new(base_ms, 1.0).unwrap());
-                // the max is to ensure the latency is not 0
-                let latency_ms = normal.sample(&mut self.rng).max(base_ms/10.0);
-                Duration::from_millis(latency_ms as u64)
-            } else {
-                config.base_latency
-            };
-        let bwdelay = 
-            if config.bandwidth_bps > 0 {
-                let bytes = message.size() as u64;
-                let seconds = bytes as f64 / config.bandwidth_bps as f64;
-                Duration::from_secs_f64(seconds)
-            } else {
-                Duration::ZERO
-            };
-        
+        let latency = if config.jitter_factor > 0.0 {
+            let jitter_std = base_ms * config.jitter_factor;
+            let normal = Normal::new(base_ms, jitter_std)
+                .unwrap_or_else(|_| Normal::new(base_ms, 1.0).unwrap());
+            // the max is to ensure the latency is not 0
+            let latency_ms = normal.sample(&mut self.rng).max(base_ms / 10.0);
+            Duration::from_millis(latency_ms as u64)
+        } else {
+            config.base_latency
+        };
+        let bwdelay = if config.bandwidth_bps > 0 {
+            let bytes = message.size() as u64;
+            let seconds = bytes as f64 / config.bandwidth_bps as f64;
+            Duration::from_secs_f64(seconds)
+        } else {
+            Duration::ZERO
+        };
+
         let total_time = current_time + latency + bwdelay;
         self.queue_times.insert(key, total_time);
         total_time
@@ -365,5 +362,4 @@ mod tests {
         // messages are delivered in FIFO order
         assert!(l1 < l2);
     }
-
 }

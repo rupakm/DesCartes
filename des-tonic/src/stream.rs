@@ -2,6 +2,8 @@ use des_tokio::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use tonic::Status;
 
+type TypedSender<T> = Arc<Mutex<Option<mpsc::Sender<Result<T, Status>>>>>;
+
 pub fn channel<T>(cap: usize) -> (Sender<T>, DesStreaming<T>) {
     let (tx, rx) = mpsc::channel::<Result<T, Status>>(cap);
     (
@@ -18,7 +20,7 @@ pub fn channel<T>(cap: usize) -> (Sender<T>, DesStreaming<T>) {
 /// either normal stream items or an explicit error.
 #[derive(Debug, Clone)]
 pub struct Sender<T> {
-    inner: Arc<Mutex<Option<mpsc::Sender<Result<T, Status>>>>>,
+    inner: TypedSender<T>,
 }
 
 impl<T> Sender<T> {
@@ -146,19 +148,13 @@ mod tests {
             tx.close();
 
             if let Some(item) = rx.next().await {
-                out2.lock()
-                    .unwrap()
-                    .push(item.map_err(|s| s.code()));
+                out2.lock().unwrap().push(item.map_err(|s| s.code()));
             }
             if let Some(item) = rx.next().await {
-                out2.lock()
-                    .unwrap()
-                    .push(item.map_err(|s| s.code()));
+                out2.lock().unwrap().push(item.map_err(|s| s.code()));
             }
             if let Some(item) = rx.next().await {
-                out2.lock()
-                    .unwrap()
-                    .push(item.map_err(|s| s.code()));
+                out2.lock().unwrap().push(item.map_err(|s| s.code()));
             }
         });
 

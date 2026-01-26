@@ -26,7 +26,6 @@ pub async fn wait_for_endpoint(
             return Some(ep);
         }
 
-
         match deadline {
             None => {
                 registry.changed().await;
@@ -38,7 +37,10 @@ pub async fn wait_for_endpoint(
                 }
 
                 let remaining = d.saturating_duration_since(now);
-                if des_tokio::time::timeout(remaining, registry.changed()).await.is_err() {
+                if des_tokio::time::timeout(remaining, registry.changed())
+                    .await
+                    .is_err()
+                {
                     return None;
                 }
             }

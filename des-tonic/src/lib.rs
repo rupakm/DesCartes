@@ -5,10 +5,12 @@
 //! Design goals:
 //! - Close to tonic's `Request`/`Response`/`Status` types.
 //! - Deterministic and deadlock-free scheduling under DES.
-//! - Unary-only RPCs.
+//! - Unary + streaming RPCs.
 //!
 //! This crate does **not** implement HTTP/2 or gRPC framing. Instead it uses the
 //! `des-components` simulated transport layer to exchange binary payloads.
+
+#![allow(clippy::result_large_err)]
 
 mod addr;
 pub mod channel;

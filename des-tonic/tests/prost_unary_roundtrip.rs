@@ -20,7 +20,10 @@ struct EchoResponse {
 
 struct Svc;
 
-async fn unary_echo(_svc: Arc<Svc>, req: Request<EchoRequest>) -> Result<Response<EchoResponse>, Status> {
+async fn unary_echo(
+    _svc: Arc<Svc>,
+    req: Request<EchoRequest>,
+) -> Result<Response<EchoResponse>, Status> {
     let v = req.into_inner().v;
     Ok(Response::new(EchoResponse { v: v + 1 }))
 }
