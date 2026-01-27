@@ -39,8 +39,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Protobuf
-# Keep aligned with tonic's prost major/minor to avoid duplicate versions.
-prost = "0.12"
+# Keep aligned with the tonic workspace's prost major/minor.
+prost = "0.14.3"
 
 # Logging and tracing
 tracing = "0.1.44"

@@ -175,5 +175,4 @@ fn main() {
     });
 
     Executor::timed(SimTime::from_millis(200)).execute(&mut sim);
-
 }
