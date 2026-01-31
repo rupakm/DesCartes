@@ -1,13 +1,14 @@
-//! Simulation-specific metrics collection using standard metrics ecosystem
+//! In-memory, simulation-oriented metrics collection.
 //!
-//! This module provides a thin wrapper around the standard `metrics` crate,
-//! adding simulation-specific functionality while leveraging battle-tested
-//! metrics infrastructure.
+//! `SimulationMetrics` is a retrievable metrics store (counters, gauges, histograms) plus
+//! simulation-specific helpers like a `RequestTracker` and high-resolution latency histograms.
+//!
+//! If you want other crates to emit standard `metrics::*` macros and have them end up in a
+//! `SimulationMetrics` instance, use `des_metrics::SimulationRecorder`.
 
 use crate::request_tracker::{RequestTracker, RequestTrackerStats};
 use des_core::SimTime;
 use hdrhistogram::Histogram as HdrHistogram;
-use metrics::{counter, gauge, histogram};
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
@@ -24,6 +25,14 @@ impl MetricKey {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
+        Self {
+            name: name.to_string(),
+            labels: labels_map,
+        }
+    }
+
+    fn from_owned(name: &str, labels: &[(String, String)]) -> Self {
+        let labels_map = labels.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         Self {
             name: name.to_string(),
             labels: labels_map,
@@ -107,13 +116,13 @@ pub struct MetricsSnapshot {
     pub timestamp: SimTime,
 }
 
-/// Simulation-specific metrics collector that wraps the standard metrics ecosystem
+/// Retrievable metrics collector for simulations.
 #[derive(Debug)]
 pub struct SimulationMetrics {
     /// Request and attempt tracking for simulation analysis
     request_tracker: RequestTracker,
     /// High-resolution histograms for latency analysis
-    latency_histograms: HashMap<String, HdrHistogram<u64>>,
+    latency_histograms: HashMap<MetricKey, HdrHistogram<u64>>,
     /// Internal storage for retrievable metrics
     storage: MetricStorage,
     /// Simulation start time for relative timing
@@ -154,41 +163,7 @@ impl SimulationMetrics {
 
     /// Record a counter increment using the standard metrics crate
     pub fn increment_counter(&mut self, name: &str, labels: &[(&str, &str)]) {
-        // Store internally for retrieval
-        let key = MetricKey::new(name, labels);
-        *self.storage.counters.entry(key).or_insert(0) += 1;
-
-        // Also record in standard metrics for monitoring
-        // Convert everything to owned strings to satisfy the metrics macros
-        let name_owned = name.to_string();
-        match labels.len() {
-            0 => counter!(name_owned).increment(1),
-            1 => {
-                let k1 = labels[0].0.to_string();
-                let v1 = labels[0].1.to_string();
-                counter!(name_owned, k1 => v1).increment(1);
-            }
-            2 => {
-                let k1 = labels[0].0.to_string();
-                let v1 = labels[0].1.to_string();
-                let k2 = labels[1].0.to_string();
-                let v2 = labels[1].1.to_string();
-                counter!(name_owned, k1 => v1, k2 => v2).increment(1);
-            }
-            _ => {
-                // For more complex cases, build a flattened key
-                let key = format!(
-                    "{}_{}",
-                    name,
-                    labels
-                        .iter()
-                        .map(|(k, v)| format!("{k}_{v}"))
-                        .collect::<Vec<_>>()
-                        .join("_")
-                );
-                counter!(key).increment(1);
-            }
-        }
+        self.increment_counter_by(name, 1, labels)
     }
 
     /// Record a counter increment with a specific value
@@ -196,35 +171,28 @@ impl SimulationMetrics {
         // Store internally for retrieval
         let key = MetricKey::new(name, labels);
         *self.storage.counters.entry(key).or_insert(0) += value;
+    }
 
-        // Also record in standard metrics
-        let name_owned = name.to_string();
-        match labels.len() {
-            0 => counter!(name_owned).increment(value),
-            1 => {
-                let k1 = labels[0].0.to_string();
-                let v1 = labels[0].1.to_string();
-                counter!(name_owned, k1 => v1).increment(value);
-            }
-            2 => {
-                let k1 = labels[0].0.to_string();
-                let v1 = labels[0].1.to_string();
-                let k2 = labels[1].0.to_string();
-                let v2 = labels[1].1.to_string();
-                counter!(name_owned, k1 => v1, k2 => v2).increment(value);
-            }
-            _ => {
-                let key = format!(
-                    "{}_{}",
-                    name,
-                    labels
-                        .iter()
-                        .map(|(k, v)| format!("{k}_{v}"))
-                        .collect::<Vec<_>>()
-                        .join("_")
-                );
-                counter!(key).increment(value);
-            }
+    pub(crate) fn increment_counter_by_owned(
+        &mut self,
+        name: &str,
+        value: u64,
+        labels: &[(String, String)],
+    ) {
+        let key = MetricKey::from_owned(name, labels);
+        *self.storage.counters.entry(key).or_insert(0) += value;
+    }
+
+    pub(crate) fn set_counter_absolute_owned(
+        &mut self,
+        name: &str,
+        value: u64,
+        labels: &[(String, String)],
+    ) {
+        let key = MetricKey::from_owned(name, labels);
+        let entry = self.storage.counters.entry(key).or_insert(0);
+        if value > *entry {
+            *entry = value;
         }
     }
 
@@ -233,36 +201,27 @@ impl SimulationMetrics {
         // Store internally for retrieval
         let key = MetricKey::new(name, labels);
         self.storage.gauges.insert(key, value);
+    }
 
-        // Also record in standard metrics
-        let name_owned = name.to_string();
-        match labels.len() {
-            0 => gauge!(name_owned).set(value),
-            1 => {
-                let k1 = labels[0].0.to_string();
-                let v1 = labels[0].1.to_string();
-                gauge!(name_owned, k1 => v1).set(value);
-            }
-            2 => {
-                let k1 = labels[0].0.to_string();
-                let v1 = labels[0].1.to_string();
-                let k2 = labels[1].0.to_string();
-                let v2 = labels[1].1.to_string();
-                gauge!(name_owned, k1 => v1, k2 => v2).set(value);
-            }
-            _ => {
-                let key = format!(
-                    "{}_{}",
-                    name,
-                    labels
-                        .iter()
-                        .map(|(k, v)| format!("{k}_{v}"))
-                        .collect::<Vec<_>>()
-                        .join("_")
-                );
-                gauge!(key).set(value);
-            }
-        }
+    pub(crate) fn record_gauge_owned(
+        &mut self,
+        name: &str,
+        value: f64,
+        labels: &[(String, String)],
+    ) {
+        let key = MetricKey::from_owned(name, labels);
+        self.storage.gauges.insert(key, value);
+    }
+
+    pub(crate) fn increment_gauge_owned(
+        &mut self,
+        name: &str,
+        delta: f64,
+        labels: &[(String, String)],
+    ) {
+        let key = MetricKey::from_owned(name, labels);
+        let entry = self.storage.gauges.entry(key).or_insert(0.0);
+        *entry += delta;
     }
 
     /// Record a histogram value using the standard metrics crate
@@ -270,36 +229,16 @@ impl SimulationMetrics {
         // Store internally for retrieval
         let key = MetricKey::new(name, labels);
         self.storage.histograms.entry(key).or_default().push(value);
+    }
 
-        // Also record in standard metrics
-        let name_owned = name.to_string();
-        match labels.len() {
-            0 => histogram!(name_owned).record(value),
-            1 => {
-                let k1 = labels[0].0.to_string();
-                let v1 = labels[0].1.to_string();
-                histogram!(name_owned, k1 => v1).record(value);
-            }
-            2 => {
-                let k1 = labels[0].0.to_string();
-                let v1 = labels[0].1.to_string();
-                let k2 = labels[1].0.to_string();
-                let v2 = labels[1].1.to_string();
-                histogram!(name_owned, k1 => v1, k2 => v2).record(value);
-            }
-            _ => {
-                let key = format!(
-                    "{}_{}",
-                    name,
-                    labels
-                        .iter()
-                        .map(|(k, v)| format!("{k}_{v}"))
-                        .collect::<Vec<_>>()
-                        .join("_")
-                );
-                histogram!(key).record(value);
-            }
-        }
+    pub(crate) fn record_histogram_owned(
+        &mut self,
+        name: &str,
+        value: f64,
+        labels: &[(String, String)],
+    ) {
+        let key = MetricKey::from_owned(name, labels);
+        self.storage.histograms.entry(key).or_default().push(value);
     }
 
     /// Record a duration as a histogram (converts to milliseconds)
@@ -310,16 +249,12 @@ impl SimulationMetrics {
 
     /// Record a latency with high-resolution histogram for detailed analysis
     pub fn record_latency(&mut self, name: &str, latency: Duration, labels: &[(&str, &str)]) {
-        // Record in standard metrics for monitoring
         self.record_duration(name, latency, labels);
 
-        // Also record in high-resolution histogram for detailed analysis
-        let histogram = self
-            .latency_histograms
-            .entry(name.to_string())
-            .or_insert_with(|| {
-                HdrHistogram::new_with_bounds(1, 60_000_000, 3).unwrap() // 1μs to 60s with 3 sig figs
-            });
+        let key = MetricKey::new(name, labels);
+        let histogram = self.latency_histograms.entry(key).or_insert_with(|| {
+            HdrHistogram::new_with_bounds(1, 60_000_000, 3).expect("hdrhistogram bounds are valid")
+        });
 
         let micros = latency.as_micros() as u64;
         if let Err(e) = histogram.record(micros) {
@@ -329,7 +264,44 @@ impl SimulationMetrics {
 
     /// Get high-resolution latency statistics for a specific metric
     pub fn get_latency_stats(&self, name: &str) -> Option<LatencyStats> {
-        self.latency_histograms.get(name).map(|hist| LatencyStats {
+        let mut combined: Option<HdrHistogram<u64>> = None;
+        for (k, h) in &self.latency_histograms {
+            if k.name != name {
+                continue;
+            }
+
+            match &mut combined {
+                None => {
+                    let mut c = HdrHistogram::new_with_bounds(1, 60_000_000, 3).ok()?;
+                    c.add(h).ok()?;
+                    combined = Some(c);
+                }
+                Some(c) => {
+                    c.add(h).ok()?;
+                }
+            }
+        }
+
+        combined.map(|hist| LatencyStats {
+            count: hist.len(),
+            min: Duration::from_micros(hist.min()),
+            max: Duration::from_micros(hist.max()),
+            mean: Duration::from_micros(hist.mean() as u64),
+            p50: Duration::from_micros(hist.value_at_quantile(0.5)),
+            p95: Duration::from_micros(hist.value_at_quantile(0.95)),
+            p99: Duration::from_micros(hist.value_at_quantile(0.99)),
+            p999: Duration::from_micros(hist.value_at_quantile(0.999)),
+            std_dev: Duration::from_micros(hist.stdev() as u64),
+        })
+    }
+
+    pub fn get_latency_stats_with_labels(
+        &self,
+        name: &str,
+        labels: &[(&str, &str)],
+    ) -> Option<LatencyStats> {
+        let key = MetricKey::new(name, labels);
+        self.latency_histograms.get(&key).map(|hist| LatencyStats {
             count: hist.len(),
             min: Duration::from_micros(hist.min()),
             max: Duration::from_micros(hist.max()),
@@ -453,7 +425,7 @@ impl SimulationMetrics {
             counters,
             gauges,
             histograms,
-            timestamp: SimTime::zero(), // TODO: Use actual simulation time
+            timestamp: des_core::scheduler::current_time().unwrap_or(SimTime::zero()),
         }
     }
 
@@ -712,6 +684,23 @@ mod tests {
     }
 
     #[test]
+    fn test_labels_more_than_two_are_preserved() {
+        let mut metrics = SimulationMetrics::new();
+        metrics.increment_counter(
+            "requests_total",
+            &[("service", "a"), ("method", "GET"), ("status", "200")],
+        );
+
+        assert_eq!(
+            metrics.get_counter(
+                "requests_total",
+                &[("status", "200"), ("method", "GET"), ("service", "a")]
+            ),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn test_metrics_retrieval() {
         let mut metrics = SimulationMetrics::new();
 
@@ -755,6 +744,27 @@ mod tests {
         assert!(stats.p95 <= stats.p99);
         assert!(stats.p99 <= stats.p999);
         assert!(stats.p999 <= stats.max);
+    }
+
+    #[test]
+    fn test_latency_stats_with_labels() {
+        let mut metrics = SimulationMetrics::new();
+        metrics.record_latency("latency", Duration::from_millis(10), &[("component", "a")]);
+        metrics.record_latency("latency", Duration::from_millis(20), &[("component", "b")]);
+
+        let a = metrics
+            .get_latency_stats_with_labels("latency", &[("component", "a")])
+            .unwrap();
+        assert_eq!(a.count, 1);
+
+        let b = metrics
+            .get_latency_stats_with_labels("latency", &[("component", "b")])
+            .unwrap();
+        assert_eq!(b.count, 1);
+
+        // Aggregated view includes both.
+        let all = metrics.get_latency_stats("latency").unwrap();
+        assert_eq!(all.count, 2);
     }
 
     #[test]

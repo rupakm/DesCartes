@@ -10,6 +10,7 @@
 pub mod error;
 pub mod export;
 pub mod mmk_time_series;
+pub mod recorder;
 pub mod request_tracker;
 pub mod simulation_metrics;
 
@@ -21,6 +22,7 @@ pub use mmk_time_series::{
 pub use request_tracker::{
     LatencyStats as RequestLatencyStats, RequestTracker, RequestTrackerStats,
 };
+pub use recorder::{with_simulation_metrics_recorder, SimulationRecorder};
 pub use simulation_metrics::{
     setup_prometheus_metrics, setup_prometheus_metrics_with_config, LatencyStats, SimulationMetrics,
 };

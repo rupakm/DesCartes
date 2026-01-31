@@ -20,3 +20,10 @@ quantiles = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+des-tokio = { path = "../des-tokio" }
+des-tower = { path = "../des-tower" }
+des-tonic = { path = "../des-tonic" }
+des-axum = { path = "../des-axum" }
+bytes = "1.0"
+tonic = "0.12"
+axum = "0.7"
