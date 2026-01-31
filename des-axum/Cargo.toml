@@ -1,0 +1,29 @@
+[package]
+name = "des-axum"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+des-core = { path = "../des-core" }
+des-components = { path = "../des-components" }
+des-tokio = { path = "../des-tokio" }
+
+axum = "0.7"
+
+bytes = "1.0"
+http = "1.0"
+http-body = "1.0"
+http-body-util = "0.1"
+
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+bincode = "1.3"
+
+tower = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

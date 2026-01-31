@@ -10,6 +10,7 @@ members = [
     "des-tonic-build",
     "des-tower",
     "des-tonic-codegen-test",
+    "des-axum",
 ]
 resolver = "2"
 
