@@ -56,8 +56,8 @@ echo ""
 publish_crate "descartes-core"
 
 # Tier 2: First-level dependencies
-publish_crate "descartes-metrics"
 publish_crate "descartes-tokio"
+publish_crate "descartes-metrics"
 
 # Tier 3: Second-level dependencies
 publish_crate "descartes-components"
