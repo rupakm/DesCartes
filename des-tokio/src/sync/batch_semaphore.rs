@@ -15,7 +15,7 @@ pub(crate) enum TryAcquireError {
 #[derive(Debug)]
 struct Waiter {
     waiter_id: u64,
-    task_id: u64,
+    //task_id: u64,
     required: usize,
     remaining: usize,
     waker: Waker,
@@ -272,7 +272,7 @@ impl std::future::Future for Acquire<'_> {
             state.next_waiter_id += 1;
             state.queue.push_back(Waiter {
                 waiter_id,
-                task_id,
+                //task_id,
                 required: self.permits,
                 remaining,
                 waker: cx.waker().clone(),
@@ -286,7 +286,7 @@ impl std::future::Future for Acquire<'_> {
         state.next_waiter_id += 1;
         state.queue.push_back(Waiter {
             waiter_id,
-            task_id,
+            //task_id,
             required: self.permits,
             remaining: self.permits,
             waker: cx.waker().clone(),

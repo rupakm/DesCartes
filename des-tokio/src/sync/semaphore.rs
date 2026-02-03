@@ -59,6 +59,15 @@ impl Semaphore {
             permits,
         })
     }
+
+    pub fn close(&self) {
+        self.inner.close();
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.inner.is_closed()
+    }
+
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

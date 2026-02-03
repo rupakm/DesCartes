@@ -21,7 +21,6 @@ fn stream_combinators_map_filter_take_collect() {
         drop(tx);
     });
 
-    let mut rx = rx;
     let _consumer = des_tokio::task::spawn(async move {
         let v = rx
             .map(|x| x * 2)
@@ -54,7 +53,6 @@ fn stream_combinators_fold_sum() {
         drop(tx);
     });
 
-    let mut rx = rx;
     let _consumer = des_tokio::task::spawn(async move {
         let sum = rx.take(10).fold(0u64, |acc, x| acc + x).await;
         *out2.lock().unwrap() = Some(sum);
