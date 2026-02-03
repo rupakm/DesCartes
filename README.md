@@ -1,3 +1,5 @@
+[![Rust](https://github.com/rupakm/DesCartes/actions/workflows/rust.yml/badge.svg)](https://github.com/rupakm/DesCartes/actions/workflows/rust.yml)
+
 # DesCartes — Deterministic, Replayable, Simulation for Rust
 
 DesCartes is a Rust workspace for building **deterministic**, **single-threaded** discrete-event simulations (DES) of distributed and concurrent systems. It provides a stand-in replacement for core Rust libraries (tokio, tower, tonic, etc.) so that systems using these libraries can be simulated deterministically.
