@@ -15,11 +15,14 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Rupak Majumdar and Codex"]
 license = "Apache-2.0"
-repository = "https://github.com/example/des-framework"
+repository = "https://github.com/rupakm/DesCartes"
+description = "A deterministic, replayable, discrete-event simulator for Rust"
+keywords = ["concurrency", "async", "server", "performance"]
+categories = ["concurrency", "development-tools::testing"]
 
 [workspace.dependencies]
 # Async runtime

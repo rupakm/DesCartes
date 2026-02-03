@@ -46,12 +46,8 @@ impl TeeConcurrencyRecorder {
 #[cfg(feature = "tokio")]
 impl ConcurrencyRecorder for TeeConcurrencyRecorder {
     fn record(&self, event: ConcurrencyEvent) {
-        for (i, r) in self.recorders.iter().enumerate() {
-            if i == 0 {
-                r.record(event.clone());
-            } else {
-                r.record(event.clone());
-            }
+        for r in self.recorders.iter() {
+            r.record(event.clone());
         }
     }
 }

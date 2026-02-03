@@ -53,7 +53,6 @@ fn mpsc_stream_combinators_are_replayable() {
 
                     let out2 = out2.clone();
                     des_tokio::thread::spawn(async move {
-                        let mut rx = rx;
                         let v = rx
                             .map(|x| x + 1)
                             .filter(|x| *x % 3 == 0)
@@ -119,7 +118,6 @@ fn mpsc_stream_combinators_are_replayable() {
 
                 let out2 = out2.clone();
                 des_tokio::thread::spawn(async move {
-                    let mut rx = rx;
                     let v = rx
                         .map(|x| x + 1)
                         .filter(|x| *x % 3 == 0)

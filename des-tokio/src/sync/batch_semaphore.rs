@@ -226,7 +226,7 @@ impl std::future::Future for Acquire<'_> {
             return std::task::Poll::Ready(Ok(()));
         }
 
-        let task_id = async_runtime::current_task_id()
+        let _task_id = async_runtime::current_task_id()
             .map(|t| t.0)
             .unwrap_or_else(|| panic!("des_tokio semaphore used outside async runtime polling"));
 

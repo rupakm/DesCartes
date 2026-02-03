@@ -1,5 +1,5 @@
 use des_core::async_runtime::RuntimeEvent;
-use des_core::{scheduler, Key, SchedulerHandle};
+use des_core::{scheduler, Key};
 
 use crate::runtime;
 
@@ -13,8 +13,4 @@ pub(crate) fn ensure_polled(runtime_key: Key<RuntimeEvent>) {
             sched.schedule_now(runtime_key, RuntimeEvent::Poll);
         });
     }
-}
-
-pub(crate) fn scheduler_handle() -> SchedulerHandle {
-    runtime::with_scheduler(|s| s.clone())
 }
