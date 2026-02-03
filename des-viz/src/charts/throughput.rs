@@ -1,5 +1,6 @@
 //! Throughput visualization charts
 
+use crate::charts::util::{metric_label, truncate_label};
 use crate::charts::ChartConfig;
 use crate::error::VizError;
 use des_metrics::simulation_metrics::MetricsSnapshot;
@@ -56,11 +57,7 @@ pub fn create_throughput_chart_with_config(
     // Extract counter data
     let mut chart_data: Vec<(String, u64)> = Vec::new();
     for (name, labels, value) in &snapshot.counters {
-        let label = if labels.is_empty() {
-            name.clone()
-        } else {
-            format!("{}:{}", name, format_labels(labels))
-        };
+        let label = metric_label(name, labels);
         chart_data.push((label, *value));
     }
 
@@ -111,23 +108,7 @@ pub fn create_throughput_chart_with_config(
     Ok(())
 }
 
-/// Format labels map as a string
-fn format_labels(labels: &std::collections::BTreeMap<String, String>) -> String {
-    labels
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-/// Truncate label to max length
-fn truncate_label(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
-}
+// formatting helpers live in `crate::charts::util`
 
 /// Format large numbers with K/M/B suffixes
 fn format_large_number(n: u64) -> String {

@@ -6,6 +6,7 @@
 use crate::charts::ChartConfig;
 use crate::error::VizError;
 use des_core::SimTime;
+use des_metrics::mmk_time_series as mmk;
 use plotters::prelude::*;
 use std::path::Path;
 
@@ -14,6 +15,15 @@ use std::path::Path;
 pub struct TimeSeriesPoint {
     pub timestamp: SimTime,
     pub value: f64,
+}
+
+impl From<mmk::TimeSeriesPoint> for TimeSeriesPoint {
+    fn from(p: mmk::TimeSeriesPoint) -> Self {
+        Self {
+            timestamp: p.timestamp,
+            value: p.value,
+        }
+    }
 }
 
 /// A complete time-series with metadata
@@ -32,6 +42,23 @@ impl TimeSeries {
             data,
             color,
         }
+    }
+
+    /// Build a `TimeSeries` from a `des-metrics` `TimeSeriesCollector`.
+    ///
+    /// This uses the collector's aggregated (EMA-smoothed) data.
+    pub fn from_mmk_collector(
+        name: impl Into<String>,
+        collector: &mmk::TimeSeriesCollector,
+        color: RGBColor,
+    ) -> Self {
+        let data = collector
+            .get_aggregated_data()
+            .iter()
+            .cloned()
+            .map(TimeSeriesPoint::from)
+            .collect::<Vec<_>>();
+        Self::new(name, data, color)
     }
 }
 

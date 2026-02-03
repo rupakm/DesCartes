@@ -1,5 +1,6 @@
 //! Percentile comparison charts
 
+use crate::charts::util::{metric_label, truncate_label};
 use crate::charts::ChartConfig;
 use crate::error::VizError;
 use des_metrics::simulation_metrics::MetricsSnapshot;
@@ -59,11 +60,7 @@ pub fn create_percentile_chart_with_config(
     let mut series_data: Vec<(String, Vec<(usize, f64)>)> = Vec::new();
 
     for (name, labels, stats) in &snapshot.histograms {
-        let label = if labels.is_empty() {
-            name.clone()
-        } else {
-            format!("{}:{}", name, format_labels(labels))
-        };
+        let label = metric_label(name, labels);
 
         let data = vec![(0, stats.median), (1, stats.p95), (2, stats.p99)];
 
@@ -83,7 +80,7 @@ pub fn create_percentile_chart_with_config(
         .margin(10)
         .x_label_area_size(60)
         .y_label_area_size(60)
-        .build_cartesian_2d(0usize..2usize, 0.0..max_value)
+        .build_cartesian_2d(0usize..3usize, 0.0..max_value)
         .map_err(|e| VizError::RenderingError(format!("Failed to build chart: {e}")))?;
 
     chart
@@ -135,23 +132,7 @@ pub fn create_percentile_chart_with_config(
     Ok(())
 }
 
-/// Format labels map as a string
-fn format_labels(labels: &std::collections::BTreeMap<String, String>) -> String {
-    labels
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-/// Truncate label to max length
-fn truncate_label(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
-}
+// formatting helpers live in `crate::charts::util`
 
 #[cfg(test)]
 mod tests {

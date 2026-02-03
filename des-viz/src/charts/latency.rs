@@ -1,5 +1,6 @@
 //! Latency visualization charts
 
+use crate::charts::util::{metric_label, truncate_label};
 use crate::charts::ChartConfig;
 use crate::error::VizError;
 use des_metrics::simulation_metrics::MetricsSnapshot;
@@ -56,12 +57,7 @@ pub fn create_latency_chart_with_config(
     // Extract latency data
     let mut chart_data: Vec<(String, f64, f64, f64, f64)> = Vec::new();
     for (name, labels, stats) in &snapshot.histograms {
-        let label = if labels.is_empty() {
-            name.clone()
-        } else {
-            format!("{}:{}", name, format_labels(labels))
-        };
-
+        let label = metric_label(name, labels);
         chart_data.push((label, stats.mean, stats.median, stats.p95, stats.p99));
     }
 
@@ -141,23 +137,7 @@ pub fn create_latency_chart_with_config(
     Ok(())
 }
 
-/// Format labels map as a string
-fn format_labels(labels: &std::collections::BTreeMap<String, String>) -> String {
-    labels
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-/// Truncate label to max length
-fn truncate_label(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
-}
+// formatting helpers live in `crate::charts::util`
 
 #[cfg(test)]
 mod tests {

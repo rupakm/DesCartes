@@ -369,6 +369,16 @@ fn html_escape(s: &str) -> String {
 mod tests {
     use super::*;
     use des_metrics::simulation_metrics::SimulationMetrics;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn make_temp_dir(prefix: &str) -> std::path::PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("{prefix}_{pid}_{n}"));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
 
     #[test]
     fn test_html_report_generation() {
@@ -380,22 +390,21 @@ mod tests {
         metrics.record_histogram("test_histogram", 123.45, &[("component", "test")]);
 
         let snapshot = metrics.get_metrics_snapshot();
-        let temp_dir = std::env::temp_dir();
-        let output_path = temp_dir.join("test_report.html");
+        let dir = make_temp_dir("des_viz_report_test");
+        let output_path = dir.join("report.html");
 
         let result = generate_html_report(&snapshot, &output_path);
         assert!(result.is_ok());
         assert!(output_path.exists());
 
         // Verify HTML content
-        let content = fs::read_to_string(&output_path).unwrap();
+        let content = fs::read_to_string(&output_path).expect("read generated report");
         assert!(content.contains("<!DOCTYPE html>"));
         assert!(content.contains("Simulation Metrics Report"));
         assert!(content.contains("test_counter"));
 
         // Cleanup
-        fs::remove_file(output_path).ok();
-        fs::remove_dir_all(temp_dir.join("charts")).ok();
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]

@@ -15,3 +15,7 @@ serde = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+des-axum = { path = "../des-axum" }
+des-tokio = { path = "../des-tokio" }
+metrics = { workspace = true }
+axum = "0.7"

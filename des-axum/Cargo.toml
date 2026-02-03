@@ -27,3 +27,9 @@ tower = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+des-metrics = { path = "../des-metrics" }
+des-tower = { path = "../des-tower" }
+metrics = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rand_distr = { workspace = true }
