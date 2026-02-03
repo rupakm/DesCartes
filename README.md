@@ -9,7 +9,7 @@ The core model contains:
 - Core data structures to create components and tasks.
 - Simulated time advances by processing scheduled events.
 - Simulation is deterministic by default (given source of randomness) and traces are recorded and replayable.
-- Async tasks (`async`/`await`) run on a simulated runtime (`des_tokio`) backed by the DES scheduler.
+- Async tasks (`async`/`await`) run on a simulated runtime (`descartes_tokio`) backed by the DES scheduler.
 - Exploration tooling: systematic exploration of the state space via record/replay.
 
 ## Key Properties
@@ -18,7 +18,7 @@ The core model contains:
 - **Single-threaded execution**: concurrency is modeled via interleaving, not OS threads.
 - **No event priorities**: same-time events are tie-broken deterministically (FIFO by default) with optional, seeded policies.
 - **Opt-in exploration**: record/replay and randomized scheduling are explicit, seeded, and isolated from default runs.
-- **Tokio-like façade**: `des_tokio` provides a subset of Tokio APIs backed by simulated time.
+- **Tokio-like façade**: `descartes_tokio` provides a subset of Tokio APIs backed by simulated time.
 
 ## Workspace Crates
 
@@ -52,7 +52,7 @@ cargo doc --workspace --open
 At the lowest layer (`des-core`), you schedule events and/or tasks, then run an executor.
 
 ```rust
-use des_core::{Execute, Executor, Simulation, SimTime};
+use descartes_core::{Execute, Executor, Simulation, SimTime};
 use std::time::Duration;
 
 let mut sim = Simulation::default();
@@ -61,18 +61,18 @@ let mut sim = Simulation::default();
 Executor::timed(SimTime::from_duration(Duration::from_secs(1))).execute(&mut sim);
 ```
 
-For async workloads, install `des_tokio` into a simulation and spawn async tasks that use simulated time:
+For async workloads, install `descartes_tokio` into a simulation and spawn async tasks that use simulated time:
 
 ```rust
-use des_core::{Execute, Executor, SimTime, Simulation};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
 use std::time::Duration;
 
 let mut sim = Simulation::default();
 
-des_tokio::runtime::install(&mut sim);
+descartes_tokio::runtime::install(&mut sim);
 
-des_tokio::task::spawn(async {
-    des_tokio::time::sleep(Duration::from_millis(10)).await;
+descartes_tokio::task::spawn(async {
+    descartes_tokio::time::sleep(Duration::from_millis(10)).await;
 });
 
 Executor::timed(SimTime::from_duration(Duration::from_millis(20))).execute(&mut sim);

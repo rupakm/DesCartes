@@ -1,12 +1,12 @@
 use std::sync::{Arc, Mutex};
 
-use des_core::{
+use descartes_core::{
     Component, Execute, Executor, Key, Scheduler, SimTime, Simulation, SimulationConfig,
     UniformRandomFrontierPolicy,
 };
 
-use des_explore::frontier::{RecordingFrontierPolicy, ReplayFrontierPolicy};
-use des_explore::trace::{TraceEvent, TraceMeta, TraceRecorder};
+use descartes_explore::frontier::{RecordingFrontierPolicy, ReplayFrontierPolicy};
+use descartes_explore::trace::{TraceEvent, TraceMeta, TraceRecorder};
 
 #[derive(Debug, Clone)]
 enum LogEvent {

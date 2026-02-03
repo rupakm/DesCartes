@@ -4,7 +4,7 @@
 //! (FIFO, priority-based) and capacity management.
 
 use crate::error::QueueError;
-use des_core::{RequestAttempt, SimTime};
+use descartes_core::{RequestAttempt, SimTime};
 use serde::{Deserialize, Serialize};
 use std::collections::{BinaryHeap, VecDeque};
 use uuid::Uuid;
@@ -156,9 +156,9 @@ pub trait Queue: Send {
 /// # Examples
 ///
 /// ```
-/// use des_components::queue::{FifoQueue, QueueItem, Queue};
-/// use des_components::{RequestAttempt, RequestAttemptId, RequestId};
-/// use des_core::SimTime;
+/// use descartes_components::queue::{FifoQueue, QueueItem, Queue};
+/// use descartes_components::{RequestAttempt, RequestAttemptId, RequestId};
+/// use descartes_core::SimTime;
 ///
 /// let mut queue = FifoQueue::new(Some(10)); // Capacity of 10
 /// let attempt = RequestAttempt::new(
@@ -194,7 +194,7 @@ impl FifoQueue {
     /// # Examples
     ///
     /// ```
-    /// use des_components::queue::FifoQueue;
+    /// use descartes_components::queue::FifoQueue;
     ///
     /// let bounded = FifoQueue::new(Some(100));
     /// let unbounded = FifoQueue::new(None);
@@ -273,7 +273,7 @@ impl Queue for FifoQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use des_core::{RequestAttemptId, RequestId};
+    use descartes_core::{RequestAttemptId, RequestId};
 
     fn create_test_item(id: u64, time: u64) -> QueueItem {
         let attempt = RequestAttempt::new(
@@ -473,9 +473,9 @@ impl Ord for PrioritizedItem {
 /// # Examples
 ///
 /// ```
-/// use des_components::queue::{PriorityQueue, QueueItem, Queue};
-/// use des_components::{RequestAttempt, RequestAttemptId, RequestId};
-/// use des_core::SimTime;
+/// use descartes_components::queue::{PriorityQueue, QueueItem, Queue};
+/// use descartes_components::{RequestAttempt, RequestAttemptId, RequestId};
+/// use descartes_core::SimTime;
 ///
 /// let mut queue = PriorityQueue::new(Some(10));
 /// let attempt = RequestAttempt::new(
@@ -512,7 +512,7 @@ impl PriorityQueue {
     /// # Examples
     ///
     /// ```
-    /// use des_components::queue::PriorityQueue;
+    /// use descartes_components::queue::PriorityQueue;
     ///
     /// let bounded = PriorityQueue::new(Some(100));
     /// let unbounded = PriorityQueue::new(None);
@@ -597,7 +597,7 @@ impl Queue for PriorityQueue {
 #[cfg(test)]
 mod priority_queue_tests {
     use super::*;
-    use des_core::{RequestAttemptId, RequestId};
+    use descartes_core::{RequestAttemptId, RequestId};
 
     fn create_test_item_with_priority(id: u64, time: u64, priority: u32) -> QueueItem {
         let attempt = RequestAttempt::new(

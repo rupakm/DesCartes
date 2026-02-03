@@ -2,14 +2,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use des_core::{Component, Key, Simulation, SimulationConfig};
+use descartes_core::{Component, Key, Simulation, SimulationConfig};
 
-use des_explore::harness::{
+use descartes_explore::harness::{
     run_controlled, HarnessConfig, HarnessControl, HarnessFrontierConfig, HarnessFrontierPolicy,
 };
-use des_explore::io::TraceFormat;
-use des_explore::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
-use des_explore::trace::TraceEvent;
+use descartes_explore::io::TraceFormat;
+use descartes_explore::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
+use descartes_explore::trace::TraceEvent;
 
 static TMP_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -28,7 +28,7 @@ impl Component for Noop {
         &mut self,
         _self_id: Key<Self::Event>,
         _event: &Self::Event,
-        _scheduler: &mut des_core::Scheduler,
+        _scheduler: &mut descartes_core::Scheduler,
     ) {
     }
 }
@@ -37,7 +37,7 @@ fn temp_path(suffix: &str) -> PathBuf {
     let n = TMP_ID.fetch_add(1, Ordering::Relaxed);
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "des_explore_harness_toggles_off_{}_{}{}",
+        "descartes_explore_harness_toggles_off_{}_{}{}",
         std::process::id(),
         n,
         suffix

@@ -21,14 +21,14 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use des_tower::limit::DesRateLimit;
-//! use des_tower::DesServiceBuilder;
-//! use des_core::Simulation;
+//! use descartes_tower::limit::DesRateLimit;
+//! use descartes_tower::DesServiceBuilder;
+//! use descartes_core::Simulation;
 //! use std::time::Duration;
 //!
 //! # fn example() {
 //! let mut simulation = Simulation::default();
-//! des_tokio::runtime::install(&mut simulation);
+//! descartes_tokio::runtime::install(&mut simulation);
 //! let base_service = DesServiceBuilder::new("rate-limited".to_string())
 //!     .build(&mut simulation).unwrap();
 //!
@@ -41,7 +41,7 @@
 //! # }
 //! ```
 
-use des_core::{scheduler, SimTime};
+use descartes_core::{scheduler, SimTime};
 use http::Request;
 use pin_project::pin_project;
 use std::future::Future;

@@ -7,7 +7,7 @@ use crate::transport::{
     endpoint_registry::SharedEndpointRegistry, EndpointId, MessageType, NetworkModel,
     TransportEvent, TransportMessage,
 };
-use des_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
+use descartes_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
 use std::collections::HashMap;
 
 /// Main transport component for simulated RPC communication
@@ -275,7 +275,7 @@ impl Default for SimTransportBuilder {
 mod tests {
     use super::*;
     use crate::transport::{endpoint_registry::EndpointInfo, SimpleNetworkModel};
-    use des_core::Simulation;
+    use descartes_core::Simulation;
     use std::time::Duration;
 
     #[test]

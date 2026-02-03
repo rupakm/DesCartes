@@ -1,5 +1,5 @@
 [package]
-name = "des-tower"
+name = "descartes-tower"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,9 +8,9 @@ repository.workspace = true
 description = "tower API bindings for DesCartes"
 
 [dependencies]
-des-core = { path = "../des-core" }
-des-tokio = { path = "../des-tokio" }
-des-components = { path = "../des-components" }
+descartes-core = { path = "../des-core" }
+descartes-tokio = { path = "../des-tokio" }
+descartes-components = { path = "../des-components" }
 
 tokio = { workspace = true }
 

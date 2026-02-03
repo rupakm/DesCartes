@@ -2,7 +2,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use des_core::{
+use descartes_core::{
     EventFrontierPolicy, Executor, FifoFrontierPolicy, SimTime, Simulation, SimulationConfig,
     UniformRandomFrontierPolicy,
 };
@@ -31,7 +31,7 @@ pub struct HarnessConfig {
     pub sim_config: SimulationConfig,
     pub scenario: String,
 
-    /// Whether to call `des_tokio::runtime::install(&mut sim)`.
+    /// Whether to call `descartes_tokio::runtime::install(&mut sim)`.
     pub install_tokio: bool,
 
     /// Optional async-runtime (tokio-level) ready-task policy configuration.
@@ -231,7 +231,7 @@ impl HarnessContext {
         policy
     }
 
-    pub fn tracing_provider(&self, seed: u64) -> Box<dyn des_core::RandomProvider> {
+    pub fn tracing_provider(&self, seed: u64) -> Box<dyn descartes_core::RandomProvider> {
         Box::new(TracingRandomProvider::new(seed, self.recorder.clone()))
     }
 
@@ -240,7 +240,7 @@ impl HarnessContext {
         &self,
         prefix: Option<&Trace>,
         fallback_seed: u64,
-    ) -> Box<dyn des_core::RandomProvider> {
+    ) -> Box<dyn descartes_core::RandomProvider> {
         match prefix {
             Some(prefix) => Box::new(crate::replay_rng::ChainedRandomProvider::new(
                 prefix,
@@ -321,27 +321,27 @@ pub fn run_controlled<R>(
 
             let concurrency_recorder = record_concurrency.then(|| {
                 Arc::new(RecordingConcurrencyRecorder::new(recorder.clone()))
-                    as Arc<dyn des_tokio::concurrency::ConcurrencyRecorder>
+                    as Arc<dyn descartes_tokio::concurrency::ConcurrencyRecorder>
             });
 
-            let mutex_policy: Option<Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>> =
+            let mutex_policy: Option<Box<dyn descartes_tokio::sync::mutex::MutexWaiterPolicy>> =
                 tokio_mutex_cfg.map(|cfg| match cfg.policy {
                     HarnessTokioMutexPolicy::Fifo => {
-                        Box::new(des_tokio::sync::mutex::FifoMutexWaiterPolicy)
-                            as Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>
+                        Box::new(descartes_tokio::sync::mutex::FifoMutexWaiterPolicy)
+                            as Box<dyn descartes_tokio::sync::mutex::MutexWaiterPolicy>
                     }
                     HarnessTokioMutexPolicy::UniformRandom { seed } => Box::new(
-                        des_tokio::sync::mutex::UniformRandomMutexWaiterPolicy::new(seed),
+                        descartes_tokio::sync::mutex::UniformRandomMutexWaiterPolicy::new(seed),
                     ),
                 });
 
-            let tokio_install = des_tokio::runtime::TokioInstallConfig {
+            let tokio_install = descartes_tokio::runtime::TokioInstallConfig {
                 mutex_policy,
                 concurrency_recorder,
             };
 
-            des_tokio::runtime::install_with_tokio(&mut sim, tokio_install, move |runtime| {
-                use des_core::async_runtime::{
+            descartes_tokio::runtime::install_with_tokio(&mut sim, tokio_install, move |runtime| {
+                use descartes_core::async_runtime::{
                     FifoReadyTaskPolicy, ReadyTaskPolicy, UniformRandomReadyTaskPolicy,
                 };
 
@@ -499,28 +499,28 @@ pub fn run_recorded<R>(
 
             let concurrency_recorder = record_concurrency.then(|| {
                 Arc::new(RecordingConcurrencyRecorder::new(recorder.clone()))
-                    as Arc<dyn des_tokio::concurrency::ConcurrencyRecorder>
+                    as Arc<dyn descartes_tokio::concurrency::ConcurrencyRecorder>
             });
 
-            let mutex_policy: Option<Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>> =
+            let mutex_policy: Option<Box<dyn descartes_tokio::sync::mutex::MutexWaiterPolicy>> =
                 tokio_mutex_cfg.map(|cfg| match cfg.policy {
                     HarnessTokioMutexPolicy::Fifo => {
-                        Box::new(des_tokio::sync::mutex::FifoMutexWaiterPolicy)
-                            as Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>
+                        Box::new(descartes_tokio::sync::mutex::FifoMutexWaiterPolicy)
+                            as Box<dyn descartes_tokio::sync::mutex::MutexWaiterPolicy>
                     }
                     HarnessTokioMutexPolicy::UniformRandom { seed } => Box::new(
-                        des_tokio::sync::mutex::UniformRandomMutexWaiterPolicy::new(seed),
+                        descartes_tokio::sync::mutex::UniformRandomMutexWaiterPolicy::new(seed),
                     ),
                 });
 
-            let tokio_install = des_tokio::runtime::TokioInstallConfig {
+            let tokio_install = descartes_tokio::runtime::TokioInstallConfig {
                 mutex_policy,
                 concurrency_recorder,
             };
 
-            des_tokio::runtime::install_with_tokio(&mut sim, tokio_install, move |runtime| {
+            descartes_tokio::runtime::install_with_tokio(&mut sim, tokio_install, move |runtime| {
                 if let Some(tokio_cfg) = tokio_ready_cfg {
-                    use des_core::async_runtime::{
+                    use descartes_core::async_runtime::{
                         FifoReadyTaskPolicy, ReadyTaskPolicy, UniformRandomReadyTaskPolicy,
                     };
 
@@ -661,10 +661,10 @@ pub fn run_replayed<R>(
 
             let record_out = cfg.record_concurrency.then(|| {
                 Arc::new(RecordingConcurrencyRecorder::new(ctx.recorder()))
-                    as Arc<dyn des_tokio::concurrency::ConcurrencyRecorder>
+                    as Arc<dyn descartes_tokio::concurrency::ConcurrencyRecorder>
             });
 
-            let concurrency_recorder: Option<Arc<dyn des_tokio::concurrency::ConcurrencyRecorder>> =
+            let concurrency_recorder: Option<Arc<dyn descartes_tokio::concurrency::ConcurrencyRecorder>> =
                 match (has_concurrency_events, record_out) {
                     (false, None) => None,
                     (false, Some(r)) => Some(r),
@@ -675,23 +675,23 @@ pub fn run_replayed<R>(
                     ]))),
                 };
 
-            let mutex_policy: Option<Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>> =
+            let mutex_policy: Option<Box<dyn descartes_tokio::sync::mutex::MutexWaiterPolicy>> =
                 cfg.tokio_mutex.clone().map(|cfg| match cfg.policy {
                     HarnessTokioMutexPolicy::Fifo => {
-                        Box::new(des_tokio::sync::mutex::FifoMutexWaiterPolicy)
-                            as Box<dyn des_tokio::sync::mutex::MutexWaiterPolicy>
+                        Box::new(descartes_tokio::sync::mutex::FifoMutexWaiterPolicy)
+                            as Box<dyn descartes_tokio::sync::mutex::MutexWaiterPolicy>
                     }
                     HarnessTokioMutexPolicy::UniformRandom { seed } => Box::new(
-                        des_tokio::sync::mutex::UniformRandomMutexWaiterPolicy::new(seed),
+                        descartes_tokio::sync::mutex::UniformRandomMutexWaiterPolicy::new(seed),
                     ),
                 });
 
-            let tokio_install = des_tokio::runtime::TokioInstallConfig {
+            let tokio_install = descartes_tokio::runtime::TokioInstallConfig {
                 mutex_policy,
                 concurrency_recorder,
             };
 
-            des_tokio::runtime::install_with_tokio(&mut sim, tokio_install, move |runtime| {
+            descartes_tokio::runtime::install_with_tokio(&mut sim, tokio_install, move |runtime| {
                 runtime.set_ready_task_policy(Box::new(ready_policy_for_runtime));
             });
 

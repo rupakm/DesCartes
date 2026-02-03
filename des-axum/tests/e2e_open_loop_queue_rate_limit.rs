@@ -1,7 +1,7 @@
-use des_core::{Execute, Executor, SimTime, Simulation};
-use des_metrics::{with_simulation_metrics_recorder, SimulationMetrics};
-use des_core::dists::{ExponentialDistribution, RequestContext, ServiceTimeDistribution};
-use des_tower::{DesRateLimit, DesServiceBuilder, ServiceError, SimBody};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
+use descartes_metrics::{with_simulation_metrics_recorder, SimulationMetrics};
+use descartes_core::dists::{ExponentialDistribution, RequestContext, ServiceTimeDistribution};
+use descartes_tower::{DesRateLimit, DesServiceBuilder, ServiceError, SimBody};
 use http::{Request, Response, StatusCode};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -52,12 +52,12 @@ impl ServiceTimeDistribution for WorkHealthServiceTime {
 
 #[derive(Clone)]
 struct BackendClient {
-    tx: des_tokio::sync::mpsc::Sender<BackendReq>,
+    tx: descartes_tokio::sync::mpsc::Sender<BackendReq>,
 }
 
 struct BackendReq {
     path: String,
-    resp_tx: des_tokio::sync::oneshot::Sender<Result<Response<SimBody>, ServiceError>>,
+    resp_tx: descartes_tokio::sync::oneshot::Sender<Result<Response<SimBody>, ServiceError>>,
 }
 
 async fn work(
@@ -74,7 +74,7 @@ async fn health(
 
 async fn handle_path(backend: BackendClient, path: &str) -> axum::response::Response {
     let route = path.to_string();
-    let (resp_tx, resp_rx) = des_tokio::sync::oneshot::channel();
+    let (resp_tx, resp_rx) = descartes_tokio::sync::oneshot::channel();
     if backend
         .tx
         .send(BackendReq {
@@ -115,14 +115,14 @@ async fn handle_path(backend: BackendClient, path: &str) -> axum::response::Resp
 // - Queue length is recorded as a histogram for a simple mean estimate.
 #[derive(Clone)]
 struct QueueService<S> {
-    tx: des_tokio::sync::mpsc::Sender<QueuedRequest>,
+    tx: descartes_tokio::sync::mpsc::Sender<QueuedRequest>,
     queue_len: Arc<AtomicUsize>,
     _phantom: std::marker::PhantomData<S>,
 }
 
 struct QueuedRequest {
     req: Request<SimBody>,
-    resp_tx: des_tokio::sync::oneshot::Sender<Result<Response<SimBody>, ServiceError>>,
+    resp_tx: descartes_tokio::sync::oneshot::Sender<Result<Response<SimBody>, ServiceError>>,
 }
 
 impl<S> QueueService<S>
@@ -133,19 +133,19 @@ where
     S::Future: Future<Output = Result<Response<SimBody>, ServiceError>> + 'static,
 {
     fn new(inner: S, bound: usize) -> Self {
-        let (tx, mut rx) = des_tokio::sync::mpsc::channel::<QueuedRequest>(bound);
+        let (tx, mut rx) = descartes_tokio::sync::mpsc::channel::<QueuedRequest>(bound);
         let queue_len = Arc::new(AtomicUsize::new(0));
         let queue_len_worker = queue_len.clone();
 
         // Single worker to drain the queue.
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             while let Some(QueuedRequest { req, resp_tx }) = rx.recv().await {
                 queue_len_worker.fetch_sub(1, Ordering::Relaxed);
                 let q = queue_len_worker.load(Ordering::Relaxed) as f64;
                 metrics::histogram!("server_queue_len").record(q);
 
                 let mut svc = inner.clone();
-                des_tokio::task::spawn_local(async move {
+                descartes_tokio::task::spawn_local(async move {
                     let result = match svc.ready().await {
                         Ok(ready_svc) => ready_svc.call(req).await,
                         Err(e) => Err(e),
@@ -177,7 +177,7 @@ where
     }
 
     fn call(&mut self, req: Request<SimBody>) -> Self::Future {
-        let (resp_tx, resp_rx) = des_tokio::sync::oneshot::channel();
+        let (resp_tx, resp_rx) = descartes_tokio::sync::oneshot::channel();
         let msg = QueuedRequest { req, resp_tx };
 
         match self.tx.try_send(msg) {
@@ -195,14 +195,14 @@ where
 }
 
 #[test]
-fn open_loop_exponential_arrivals_axum_with_des_tower_queue_and_rate_limit() {
+fn open_loop_exponential_arrivals_axum_with_descartes_tower_queue_and_rate_limit() {
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
 
     with_simulation_metrics_recorder(&metrics, || {
         let mut sim = Simulation::default();
-        des_tokio::runtime::install(&mut sim);
+        descartes_tokio::runtime::install(&mut sim);
 
-        let transport = des_axum::Transport::install_default(&mut sim);
+        let transport = descartes_axum::Transport::install_default(&mut sim);
 
         // Build a DES-backed tower service representing server-side compute.
         // /work is exponential(mean=80ms), /health is constant(1ms). Both share queue + token bucket.
@@ -226,8 +226,8 @@ fn open_loop_exponential_arrivals_axum_with_des_tower_queue_and_rate_limit() {
 
         // Bridge axum handler -> des-tower service through a channel.
         // This keeps axum state `Send + Sync` even though the underlying DES service is not.
-        let (tx, mut rx) = des_tokio::sync::mpsc::channel::<BackendReq>(1024);
-        des_tokio::task::spawn_local(async move {
+        let (tx, mut rx) = descartes_tokio::sync::mpsc::channel::<BackendReq>(1024);
+        descartes_tokio::task::spawn_local(async move {
             while let Some(BackendReq { path, resp_tx }) = rx.recv().await {
                 let mut svc = admitted.clone();
                 let req = Request::builder()
@@ -236,7 +236,7 @@ fn open_loop_exponential_arrivals_axum_with_des_tower_queue_and_rate_limit() {
                     .body(SimBody::empty())
                     .expect("build backend request");
 
-                des_tokio::task::spawn_local(async move {
+                descartes_tokio::task::spawn_local(async move {
                     let result = svc.call(req).await;
                     let _ = resp_tx.send(result);
                 });
@@ -269,28 +269,28 @@ fn open_loop_exponential_arrivals_axum_with_des_tower_queue_and_rate_limit() {
         let work_arrival_rate_rps = 15.0;
         let health_arrival_rate_rps = 2.0;
         let seed = 42u64;
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
             let exp = Exp::new(work_arrival_rate_rps).expect("valid exp rate");
-            let start = des_tokio::time::Instant::now();
+            let start = descartes_tokio::time::Instant::now();
 
             loop {
-                let now = des_tokio::time::Instant::now();
+                let now = descartes_tokio::time::Instant::now();
                 if now.duration_since(start) >= sim_duration {
                     break;
                 }
 
                 let dt_secs: f64 = exp.sample(&mut rng);
                 let dt = Duration::from_secs_f64(dt_secs.max(0.0));
-                des_tokio::time::sleep(dt).await;
+                descartes_tokio::time::sleep(dt).await;
 
                 metrics::counter!("client_requests_sent_total", "route" => "/work").increment(1);
 
                 let client = Rc::clone(&work_client);
-                des_tokio::task::spawn_local(async move {
-                    let t0 = des_tokio::time::Instant::now();
+                descartes_tokio::task::spawn_local(async move {
+                    let t0 = descartes_tokio::time::Instant::now();
                     let resp = client.get("/work", Some(Duration::from_secs(5))).await;
-                    let latency = des_tokio::time::Instant::now().duration_since(t0);
+                    let latency = descartes_tokio::time::Instant::now().duration_since(t0);
                     metrics::histogram!("client_latency_ms", "route" => "/work")
                         .record(latency.as_secs_f64() * 1000.0);
 
@@ -313,28 +313,28 @@ fn open_loop_exponential_arrivals_axum_with_des_tower_queue_and_rate_limit() {
         });
 
         // Health client: open-loop exponential arrivals.
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             let mut rng = ChaCha8Rng::seed_from_u64(seed ^ 0xBEEF);
             let exp = Exp::new(health_arrival_rate_rps).expect("valid exp rate");
-            let start = des_tokio::time::Instant::now();
+            let start = descartes_tokio::time::Instant::now();
 
             loop {
-                let now = des_tokio::time::Instant::now();
+                let now = descartes_tokio::time::Instant::now();
                 if now.duration_since(start) >= sim_duration {
                     break;
                 }
 
                 let dt_secs: f64 = exp.sample(&mut rng);
                 let dt = Duration::from_secs_f64(dt_secs.max(0.0));
-                des_tokio::time::sleep(dt).await;
+                descartes_tokio::time::sleep(dt).await;
 
                 metrics::counter!("client_requests_sent_total", "route" => "/health").increment(1);
 
                 let client = Rc::clone(&health_client);
-                des_tokio::task::spawn_local(async move {
-                    let t0 = des_tokio::time::Instant::now();
+                descartes_tokio::task::spawn_local(async move {
+                    let t0 = descartes_tokio::time::Instant::now();
                     let resp = client.get("/health", Some(Duration::from_secs(5))).await;
-                    let latency = des_tokio::time::Instant::now().duration_since(t0);
+                    let latency = descartes_tokio::time::Instant::now().duration_since(t0);
                     metrics::histogram!("client_latency_ms", "route" => "/health")
                         .record(latency.as_secs_f64() * 1000.0);
 

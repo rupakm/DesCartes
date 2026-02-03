@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex as StdMutex};
 
-use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
-use des_explore::prelude::*;
-use des_tokio::stream::StreamExt;
+use descartes_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
+use descartes_explore::prelude::*;
+use descartes_tokio::stream::StreamExt;
 
 #[test]
 fn mpsc_stream_is_replayable_under_random_scheduling() {
@@ -12,7 +12,7 @@ fn mpsc_stream_is_replayable_under_random_scheduling() {
         let scenario = scenario.clone();
         move || {
             let trace_path = std::env::temp_dir().join(format!(
-                "des_explore_mpsc_stream_record_{}_{}.json",
+                "descartes_explore_mpsc_stream_record_{}_{}.json",
                 std::process::id(),
                 scenario
             ));
@@ -39,27 +39,27 @@ fn mpsc_stream_is_replayable_under_random_scheduling() {
                 cfg,
                 move |sim_config, _ctx| Simulation::new(sim_config),
                 move |sim, _ctx| {
-                    let (tx, mut rx) = des_tokio::sync::mpsc::channel::<u64>(8);
+                    let (tx, mut rx) = descartes_tokio::sync::mpsc::channel::<u64>(8);
 
-                    let producer = des_tokio::thread::spawn(async move {
+                    let producer = descartes_tokio::thread::spawn(async move {
                         for i in 0..10u64 {
                             tx.send(i).await.unwrap();
-                            des_tokio::thread::yield_now().await;
+                            descartes_tokio::thread::yield_now().await;
                         }
                         drop(tx);
                     });
 
-                    let consumer = des_tokio::thread::spawn(async move {
+                    let consumer = descartes_tokio::thread::spawn(async move {
                         let mut v = Vec::new();
                         while let Some(x) = rx.next().await {
                             v.push(x);
-                            des_tokio::thread::yield_now().await;
+                            descartes_tokio::thread::yield_now().await;
                         }
                         v
                     });
 
                     let out2 = out2.clone();
-                    des_tokio::thread::spawn(async move {
+                    descartes_tokio::thread::spawn(async move {
                         producer.await.expect("producer");
                         let v = consumer.await.expect("consumer");
                         *out2.lock().unwrap() = Some(v);
@@ -83,7 +83,7 @@ fn mpsc_stream_is_replayable_under_random_scheduling() {
 
     let replayed_out = std::thread::spawn(move || {
         let trace_path = std::env::temp_dir().join(format!(
-            "des_explore_mpsc_stream_replay_{}_{}.json",
+            "descartes_explore_mpsc_stream_replay_{}_{}.json",
             std::process::id(),
             scenario
         ));
@@ -108,27 +108,27 @@ fn mpsc_stream_is_replayable_under_random_scheduling() {
             &trace,
             move |sim_config, _ctx, _input| Simulation::new(sim_config),
             move |sim, _ctx| {
-                let (tx, mut rx) = des_tokio::sync::mpsc::channel::<u64>(8);
+                let (tx, mut rx) = descartes_tokio::sync::mpsc::channel::<u64>(8);
 
-                let producer = des_tokio::thread::spawn(async move {
+                let producer = descartes_tokio::thread::spawn(async move {
                     for i in 0..10u64 {
                         tx.send(i).await.unwrap();
-                        des_tokio::thread::yield_now().await;
+                        descartes_tokio::thread::yield_now().await;
                     }
                     drop(tx);
                 });
 
-                let consumer = des_tokio::thread::spawn(async move {
+                let consumer = descartes_tokio::thread::spawn(async move {
                     let mut v = Vec::new();
                     while let Some(x) = rx.next().await {
                         v.push(x);
-                        des_tokio::thread::yield_now().await;
+                        descartes_tokio::thread::yield_now().await;
                     }
                     v
                 });
 
                 let out2 = out2.clone();
-                des_tokio::thread::spawn(async move {
+                descartes_tokio::thread::spawn(async move {
                     producer.await.expect("producer");
                     let v = consumer.await.expect("consumer");
                     *out2.lock().unwrap() = Some(v);

@@ -7,10 +7,10 @@
 
 use crate::retry_policy::{ExponentialBackoffPolicy, RetryPolicy};
 use crate::ServerEvent;
-use des_core::{
+use descartes_core::{
     Component, Key, RequestAttempt, RequestAttemptId, RequestId, Response, Scheduler, SimTime,
 };
-use des_metrics::SimulationMetrics;
+use descartes_metrics::SimulationMetrics;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -384,8 +384,8 @@ mod tests {
         ExponentialBackoffPolicy, SuccessBasedRetryPolicy, TokenBucketRetryPolicy,
     };
     use crate::Server;
-    use des_core::task::PeriodicTask;
-    use des_core::{Execute, Executor, Simulation};
+    use descartes_core::task::PeriodicTask;
+    use descartes_core::{Execute, Executor, Simulation};
 
     #[test]
     fn test_simple_client_with_retry() {

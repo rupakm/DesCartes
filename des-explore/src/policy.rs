@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use des_core::{
+use descartes_core::{
     async_runtime::{ReadyTaskPolicy, ReadyTaskSignature, TaskId},
     EventFrontierPolicy, FrontierEvent, FrontierEventKind, FrontierSignature, SimTime,
 };

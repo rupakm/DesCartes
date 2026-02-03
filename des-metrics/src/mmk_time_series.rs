@@ -3,7 +3,7 @@
 //! This module provides time-series data collection with exponential moving averages
 //! and visualization capabilities for analyzing M/M/k queueing system behavior over time.
 
-use des_core::SimTime;
+use descartes_core::SimTime;
 use std::collections::VecDeque;
 use std::time::Duration;
 

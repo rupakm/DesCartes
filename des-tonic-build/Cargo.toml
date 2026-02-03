@@ -1,5 +1,5 @@
 [package]
-name = "des-tonic-build"
+name = "descartes-tonic-build"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

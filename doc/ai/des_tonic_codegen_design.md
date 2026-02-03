@@ -1,4 +1,4 @@
-# `des-tonic` Prost Codegen (`des_tonic_build`) Design
+# `des-tonic` Prost Codegen (`descartes_tonic_build`) Design
 
 **Status:** Proposed
 
@@ -25,10 +25,10 @@ This is intentionally *not* gRPC/HTTP2 compatible; it generates tonic-shaped API
 ## Dependencies
 
 - Add `prost` as a normal dependency of `des-tonic` (and in the generated code).
-- Add `prost-build` to `des_tonic_build`.
+- Add `prost-build` to `descartes_tonic_build`.
 - Optional (recommended): add `async-trait` to generated server traits (or re-export `tonic::async_trait`).
 
-We do **not** require `futures-core::Stream` for v1 stubs. Streaming types are `des_tonic::DesStreaming<T>` which already provides `async fn next()`.
+We do **not** require `futures-core::Stream` for v1 stubs. Streaming types are `descartes_tonic::DesStreaming<T>` which already provides `async fn next()`.
 
 ## Minimal Runtime API Surface in `des-tonic`
 
@@ -64,7 +64,7 @@ Provide a small helper to build server response streams or client request stream
 pub mod stream {
     pub fn channel<T>(cap: usize) -> (Sender<T>, DesStreaming<T>);
 
-    pub struct Sender<T> { /* wraps des_tokio::mpsc::Sender<Result<T, Status>> */ }
+    pub struct Sender<T> { /* wraps descartes_tokio::mpsc::Sender<Result<T, Status>> */ }
     impl<T> Sender<T> {
         pub async fn send(&self, item: T) -> Result<(), ()>;
         pub async fn send_err(&self, status: tonic::Status) -> Result<(), ()>;
@@ -73,7 +73,7 @@ pub mod stream {
 }
 ```
 
-This can be implemented on top of `des_tokio::sync::mpsc`.
+This can be implemented on top of `descartes_tokio::sync::mpsc`.
 
 ### 3) Prost-typed `Channel` RPCs (exact signatures)
 
@@ -187,7 +187,7 @@ impl Router {
 This shape keeps codegen simple:
 - generated `FooServer::register` passes `Arc::new(inner)` and function pointers to each method.
 
-## Generated Code Surface (what `des_tonic_build` emits)
+## Generated Code Surface (what `descartes_tonic_build` emits)
 
 For a service `Echo` in package `grpc.examples.echo`:
 
@@ -197,7 +197,7 @@ For a service `Echo` in package `grpc.examples.echo`:
 pub mod echo_server {
     use super::*;
 
-    #[des_tonic::async_trait]
+    #[descartes_tonic::async_trait]
     pub trait Echo: Send + Sync + 'static {
         async fn unary_echo(
             &self,
@@ -207,17 +207,17 @@ pub mod echo_server {
         async fn server_streaming_echo(
             &self,
             request: tonic::Request<EchoRequest>,
-        ) -> Result<tonic::Response<des_tonic::DesStreaming<EchoResponse>>, tonic::Status>;
+        ) -> Result<tonic::Response<descartes_tonic::DesStreaming<EchoResponse>>, tonic::Status>;
 
         async fn client_streaming_echo(
             &self,
-            request: tonic::Request<des_tonic::DesStreaming<EchoRequest>>,
+            request: tonic::Request<descartes_tonic::DesStreaming<EchoRequest>>,
         ) -> Result<tonic::Response<EchoResponse>, tonic::Status>;
 
         async fn bidirectional_streaming_echo(
             &self,
-            request: tonic::Request<des_tonic::DesStreaming<EchoRequest>>,
-        ) -> Result<tonic::Response<des_tonic::DesStreaming<EchoResponse>>, tonic::Status>;
+            request: tonic::Request<descartes_tonic::DesStreaming<EchoRequest>>,
+        ) -> Result<tonic::Response<descartes_tonic::DesStreaming<EchoResponse>>, tonic::Status>;
     }
 
     pub struct EchoServer<T> {
@@ -229,7 +229,7 @@ pub mod echo_server {
             Self { inner: std::sync::Arc::new(inner) }
         }
 
-        pub fn register(self, router: &mut des_tonic::Router) {
+        pub fn register(self, router: &mut descartes_tonic::Router) {
             router
                 .add_unary_prost(METHOD_UNARY_ECHO, self.inner.clone(), |svc, req| async move {
                     svc.unary_echo(req).await
@@ -256,12 +256,12 @@ pub mod echo_client {
 
     #[derive(Clone)]
     pub struct EchoClient {
-        inner: des_tonic::Channel,
+        inner: descartes_tonic::Channel,
         timeout: Option<std::time::Duration>,
     }
 
     impl EchoClient {
-        pub fn new(inner: des_tonic::Channel) -> Self {
+        pub fn new(inner: descartes_tonic::Channel) -> Self {
             Self { inner, timeout: None }
         }
 
@@ -272,7 +272,7 @@ pub mod echo_client {
 
         pub async fn unary_echo(
             &self,
-            request: impl des_tonic::IntoRequest<EchoRequest>,
+            request: impl descartes_tonic::IntoRequest<EchoRequest>,
         ) -> Result<tonic::Response<EchoResponse>, tonic::Status> {
             self.inner
                 .unary_prost(METHOD_UNARY_ECHO, request.into_request(), self.timeout)
@@ -281,8 +281,8 @@ pub mod echo_client {
 
         pub async fn server_streaming_echo(
             &self,
-            request: impl des_tonic::IntoRequest<EchoRequest>,
-        ) -> Result<tonic::Response<des_tonic::DesStreaming<EchoResponse>>, tonic::Status> {
+            request: impl descartes_tonic::IntoRequest<EchoRequest>,
+        ) -> Result<tonic::Response<descartes_tonic::DesStreaming<EchoResponse>>, tonic::Status> {
             self.inner
                 .server_streaming_prost(METHOD_SERVER_STREAMING_ECHO, request.into_request(), self.timeout)
                 .await
@@ -290,7 +290,7 @@ pub mod echo_client {
 
         pub async fn client_streaming_echo(
             &self,
-        ) -> Result<(des_tonic::stream::Sender<EchoRequest>, des_tonic::ClientResponseFuture<EchoResponse>), tonic::Status> {
+        ) -> Result<(descartes_tonic::stream::Sender<EchoRequest>, descartes_tonic::ClientResponseFuture<EchoResponse>), tonic::Status> {
             self.inner
                 .client_streaming_prost(METHOD_CLIENT_STREAMING_ECHO, self.timeout)
                 .await
@@ -298,7 +298,7 @@ pub mod echo_client {
 
         pub async fn bidirectional_streaming_echo(
             &self,
-        ) -> Result<(des_tonic::stream::Sender<EchoRequest>, tonic::Response<des_tonic::DesStreaming<EchoResponse>>), tonic::Status> {
+        ) -> Result<(descartes_tonic::stream::Sender<EchoRequest>, tonic::Response<descartes_tonic::DesStreaming<EchoResponse>>), tonic::Status> {
             self.inner
                 .bidirectional_streaming_prost(METHOD_BIDI_STREAMING_ECHO, self.timeout)
                 .await
@@ -318,7 +318,7 @@ pub const METHOD_CLIENT_STREAMING_ECHO: &str = "/grpc.examples.echo.Echo/ClientS
 pub const METHOD_BIDI_STREAMING_ECHO: &str = "/grpc.examples.echo.Echo/BidirectionalStreamingEcho";
 ```
 
-## `des_tonic_build` crate API
+## `descartes_tonic_build` crate API
 
 Keep it close to `tonic_build`:
 
@@ -340,7 +340,7 @@ impl Builder {
 `compile` should:
 - run `prost-build` to emit message types
 - run a small custom service generator to emit client/server stubs that target `des-tonic`
-- emit a module layout compatible with `des_tonic::include_proto!("...")`
+- emit a module layout compatible with `descartes_tonic::include_proto!("...")`
 
 ## Open Questions
 

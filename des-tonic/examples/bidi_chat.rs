@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
-use des_tonic::{stream, Channel, ClientBuilder, DesStreaming, Router, ServerBuilder, Transport};
+use descartes_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
+use descartes_tonic::{stream, Channel, ClientBuilder, DesStreaming, Router, ServerBuilder, Transport};
 use tonic::{Request, Response, Status};
 
 const METHOD_CHAT: &str = "/chat.Chat/Chat";
@@ -15,7 +15,7 @@ pub struct ChatMessage {
     pub text: String,
 }
 
-#[des_tonic::async_trait]
+#[descartes_tonic::async_trait]
 pub trait Chat: Send + Sync + 'static {
     async fn chat(
         &self,
@@ -78,7 +78,7 @@ impl ChatClient {
 #[derive(Default)]
 struct ChatImpl;
 
-#[des_tonic::async_trait]
+#[descartes_tonic::async_trait]
 impl Chat for ChatImpl {
     async fn chat(
         &self,
@@ -88,7 +88,7 @@ impl Chat for ChatImpl {
         let (out_tx, out_rx) = stream::channel::<ChatMessage>(16);
 
         // Simple echo server: respond with "server: echo:<text>".
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             while let Some(item) = inbound.next().await {
                 match item {
                     Ok(msg) => {
@@ -115,7 +115,7 @@ impl Chat for ChatImpl {
 
 fn main() {
     let mut sim = Simulation::new(SimulationConfig { seed: 1 });
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let transport = Transport::install_default(&mut sim);
 
@@ -147,7 +147,7 @@ fn main() {
 
     let client = ChatClient::new(installed.channel).with_timeout(Duration::from_millis(200));
 
-    des_tokio::task::spawn_local(async move {
+    descartes_tokio::task::spawn_local(async move {
         let (tx, mut rx) = client.chat().await.unwrap();
 
         // Send a few messages.

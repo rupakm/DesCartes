@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use des_core::SimTime;
+use descartes_core::SimTime;
 use hdrhistogram::Histogram;
 use serde::{Deserialize, Serialize};
 

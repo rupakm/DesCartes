@@ -1,19 +1,19 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::{Execute, Executor, SimTime, Simulation};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
 
 #[test]
 fn mpsc_send_recv_fifo() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
-    let (tx, mut rx) = des_tokio::sync::mpsc::channel::<usize>(4);
+    let (tx, mut rx) = descartes_tokio::sync::mpsc::channel::<usize>(4);
 
     let out = Arc::new(Mutex::new(Vec::new()));
     let out2 = out.clone();
 
-    let _consumer = des_tokio::task::spawn(async move {
+    let _consumer = descartes_tokio::task::spawn(async move {
         while let Some(v) = rx.recv().await {
             out2.lock().unwrap().push(v);
             if v == 3 {
@@ -22,7 +22,7 @@ fn mpsc_send_recv_fifo() {
         }
     });
 
-    let _producer = des_tokio::task::spawn(async move {
+    let _producer = descartes_tokio::task::spawn(async move {
         tx.send(1).await.unwrap();
         tx.send(2).await.unwrap();
         tx.send(3).await.unwrap();
@@ -35,14 +35,14 @@ fn mpsc_send_recv_fifo() {
 #[test]
 fn mpsc_backpressure_blocks_sender_until_recv() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
-    let (tx, mut rx) = des_tokio::sync::mpsc::channel::<usize>(1);
+    let (tx, mut rx) = descartes_tokio::sync::mpsc::channel::<usize>(1);
 
     let sent = Arc::new(Mutex::new(Vec::new()));
     let sent2 = sent.clone();
 
-    let _producer = des_tokio::task::spawn(async move {
+    let _producer = descartes_tokio::task::spawn(async move {
         tx.send(1).await.unwrap();
         sent2.lock().unwrap().push(1);
 
@@ -54,9 +54,9 @@ fn mpsc_backpressure_blocks_sender_until_recv() {
     let received = Arc::new(Mutex::new(Vec::new()));
     let received2 = received.clone();
 
-    let _consumer = des_tokio::task::spawn(async move {
+    let _consumer = descartes_tokio::task::spawn(async move {
         // Wait a bit before reading, to ensure second send would block.
-        des_tokio::time::sleep(Duration::from_millis(50)).await;
+        descartes_tokio::time::sleep(Duration::from_millis(50)).await;
 
         if let Some(v) = rx.recv().await {
             received2.lock().unwrap().push(v);
@@ -76,14 +76,14 @@ fn mpsc_backpressure_blocks_sender_until_recv() {
 #[test]
 fn mpsc_recv_returns_none_when_all_senders_dropped() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
-    let (tx, mut rx) = des_tokio::sync::mpsc::channel::<usize>(2);
+    let (tx, mut rx) = descartes_tokio::sync::mpsc::channel::<usize>(2);
 
     let out = Arc::new(Mutex::new(None));
     let out2 = out.clone();
 
-    let _consumer = des_tokio::task::spawn(async move {
+    let _consumer = descartes_tokio::task::spawn(async move {
         // Drop sender immediately; recv should return None.
         drop(tx);
         *out2.lock().unwrap() = Some(rx.recv().await.is_none());
@@ -96,15 +96,15 @@ fn mpsc_recv_returns_none_when_all_senders_dropped() {
 #[test]
 fn mpsc_send_errors_when_receiver_dropped() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
-    let (tx, rx) = des_tokio::sync::mpsc::channel::<usize>(2);
+    let (tx, rx) = descartes_tokio::sync::mpsc::channel::<usize>(2);
     drop(rx);
 
     let out = Arc::new(Mutex::new(None));
     let out2 = out.clone();
 
-    let _producer = des_tokio::task::spawn(async move {
+    let _producer = descartes_tokio::task::spawn(async move {
         *out2.lock().unwrap() = Some(tx.send(1).await.is_err());
     });
 

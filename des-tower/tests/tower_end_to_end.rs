@@ -1,5 +1,5 @@
-use des_core::{Execute, Executor, SimTime, Simulation};
-use des_tower::{DesServiceBuilder, SimBody};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
+use descartes_tower::{DesServiceBuilder, SimBody};
 use http::{Method, Request};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,7 +9,7 @@ use tower::ServiceExt;
 #[test]
 fn tower_service_oneshot_completes_without_deadlock() {
     let mut simulation = Simulation::default();
-    des_tokio::runtime::install(&mut simulation);
+    descartes_tokio::runtime::install(&mut simulation);
 
     let service = DesServiceBuilder::new("simple-server".to_string())
         .thread_capacity(1)
@@ -20,8 +20,8 @@ fn tower_service_oneshot_completes_without_deadlock() {
     let done: Rc<RefCell<Option<http::Response<SimBody>>>> = Rc::new(RefCell::new(None));
     let done_clone = done.clone();
 
-    des_tokio::task::spawn_local(async move {
-        des_tokio::time::sleep(Duration::from_millis(5)).await;
+    descartes_tokio::task::spawn_local(async move {
+        descartes_tokio::time::sleep(Duration::from_millis(5)).await;
 
         let req = Request::builder()
             .method(Method::POST)

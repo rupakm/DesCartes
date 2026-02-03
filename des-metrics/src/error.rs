@@ -1,6 +1,6 @@
 //! Error types for metrics and logging
 
-use des_core::{RequestAttemptId, RequestId};
+use descartes_core::{RequestAttemptId, RequestId};
 use thiserror::Error;
 
 /// Errors related to metrics collection

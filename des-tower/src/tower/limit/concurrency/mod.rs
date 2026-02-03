@@ -5,9 +5,9 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use des_tower::limit::DesConcurrencyLimit;
-//! use des_tower::DesServiceBuilder;
-//! use des_core::Simulation;
+//! use descartes_tower::limit::DesConcurrencyLimit;
+//! use descartes_tower::DesServiceBuilder;
+//! use descartes_core::Simulation;
 //!
 //! # fn example() {
 //! let mut simulation = Simulation::default();

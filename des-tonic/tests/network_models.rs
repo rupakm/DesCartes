@@ -3,16 +3,16 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use des_core::async_runtime::current_sim_time;
-use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
-use des_tonic::{network, NetworkModel, Request, Response, Router, Transport};
+use descartes_core::async_runtime::current_sim_time;
+use descartes_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
+use descartes_tonic::{network, NetworkModel, Request, Response, Router, Transport};
 
 fn run_client_server_with_transport(
     cfg: SimulationConfig,
     model: Box<dyn NetworkModel>,
 ) -> Vec<Duration> {
     let mut sim = Simulation::new(cfg);
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let transport = Transport::install(&mut sim, model);
 
@@ -26,13 +26,13 @@ fn run_client_server_with_transport(
         .serve(&mut sim, "svc.Echo", addr.to_string(), router)
         .expect("serve");
 
-    let channel = des_tonic::Channel::connect(&mut sim, &transport, "svc.Echo", addr.to_string())
+    let channel = descartes_tonic::Channel::connect(&mut sim, &transport, "svc.Echo", addr.to_string())
         .expect("connect");
 
     let latencies: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
     let lat2 = latencies.clone();
 
-    des_tokio::task::spawn_local(async move {
+    descartes_tokio::task::spawn_local(async move {
         for _ in 0..20 {
             let start = current_sim_time().unwrap();
             let _resp = channel
@@ -45,7 +45,7 @@ fn run_client_server_with_transport(
                 .expect("rpc");
             let end = current_sim_time().unwrap();
             lat2.lock().unwrap().push(end - start);
-            des_tokio::thread::yield_now().await;
+            descartes_tokio::thread::yield_now().await;
         }
     });
 

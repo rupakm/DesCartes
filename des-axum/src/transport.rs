@@ -1,10 +1,10 @@
 use crate::addr::parse_socket_addr;
 use crate::client::{Client, ClientBuilder, Error, InstalledClient};
 use crate::server::{InstalledServer, ServerBuilder};
-use des_components::transport::{
+use descartes_components::transport::{
     EndpointId, NetworkModel, SimTransport, SimpleNetworkModel, TransportEvent,
 };
-use des_core::{Key, SchedulerHandle, Simulation};
+use descartes_core::{Key, SchedulerHandle, Simulation};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -12,7 +12,7 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct Transport {
     pub transport_key: Key<TransportEvent>,
-    pub endpoint_registry: des_components::transport::SharedEndpointRegistry,
+    pub endpoint_registry: descartes_components::transport::SharedEndpointRegistry,
     pub scheduler: SchedulerHandle,
 
     next_client_id: Arc<Mutex<u64>>,

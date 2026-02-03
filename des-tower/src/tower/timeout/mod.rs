@@ -2,7 +2,7 @@
 //!
 //! Provides timeout functionality using simulation time via `des-tokio`.
 //!
-//! Note: this requires `des_tokio::runtime::install(&mut sim)`.
+//! Note: this requires `descartes_tokio::runtime::install(&mut sim)`.
 
 use http::Request;
 use pin_project::pin_project;
@@ -51,7 +51,7 @@ impl<S> DesTimeout<S> {
 pub struct DesTimeoutFuture<F> {
     timeout: Duration,
     #[pin]
-    inner: des_tokio::time::Timeout<F>,
+    inner: descartes_tokio::time::Timeout<F>,
 }
 
 impl<F> Future for DesTimeoutFuture<F>
@@ -65,7 +65,7 @@ where
 
         match this.inner.poll(cx) {
             Poll::Ready(Ok(v)) => Poll::Ready(v),
-            Poll::Ready(Err(des_tokio::time::Elapsed)) => Poll::Ready(Err(ServiceError::Timeout {
+            Poll::Ready(Err(descartes_tokio::time::Elapsed)) => Poll::Ready(Err(ServiceError::Timeout {
                 duration: *this.timeout,
             })),
             Poll::Pending => Poll::Pending,
@@ -89,7 +89,7 @@ where
         let inner = self.inner.call(req);
         DesTimeoutFuture {
             timeout: self.timeout,
-            inner: des_tokio::time::timeout(self.timeout, inner),
+            inner: descartes_tokio::time::timeout(self.timeout, inner),
         }
     }
 }

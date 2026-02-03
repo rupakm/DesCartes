@@ -1,19 +1,19 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
+use descartes_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
 
-use des_explore::harness::{
+use descartes_explore::harness::{
     run_recorded, run_replayed, HarnessConfig, HarnessReplayError, HarnessTokioReadyConfig,
     HarnessTokioReadyPolicy,
 };
-use des_explore::io::TraceFormat;
-use des_explore::trace::{Trace, TraceEvent};
+use descartes_explore::io::TraceFormat;
+use descartes_explore::trace::{Trace, TraceEvent};
 
 fn temp_path(suffix: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "des_explore_harness_tokio_ready_{}_{}{}",
+        "descartes_explore_harness_tokio_ready_{}_{}{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -52,7 +52,7 @@ fn harness_replays_tokio_ready_task_decisions() {
             move |sim, _ctx| {
                 for i in 0..200 {
                     let log = log_for_run.clone();
-                    des_tokio::task::spawn(async move {
+                    descartes_tokio::task::spawn(async move {
                         log.lock().unwrap().push(i);
                     });
                 }
@@ -100,7 +100,7 @@ fn harness_replays_tokio_ready_task_decisions() {
             move |sim, _ctx| {
                 for i in 0..200 {
                     let log = log_for_run.clone();
-                    des_tokio::task::spawn(async move {
+                    descartes_tokio::task::spawn(async move {
                         log.lock().unwrap().push(i);
                     });
                 }
@@ -145,7 +145,7 @@ fn harness_replay_reports_tokio_ready_mismatch() {
             move |sim_config, _ctx| Simulation::new(sim_config),
             move |sim, _ctx| {
                 for _ in 0..200 {
-                    des_tokio::task::spawn(async move {
+                    descartes_tokio::task::spawn(async move {
                         // no-op
                     });
                 }
@@ -182,7 +182,7 @@ fn harness_replay_reports_tokio_ready_mismatch() {
             move |sim, _ctx| {
                 // Intentional divergence: fewer tasks.
                 for _ in 0..199 {
-                    des_tokio::task::spawn(async move {
+                    descartes_tokio::task::spawn(async move {
                         // no-op
                     });
                 }

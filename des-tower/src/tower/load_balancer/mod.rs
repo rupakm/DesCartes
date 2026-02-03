@@ -11,8 +11,8 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use des_tower::{DesServiceBuilder, DesLoadBalancer, DesLoadBalanceStrategy};
-//! use des_core::Simulation;
+//! use descartes_tower::{DesServiceBuilder, DesLoadBalancer, DesLoadBalanceStrategy};
+//! use descartes_core::Simulation;
 //! use std::time::Duration;
 //!
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,8 +37,8 @@
 //! For reproducible random load balancing:
 //!
 //! ```rust,no_run
-//! # use des_tower::DesLoadBalancer;
-//! # let services: Vec<des_tower::DesService> = vec![];
+//! # use descartes_tower::DesLoadBalancer;
+//! # let services: Vec<descartes_tower::DesService> = vec![];
 //! let load_balancer = DesLoadBalancer::random_with_seed(services, 12345);
 //! ```
 

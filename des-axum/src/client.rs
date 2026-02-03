@@ -7,11 +7,11 @@
 
 use crate::wire::{decode_response, encode_request, HttpRequestWire, HttpResponseWire};
 use crate::util::{now, schedule_transport};
-use des_components::transport::{
+use descartes_components::transport::{
     EndpointId, EndpointInfo, MessageType, SharedEndpointRegistry, SimTransport, TransportEvent,
     TransportMessage,
 };
-use des_core::{Component, Key, Scheduler, SchedulerHandle};
+use descartes_core::{Component, Key, Scheduler, SchedulerHandle};
 use http::{HeaderName, HeaderValue, Method, Request, Response, Uri};
 use http_body_util::BodyExt;
 use std::collections::HashMap;
@@ -38,7 +38,7 @@ type Pending = Arc<
     Mutex<
         HashMap<
             String,
-            des_tokio::sync::oneshot::Sender<Result<Response<axum::body::Body>, Error>>,
+            descartes_tokio::sync::oneshot::Sender<Result<Response<axum::body::Body>, Error>>,
         >,
     >,
 >;
@@ -93,7 +93,7 @@ impl ClientBuilder {
         self
     }
 
-    pub fn install(self, sim: &mut des_core::Simulation) -> Result<InstalledClient, Error> {
+    pub fn install(self, sim: &mut descartes_core::Simulation) -> Result<InstalledClient, Error> {
         let endpoint_id = self
             .endpoint_id
             .unwrap_or_else(|| EndpointId::new(format!("client:{}", self.client_name)));
@@ -181,7 +181,7 @@ impl Client {
             });
         }
 
-        let deadline = timeout.map(|d| des_tokio::time::Instant::now() + d);
+        let deadline = timeout.map(|d| descartes_tokio::time::Instant::now() + d);
         loop {
             if let Some(ep) = self.endpoint_registry.get_endpoint_for_service(&self.service_name) {
                 return Ok(ep);
@@ -192,7 +192,7 @@ impl Client {
                     self.endpoint_registry.changed().await;
                 }
                 Some(d) => {
-                    let now = des_tokio::time::Instant::now();
+                    let now = descartes_tokio::time::Instant::now();
                     if now >= d {
                         return Err(Error::Timeout(format!(
                             "no endpoints for '{}'",
@@ -201,7 +201,7 @@ impl Client {
                     }
 
                     let remaining = d.saturating_duration_since(now);
-                    if des_tokio::time::timeout(remaining, self.endpoint_registry.changed())
+                    if descartes_tokio::time::timeout(remaining, self.endpoint_registry.changed())
                         .await
                         .is_err()
                     {
@@ -261,7 +261,7 @@ impl Client {
         )
         .with_correlation_id(correlation_id.clone());
 
-        let (tx, rx) = des_tokio::sync::oneshot::channel();
+        let (tx, rx) = descartes_tokio::sync::oneshot::channel();
         {
             let mut pending = self.pending.lock().unwrap();
             pending.insert(correlation_id.clone(), tx);
@@ -278,7 +278,7 @@ impl Client {
                 .await
                 .map_err(|_| Error::Cancelled)
                 .and_then(|r| r),
-            Some(d) => match des_tokio::time::timeout(d, rx).await {
+            Some(d) => match descartes_tokio::time::timeout(d, rx).await {
                 Ok(r) => r.map_err(|_| Error::Cancelled).and_then(|r| r),
                 Err(_) => {
                     let mut pending = self.pending.lock().unwrap();

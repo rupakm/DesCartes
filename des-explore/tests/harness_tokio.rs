@@ -3,11 +3,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use des_core::dists::{ArrivalPattern, PoissonArrivals};
-use des_core::{Component, Executor, Key, SimTime, Simulation, SimulationConfig};
-use des_explore::harness::{run_recorded, HarnessConfig};
-use des_explore::io::{read_trace_from_path, TraceFormat, TraceIoConfig};
-use des_explore::trace::TraceEvent;
+use descartes_core::dists::{ArrivalPattern, PoissonArrivals};
+use descartes_core::{Component, Executor, Key, SimTime, Simulation, SimulationConfig};
+use descartes_explore::harness::{run_recorded, HarnessConfig};
+use descartes_explore::io::{read_trace_from_path, TraceFormat, TraceIoConfig};
+use descartes_explore::trace::TraceEvent;
 
 #[derive(Debug)]
 enum Event {
@@ -27,7 +27,7 @@ impl Component for Driver {
         &mut self,
         self_id: Key<Self::Event>,
         event: &Self::Event,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         match event {
             Event::Tick => {
@@ -45,7 +45,7 @@ impl Component for Driver {
 fn temp_path(suffix: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "des_explore_harness_{}_{}{}",
+        "descartes_explore_harness_{}_{}{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -90,7 +90,7 @@ fn harness_records_trace_and_runs_tokio_tasks_json() {
             // Record at least one RNG draw via the provider.
             let provider = ctx.tracing_provider(sim.config().seed ^ 0x1111);
             let arrivals = PoissonArrivals::from_config(sim.config(), 1.0)
-                .with_provider(provider, des_core::draw_site!("arrival"));
+                .with_provider(provider, descartes_core::draw_site!("arrival"));
 
             let key = sim.add_component(Driver {
                 arrivals,
@@ -103,8 +103,8 @@ fn harness_records_trace_and_runs_tokio_tasks_json() {
         move |sim, _ctx| {
             // Exercise des-tokio runtime integration.
             let ran_task = ran_for_run.clone();
-            des_tokio::task::spawn(async move {
-                des_tokio::time::sleep(Duration::from_millis(1)).await;
+            descartes_tokio::task::spawn(async move {
+                descartes_tokio::time::sleep(Duration::from_millis(1)).await;
                 ran_task.store(true, Ordering::Relaxed);
             });
 
@@ -164,7 +164,7 @@ fn harness_records_trace_and_runs_tokio_tasks_postcard() {
 
             let provider = ctx.tracing_provider(sim.config().seed ^ 0x2222);
             let arrivals = PoissonArrivals::from_config(sim.config(), 1.0)
-                .with_provider(provider, des_core::draw_site!("arrival"));
+                .with_provider(provider, descartes_core::draw_site!("arrival"));
 
             let key = sim.add_component(Driver {
                 arrivals,
@@ -175,8 +175,8 @@ fn harness_records_trace_and_runs_tokio_tasks_postcard() {
             sim
         },
         move |sim, _ctx| {
-            des_tokio::task::spawn(async move {
-                des_tokio::time::sleep(Duration::from_millis(1)).await;
+            descartes_tokio::task::spawn(async move {
+                descartes_tokio::time::sleep(Duration::from_millis(1)).await;
             });
             sim.execute(Executor::timed(SimTime::from_duration(
                 Duration::from_millis(10),

@@ -13,7 +13,7 @@ pub mod runtime;
 #[macro_export]
 macro_rules! stable_id {
     ($domain:expr, $name:expr) => {{
-        const _ID: u64 = des_core::randomness::fnv1a64(concat!($domain, "::", $name));
+        const _ID: u64 = descartes_core::randomness::fnv1a64(concat!($domain, "::", $name));
         _ID
     }};
     ($name:expr) => {{
@@ -23,7 +23,7 @@ macro_rules! stable_id {
 
 /// Generate a callsite-unique deterministic identifier.
 ///
-/// This mirrors `des_core::draw_site!` but returns only the `site_id`.
+/// This mirrors `descartes_core::draw_site!` but returns only the `site_id`.
 #[macro_export]
 macro_rules! site_id {
     ($tag:expr) => {{

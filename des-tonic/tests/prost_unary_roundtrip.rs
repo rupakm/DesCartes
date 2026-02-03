@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
-use des_tonic::{Request, Response, Router, Transport};
+use descartes_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
+use descartes_tonic::{Request, Response, Router, Transport};
 use tonic::Status;
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -29,9 +29,9 @@ async fn unary_echo(
 }
 
 #[test]
-fn unary_prost_roundtrip_encodes_and_decodes() {
+fn unary_prost_roundtrip_encodescartes_and_decodes() {
     let mut sim = Simulation::new(SimulationConfig { seed: 1 });
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let transport = Transport::install_default(&mut sim);
 
@@ -50,7 +50,7 @@ fn unary_prost_roundtrip_encodes_and_decodes() {
     let out: Arc<std::sync::Mutex<Option<u32>>> = Arc::new(std::sync::Mutex::new(None));
     let out2 = out.clone();
 
-    des_tokio::task::spawn_local(async move {
+    descartes_tokio::task::spawn_local(async move {
         let resp: Response<EchoResponse> = channel
             .unary_prost::<EchoRequest, EchoResponse>(
                 "/svc.Echo/Unary",

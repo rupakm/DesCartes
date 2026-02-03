@@ -1,6 +1,6 @@
 //! Integration tests for the Task system
 
-use des_core::{Execute, Executor, SimTime, Simulation, Task, TaskHandle};
+use descartes_core::{Execute, Executor, SimTime, Simulation, Task, TaskHandle};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -171,7 +171,7 @@ fn test_custom_task_implementation() {
     impl Task for CounterTask {
         type Output = i32;
 
-        fn execute(self, _scheduler: &mut des_core::Scheduler) -> Self::Output {
+        fn execute(self, _scheduler: &mut descartes_core::Scheduler) -> Self::Output {
             self.count * 2
         }
     }
@@ -191,7 +191,7 @@ fn test_custom_task_implementation() {
 
 #[test]
 fn test_tasks_mixed_with_components() {
-    use des_core::{Component, Key};
+    use descartes_core::{Component, Key};
 
     #[derive(Debug)]
     enum TestEvent {
@@ -209,7 +209,7 @@ fn test_tasks_mixed_with_components() {
             &mut self,
             _self_id: Key<Self::Event>,
             event: &Self::Event,
-            scheduler: &mut des_core::Scheduler,
+            scheduler: &mut descartes_core::Scheduler,
         ) {
             match event {
                 TestEvent::Ping => {

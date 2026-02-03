@@ -11,27 +11,27 @@ categories.workspace = true
 
 [dependencies]
 # Core functionality - always included
-des-core = { version = "0.1.1", path = "../des-core" }
-des-tokio = { version = "0.1.1", path = "../des-tokio" }
-des-components = { version = "0.1.1", path = "../des-components" }
-des-metrics = { version = "0.1.1", path = "../des-metrics" }
-des-explore = { version = "0.1.1", path = "../des-explore" }
+descartes-core = { version = "0.1.1", path = "../des-core" }
+descartes-tokio = { version = "0.1.1", path = "../des-tokio" }
+descartes-components = { version = "0.1.1", path = "../des-components" }
+descartes-metrics = { version = "0.1.1", path = "../des-metrics" }
+descartes-explore = { version = "0.1.1", path = "../des-explore" }
 
 
 # Optional features for different use cases
-des-viz = { version = "0.1.1", path = "../des-viz", optional = true }
-des-tonic = { version = "0.1.1", path = "../des-tonic", optional = true }
-des-tower = { version = "0.1.1", path = "../des-tower", optional = true }
-des-axum = { version = "0.1.1", path = "../des-axum", optional = true }
+descartes-viz = { version = "0.1.1", path = "../des-viz", optional = true }
+descartes-tonic = { version = "0.1.1", path = "../des-tonic", optional = true }
+descartes-tower = { version = "0.1.1", path = "../des-tower", optional = true }
+descartes-axum = { version = "0.1.1", path = "../des-axum", optional = true }
 
 [features]
 default = []
 
 # Individual features
-viz = ["dep:des-viz"]
-tonic = ["dep:des-tonic"]
-tower = ["dep:des-tower"]
-axum = ["dep:des-axum"]
+viz = ["dep:descartes-viz"]
+tonic = ["dep:descartes-tonic"]
+tower = ["dep:descartes-tower"]
+axum = ["dep:descartes-axum"]
 
 # Convenience feature bundles
 full = ["viz", "tonic", "tower", "axum"]

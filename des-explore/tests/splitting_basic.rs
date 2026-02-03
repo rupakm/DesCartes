@@ -1,13 +1,13 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::dists::{ArrivalPattern, PoissonArrivals};
-use des_core::{Component, Key, SimTime, Simulation, SimulationConfig};
+use descartes_core::dists::{ArrivalPattern, PoissonArrivals};
+use descartes_core::{Component, Key, SimTime, Simulation, SimulationConfig};
 
-use des_explore::harness::HarnessContext;
-use des_explore::monitor::{Monitor, MonitorConfig, QueueId};
-use des_explore::splitting::{find_with_splitting, SplittingConfig};
-use des_explore::trace::Trace;
+use descartes_explore::harness::HarnessContext;
+use descartes_explore::monitor::{Monitor, MonitorConfig, QueueId};
+use descartes_explore::splitting::{find_with_splitting, SplittingConfig};
+use descartes_explore::trace::Trace;
 
 const Q: QueueId = QueueId(1);
 
@@ -29,7 +29,7 @@ impl Component for Toy {
         &mut self,
         self_id: Key<Self::Event>,
         _event: &Self::Event,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         let now = scheduler.time();
 
@@ -71,7 +71,7 @@ fn setup(
     let provider = ctx.branching_provider(prefix, cont_seed);
 
     let arrivals = PoissonArrivals::from_config(sim.config(), 1000.0)
-        .with_provider(provider, des_core::draw_site!("arrival"));
+        .with_provider(provider, descartes_core::draw_site!("arrival"));
 
     let key = sim.add_component(Toy {
         arrivals,

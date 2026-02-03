@@ -1,6 +1,6 @@
 use bytes::Bytes;
-use des_core::{Execute, Executor, SimTime, Simulation};
-use des_tonic::{ClientBuilder, Router, ServerBuilder, Transport};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
+use descartes_tonic::{ClientBuilder, Router, ServerBuilder, Transport};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tonic::{Request, Response, Status};
@@ -9,14 +9,14 @@ use tonic::{Request, Response, Status};
 fn client_streaming_end_to_end_via_server_endpoint() {
     std::thread::spawn(|| {
         let mut sim = Simulation::default();
-        des_tokio::runtime::install(&mut sim);
+        descartes_tokio::runtime::install(&mut sim);
 
         let transport = Transport::install_default(&mut sim);
 
         let mut router = Router::new();
         router.add_client_streaming(
             "/svc.Test/Upload",
-            |req: Request<des_tonic::DesStreaming<Bytes>>| async move {
+            |req: Request<descartes_tonic::DesStreaming<Bytes>>| async move {
                 let mut stream = req.into_inner();
                 let mut out = Vec::new();
 
@@ -55,7 +55,7 @@ fn client_streaming_end_to_end_via_server_endpoint() {
         let result: Arc<Mutex<Option<Result<Bytes, Status>>>> = Arc::new(Mutex::new(None));
         let result_out = result.clone();
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             let (sender, resp) = channel
                 .client_streaming("/svc.Test/Upload", Some(Duration::from_millis(200)))
                 .await

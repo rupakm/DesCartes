@@ -1,5 +1,5 @@
 [package]
-name = "des-tonic"
+name = "descartes-tonic"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,10 +8,10 @@ repository.workspace = true
 description = "tonic API utilities for DesCartes"
 
 [dependencies]
-des-core = { path = "../des-core" }
-des-tokio = { path = "../des-tokio" }
-des-components = { path = "../des-components" }
-des-tower = { path = "../des-tower" }
+descartes-core = { path = "../des-core" }
+descartes-tokio = { path = "../des-tokio" }
+descartes-components = { path = "../des-components" }
+descartes-tower = { path = "../des-tower" }
 
 # Tonic types only (no tonic::transport)
 tonic = "0.12"
@@ -24,7 +24,7 @@ rand = { workspace = true }
 
 # Example-only dependencies
 # (kept as dev-deps so des-tonic library stays minimal)
-des-explore = { path = "../des-explore" }
+descartes-explore = { path = "../des-explore" }
 
 # These are used directly by the example (Rust requires direct deps).
 tower = { workspace = true }

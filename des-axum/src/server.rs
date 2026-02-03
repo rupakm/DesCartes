@@ -7,11 +7,11 @@
 use crate::wire::{decode_request, encode_response, HttpRequestWire, HttpResponseWire};
 use crate::Error;
 use crate::util::{now, schedule_transport};
-use des_components::transport::{
+use descartes_components::transport::{
     EndpointId, EndpointInfo, MessageType, SharedEndpointRegistry, SimTransport, TransportEvent,
     TransportMessage,
 };
-use des_core::{Component, Key, Scheduler, SchedulerHandle};
+use descartes_core::{Component, Key, Scheduler, SchedulerHandle};
 use http::{HeaderName, HeaderValue, Method, Request, Response, Uri};
 use http_body_util::BodyExt;
 use std::time::Duration;
@@ -83,7 +83,7 @@ impl ServerBuilder {
         }
     }
 
-    pub fn install(self, sim: &mut des_core::Simulation) -> Result<InstalledServer, Error> {
+    pub fn install(self, sim: &mut descartes_core::Simulation) -> Result<InstalledServer, Error> {
         let endpoint = self.build();
         endpoint.start()?;
         let endpoint_id = endpoint.endpoint_id;
@@ -163,9 +163,9 @@ impl Component for ServerEndpoint {
 
                 let encoded_req = message.payload.clone();
 
-                des_tokio::task::spawn_local(async move {
+                descartes_tokio::task::spawn_local(async move {
                     if delay > Duration::ZERO {
-                        des_tokio::time::sleep(delay).await;
+                        descartes_tokio::time::sleep(delay).await;
                     }
 
                     let resp_wire = match decode_request(&encoded_req) {

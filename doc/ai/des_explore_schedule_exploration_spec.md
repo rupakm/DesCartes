@@ -5,9 +5,9 @@
 **Source of truth:** This is the authoritative specification for *schedule exploration* (backtracking, policy search, and later DPOR/MCTS) in this workspace.
 
 Related documents in `doc/ai/` provide background and record/replay details:
-- `doc/ai/des_event_scheduling_policies.md` (frontier + tokio policy hooks, recording/replay)
-- `doc/ai/des_tokio_concurrency_replay.md` (mutex/atomic tracing + replay validation)
-- `doc/ai/des_exploration_design.md` (older conceptual overview)
+- `doc/ai/descartes_event_scheduling_policies.md` (frontier + tokio policy hooks, recording/replay)
+- `doc/ai/descartes_tokio_concurrency_replay.md` (mutex/atomic tracing + replay validation)
+- `doc/ai/descartes_exploration_design.md` (older conceptual overview)
 
 ---
 
@@ -37,7 +37,7 @@ For v1 we accept:
 
 - Decision points explored:
   - DES same-time **frontier ordering** decisions.
-  - `des_tokio` **ready-task ordering** decisions.
+  - `descartes_tokio` **ready-task ordering** decisions.
 - Exploration strategies:
   - Backtracking core (rerun + replay prefix + force a deviation).
   - **Policy search** (Algorithm 2): optimize a scheduler policy using rollouts.

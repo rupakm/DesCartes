@@ -1,15 +1,15 @@
 use bytes::Bytes;
-use des_components::transport::{
+use descartes_components::transport::{
     LatencyConfig, LatencyJitterModel, SharedEndpointRegistry, SimTransport,
 };
-use des_core::{Executor, SimTime, Simulation, SimulationConfig};
-use des_explore::harness::{
+use descartes_core::{Executor, SimTime, Simulation, SimulationConfig};
+use descartes_explore::harness::{
     run_recorded, run_replayed, HarnessConfig, HarnessFrontierConfig, HarnessFrontierPolicy,
     HarnessTokioReadyConfig, HarnessTokioReadyPolicy,
 };
-use des_explore::io::TraceFormat;
-use des_tonic::{ClientBuilder, Router, ServerBuilder};
-use des_tower::{
+use descartes_explore::io::TraceFormat;
+use descartes_tonic::{ClientBuilder, Router, ServerBuilder};
+use descartes_tower::{
     DesGlobalConcurrencyLimitLayer, DesRateLimitLayer, DesServiceBuilder, ServiceError, SimBody,
 };
 use http::{Request as HttpRequest, Response as HttpResponse};
@@ -58,7 +58,7 @@ impl SharedStats {
 // A DES-aware bounded buffer (queue) in front of a Tower service.
 //
 // This is NOT `tower::buffer::Buffer` (which assumes a real tokio runtime).
-// Instead, it queues requests on a deterministic `des_tokio::sync::mpsc` channel
+// Instead, it queues requests on a deterministic `descartes_tokio::sync::mpsc` channel
 // and processes them via a single local worker task.
 // -----------------------------------------------------------------------------
 
@@ -108,12 +108,12 @@ type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 type BufferedItem = (
     HttpRequest<SimBody>,
-    des_tokio::sync::oneshot::Sender<Result<HttpResponse<SimBody>, ServiceError>>,
+    descartes_tokio::sync::oneshot::Sender<Result<HttpResponse<SimBody>, ServiceError>>,
 );
 
 struct DesBuffer {
     state: Arc<BufferState>,
-    tx: des_tokio::sync::mpsc::Sender<BufferedItem>,
+    tx: descartes_tokio::sync::mpsc::Sender<BufferedItem>,
 
     // Cached permit acquired in poll_ready (Tower contract).
     permit: bool,
@@ -127,11 +127,11 @@ impl DesBuffer {
         S::Future: 'static,
     {
         let state = BufferState::new(capacity);
-        let (tx, mut rx) = des_tokio::sync::mpsc::channel::<BufferedItem>(capacity);
+        let (tx, mut rx) = descartes_tokio::sync::mpsc::channel::<BufferedItem>(capacity);
 
         // Single worker task: dequeue then call the inner service.
         let state_for_worker = state.clone();
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             while let Some((req, resp_tx)) = rx.recv().await {
                 // Slot represents queued capacity, not in-flight.
                 state_for_worker.release();
@@ -195,7 +195,7 @@ impl Service<HttpRequest<SimBody>> for DesBuffer {
             return Box::pin(async { Err(ServiceError::NotReady) });
         }
 
-        let (tx, rx) = des_tokio::sync::oneshot::channel();
+        let (tx, rx) = descartes_tokio::sync::oneshot::channel();
 
         if let Err(_e) = self.tx.try_send((req, tx)) {
             // Channel full/closed. Release the slot we just acquired.
@@ -209,7 +209,7 @@ impl Service<HttpRequest<SimBody>> for DesBuffer {
 
 async fn unary_with_timeout_retry(
     stats: Arc<SharedStats>,
-    channel: des_tonic::Channel,
+    channel: descartes_tonic::Channel,
     method: &'static str,
     payload: Bytes,
     timeout: Duration,
@@ -231,7 +231,7 @@ async fn unary_with_timeout_retry(
             Err(status) if status.code() == Code::DeadlineExceeded && attempt <= max_retries => {
                 stats.timeouts.fetch_add(1, Ordering::Relaxed);
                 stats.retries.fetch_add(1, Ordering::Relaxed);
-                des_tokio::time::sleep(backoff).await;
+                descartes_tokio::time::sleep(backoff).await;
                 continue;
             }
             Err(status) => return Err(status),
@@ -333,7 +333,7 @@ fn run_open_loop_scenario(sim: &mut Simulation) -> Stats {
             stats_for_send.sent.fetch_add(1, Ordering::Relaxed);
             let stats_for_task = stats_for_send.clone();
 
-            des_tokio::task::spawn_local(async move {
+            descartes_tokio::task::spawn_local(async move {
                 let payload = Bytes::from(format!("req-{i}"));
 
                 let result = unary_with_timeout_retry(
@@ -363,14 +363,14 @@ fn run_open_loop_scenario(sim: &mut Simulation) -> Stats {
 }
 
 fn record_and_replay() -> Result<(), Box<dyn std::error::Error>> {
-    // Note: des_tokio installs into TLS and can only be installed once per thread.
+    // Note: descartes_tokio installs into TLS and can only be installed once per thread.
     // Run record+replay in fresh threads to keep this example single-process.
 
-    let trace_path = std::env::temp_dir().join("des_tonic_open_loop_tower_retry_trace.json");
+    let trace_path = std::env::temp_dir().join("descartes_tonic_open_loop_tower_retry_trace.json");
 
     let record_cfg = HarnessConfig {
         sim_config: SimulationConfig { seed: 1 },
-        scenario: "des_tonic_open_loop_tower_retry".to_string(),
+        scenario: "descartes_tonic_open_loop_tower_retry".to_string(),
         install_tokio: true,
         tokio_ready: Some(HarnessTokioReadyConfig {
             policy: HarnessTokioReadyPolicy::Fifo,
@@ -399,7 +399,7 @@ fn record_and_replay() -> Result<(), Box<dyn std::error::Error>> {
 
     let replay_cfg = HarnessConfig {
         sim_config: SimulationConfig { seed: 1 },
-        scenario: "des_tonic_open_loop_tower_retry_replay".to_string(),
+        scenario: "descartes_tonic_open_loop_tower_retry_replay".to_string(),
         install_tokio: true,
         tokio_ready: None,
         tokio_mutex: None,

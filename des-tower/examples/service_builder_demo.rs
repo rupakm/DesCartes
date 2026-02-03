@@ -3,8 +3,8 @@
 //! This example shows how to use DesServiceBuilder as a drop-in replacement
 //! for Tower's ServiceBuilder, with all the same methods available.
 
-use des_core::Simulation;
-use des_tower::{DesRetryPolicy, DesServiceBuilder, SimBody};
+use descartes_core::Simulation;
+use descartes_tower::{DesRetryPolicy, DesServiceBuilder, SimBody};
 use http::{Method, Request};
 use std::time::Duration;
 use tower::Service;
@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("================================================================");
 
     let mut simulation = Simulation::default();
-    des_tokio::runtime::install(&mut simulation);
+    descartes_tokio::runtime::install(&mut simulation);
 
     // Demonstrate basic service creation
     println!("\n1. Basic Service Creation:");
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _optional_service = DesServiceBuilder::new("optional-server".to_string())
         .thread_capacity(5)
         .service_time(Duration::from_millis(75))
-        .option_layer(Some(des_tower::DesConcurrencyLimitLayer::new(2)))
+        .option_layer(Some(descartes_tower::DesConcurrencyLimitLayer::new(2)))
         .build(&mut simulation)?;
     println!("   ✓ Created service with optional concurrency limit layer");
 
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Demonstrate global concurrency limiting
     println!("\n5. Global Concurrency Limiting:");
-    let global_state = des_tower::limit::global_concurrency::GlobalConcurrencyLimitState::new(5);
+    let global_state = descartes_tower::limit::global_concurrency::GlobalConcurrencyLimitState::new(5);
     let _global_service = DesServiceBuilder::new("global-server".to_string())
         .thread_capacity(10)
         .service_time(Duration::from_millis(60))

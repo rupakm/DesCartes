@@ -1,5 +1,5 @@
 [package]
-name = "des-core"
+name = "descartes-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -27,7 +27,7 @@ features = [
 [dev-dependencies]
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
-des-explore = { path = "../des-explore" }
+descartes-explore = { path = "../des-explore" }
 
 [features]
 default = ["formal"]

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64 as StdAtomicU64, Ordering};
 
-use des_core::async_runtime;
+use descartes_core::async_runtime;
 
 use crate::concurrency::ConcurrencyEvent;
 
@@ -21,7 +21,7 @@ impl AtomicU64 {
     /// Construct an atomic with a stable name-based id.
     pub fn new_named(name: &'static str, value: u64) -> Self {
         let site_id =
-            des_core::randomness::runtime_site_id("des_tokio::sync::atomic::AtomicU64", name);
+            descartes_core::randomness::runtime_site_id("des_tokio::sync::atomic::AtomicU64", name);
         Self::new(site_id, value)
     }
 

@@ -2,18 +2,18 @@ use std::cmp::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::{Component, Key, Scheduler, SimTime, Simulation, SimulationConfig};
+use descartes_core::{Component, Key, Scheduler, SimTime, Simulation, SimulationConfig};
 
-use des_explore::harness::HarnessContext;
-use des_explore::monitor::{Monitor, MonitorConfig, MonitorStatus, ScoreWeights};
-use des_explore::policy::ActionDistribution;
-use des_explore::policy_search::{
+use descartes_explore::harness::HarnessContext;
+use descartes_explore::monitor::{Monitor, MonitorConfig, MonitorStatus, ScoreWeights};
+use descartes_explore::policy::ActionDistribution;
+use descartes_explore::policy_search::{
     search_policy, BaseFrontierPolicy, BaseTokioReadyPolicy, FailurePhase, PolicySearchConfig,
     PolicySearchObjective,
 };
-use des_explore::schedule_explore::DecisionKey;
-use des_explore::stats::wilson_interval;
-use des_explore::trace::Trace;
+use descartes_explore::schedule_explore::DecisionKey;
+use descartes_explore::stats::wilson_interval;
+use descartes_explore::trace::Trace;
 
 #[derive(Debug, Clone)]
 enum Ev {
@@ -94,7 +94,7 @@ fn hit_bad(status: &MonitorStatus) -> bool {
     status.score > 0.0
 }
 
-fn canonical_policy(policy: &des_explore::policy::TablePolicy) -> Vec<(DecisionKey, u64)> {
+fn canonical_policy(policy: &descartes_explore::policy::TablePolicy) -> Vec<(DecisionKey, u64)> {
     let mut out: Vec<(DecisionKey, u64)> = policy
         .keys()
         .filter_map(|k| match policy.get(k) {

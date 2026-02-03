@@ -36,10 +36,10 @@
 //! actually finishes processing, regardless of whether the service was called from within
 //! or outside of event processing.
 
-use des_components::{ClientEvent, Server, ServerEvent};
-use des_core::dists::{ConstantServiceTime, ExponentialDistribution, ServiceTimeDistribution};
-use des_core::{defer_wake, in_scheduler_context, SchedulerHandle as CoreSchedulerHandle};
-use des_core::{
+use descartes_components::{ClientEvent, Server, ServerEvent};
+use descartes_core::dists::{ConstantServiceTime, ExponentialDistribution, ServiceTimeDistribution};
+use descartes_core::{defer_wake, in_scheduler_context, SchedulerHandle as CoreSchedulerHandle};
+use descartes_core::{
     Component, Key, RequestAttempt, RequestAttemptId, RequestId, Response, Scheduler, SimTime,
     Simulation,
 };

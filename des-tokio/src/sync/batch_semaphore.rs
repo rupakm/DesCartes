@@ -1,4 +1,4 @@
-use des_core::async_runtime;
+use descartes_core::async_runtime;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Mutex;
 use std::task::Waker;

@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use des_core::{SimTime, Simulation, SimulationConfig};
+use descartes_core::{SimTime, Simulation, SimulationConfig};
 
 use crate::harness::{HarnessContext, HarnessError};
 use crate::monitor::{Monitor, MonitorStatus};
@@ -147,7 +147,7 @@ pub fn find_with_splitting(
             if cfg.install_tokio {
                 #[cfg(feature = "tokio")]
                 {
-                    des_tokio::runtime::install(&mut sim);
+                    descartes_tokio::runtime::install(&mut sim);
                 }
 
                 #[cfg(not(feature = "tokio"))]

@@ -7,8 +7,8 @@ use std::sync::{
 };
 use std::task::{Context, Poll, Waker};
 
-use des_core::async_runtime::{RuntimeEvent, TaskId};
-use des_core::{defer_wake, Key};
+use descartes_core::async_runtime::{RuntimeEvent, TaskId};
+use descartes_core::{defer_wake, Key};
 
 use crate::{runtime, runtime_internal};
 

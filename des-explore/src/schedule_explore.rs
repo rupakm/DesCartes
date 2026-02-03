@@ -5,7 +5,7 @@
 //! traces and scripted overrides.
 //!
 //! A typical loop is:
-//! - record a baseline run (see `des_explore::harness`)
+//! - record a baseline run (see `descartes_explore::harness`)
 //! - call [`extract_decisions`] to obtain [`ObservedDecision`] values
 //! - build a [`DecisionScript`] from those decisions
 //! - replay a run while forcing some decisions via `run_controlled`

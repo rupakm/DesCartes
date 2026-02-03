@@ -2,14 +2,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::{Component, Key, SimTime, Simulation, SimulationConfig};
+use descartes_core::{Component, Key, SimTime, Simulation, SimulationConfig};
 
-use des_explore::monitor::{Monitor, MonitorConfig, MonitorStatus, ScoreWeights};
-use des_explore::policy_search::{
+use descartes_explore::monitor::{Monitor, MonitorConfig, MonitorStatus, ScoreWeights};
+use descartes_explore::policy_search::{
     search_policy, BaseFrontierPolicy, BaseTokioReadyPolicy, PolicySearchConfig,
     PolicySearchObjective,
 };
-use des_explore::trace::Trace;
+use descartes_explore::trace::Trace;
 
 #[derive(Debug)]
 enum Ev {
@@ -33,7 +33,7 @@ impl Component for TokioReadyOrderBug {
         &mut self,
         _self_id: Key<Self::Event>,
         event: &Self::Event,
-        _scheduler: &mut des_core::Scheduler,
+        _scheduler: &mut descartes_core::Scheduler,
     ) {
         match event {
             Ev::Start => {
@@ -41,22 +41,22 @@ impl Component for TokioReadyOrderBug {
 
                 // Spawn order matters: baseline FIFO polls init first.
                 let state_init = state.clone();
-                des_tokio::task::spawn(async move {
+                descartes_tokio::task::spawn(async move {
                     state_init.store(1, Ordering::SeqCst);
                 });
 
                 let state_check = state.clone();
                 let monitor = self.monitor.clone();
-                des_tokio::task::spawn(async move {
+                descartes_tokio::task::spawn(async move {
                     let now =
-                        des_core::async_runtime::current_sim_time().unwrap_or_else(SimTime::zero);
+                        descartes_core::async_runtime::current_sim_time().unwrap_or_else(SimTime::zero);
 
                     if state_check.load(Ordering::SeqCst) == 0 {
                         monitor.lock().unwrap().observe_drop(now);
                     }
 
                     // Ensure the monitor window flushes (advance simulated time).
-                    des_tokio::time::sleep(Duration::from_millis(1)).await;
+                    descartes_tokio::time::sleep(Duration::from_millis(1)).await;
                 });
             }
         }
@@ -65,7 +65,7 @@ impl Component for TokioReadyOrderBug {
 
 fn setup(
     config: SimulationConfig,
-    _ctx: &des_explore::harness::HarnessContext,
+    _ctx: &descartes_explore::harness::HarnessContext,
     _prefix: Option<&Trace>,
     _cont_seed: u64,
 ) -> (Simulation, Arc<Mutex<Monitor>>) {

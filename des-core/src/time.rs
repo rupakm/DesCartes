@@ -154,7 +154,7 @@ impl From<f64> for SimTime {
     ///
     /// # Examples
     /// ```
-    /// # use des_core::SimTime;
+    /// # use descartes_core::SimTime;
     /// let time = SimTime::from(1.5); // 1.5 seconds
     /// assert_eq!(time.as_nanos(), 1_500_000_000);
     /// ```

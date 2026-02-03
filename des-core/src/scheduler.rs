@@ -421,7 +421,7 @@ fn nanos_to_simtime(nanos: u64) -> SimTime {
 /// # Example
 ///
 /// ```rust
-/// # use des_core::Scheduler;
+/// # use descartes_core::Scheduler;
 /// let scheduler = Scheduler::default();
 /// let clock = scheduler.clock();
 /// assert_eq!(clock.time(), scheduler.time());

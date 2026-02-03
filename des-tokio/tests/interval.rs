@@ -1,19 +1,19 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::{Execute, Executor, SimTime, Simulation};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
 
 #[test]
 fn interval_first_tick_is_immediate() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let out: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
     let out2 = out.clone();
 
-    des_tokio::task::spawn(async move {
-        let start = des_tokio::time::Instant::now();
-        let mut intv = des_tokio::time::interval(Duration::from_millis(10));
+    descartes_tokio::task::spawn(async move {
+        let start = descartes_tokio::time::Instant::now();
+        let mut intv = descartes_tokio::time::interval(Duration::from_millis(10));
 
         let t0 = intv.tick().await;
         let t1 = intv.tick().await;
@@ -37,18 +37,18 @@ fn interval_first_tick_is_immediate() {
 #[test]
 fn interval_missed_tick_behavior_burst_catches_up() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let out: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
     let out2 = out.clone();
 
-    des_tokio::task::spawn(async move {
-        let start = des_tokio::time::Instant::now();
-        let mut intv = des_tokio::time::interval(Duration::from_millis(10));
-        intv.set_missed_tick_behavior(des_tokio::time::MissedTickBehavior::Burst);
+    descartes_tokio::task::spawn(async move {
+        let start = descartes_tokio::time::Instant::now();
+        let mut intv = descartes_tokio::time::interval(Duration::from_millis(10));
+        intv.set_missed_tick_behavior(descartes_tokio::time::MissedTickBehavior::Burst);
 
         let t0 = intv.tick().await;
-        des_tokio::time::sleep(Duration::from_millis(35)).await;
+        descartes_tokio::time::sleep(Duration::from_millis(35)).await;
         let t1 = intv.tick().await;
         let t2 = intv.tick().await;
         let t3 = intv.tick().await;
@@ -74,18 +74,18 @@ fn interval_missed_tick_behavior_burst_catches_up() {
 #[test]
 fn interval_missed_tick_behavior_delay_resets_schedule() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let out: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
     let out2 = out.clone();
 
-    des_tokio::task::spawn(async move {
-        let start = des_tokio::time::Instant::now();
-        let mut intv = des_tokio::time::interval(Duration::from_millis(10));
-        intv.set_missed_tick_behavior(des_tokio::time::MissedTickBehavior::Delay);
+    descartes_tokio::task::spawn(async move {
+        let start = descartes_tokio::time::Instant::now();
+        let mut intv = descartes_tokio::time::interval(Duration::from_millis(10));
+        intv.set_missed_tick_behavior(descartes_tokio::time::MissedTickBehavior::Delay);
 
         let t0 = intv.tick().await;
-        des_tokio::time::sleep(Duration::from_millis(35)).await;
+        descartes_tokio::time::sleep(Duration::from_millis(35)).await;
         let t1 = intv.tick().await;
         let t2 = intv.tick().await;
         let t3 = intv.tick().await;
@@ -111,18 +111,18 @@ fn interval_missed_tick_behavior_delay_resets_schedule() {
 #[test]
 fn interval_missed_tick_behavior_skip_skips_to_next_multiple() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let out: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
     let out2 = out.clone();
 
-    des_tokio::task::spawn(async move {
-        let start = des_tokio::time::Instant::now();
-        let mut intv = des_tokio::time::interval(Duration::from_millis(10));
-        intv.set_missed_tick_behavior(des_tokio::time::MissedTickBehavior::Skip);
+    descartes_tokio::task::spawn(async move {
+        let start = descartes_tokio::time::Instant::now();
+        let mut intv = descartes_tokio::time::interval(Duration::from_millis(10));
+        intv.set_missed_tick_behavior(descartes_tokio::time::MissedTickBehavior::Skip);
 
         let t0 = intv.tick().await;
-        des_tokio::time::sleep(Duration::from_millis(35)).await;
+        descartes_tokio::time::sleep(Duration::from_millis(35)).await;
         let t1 = intv.tick().await;
         let t2 = intv.tick().await;
         let t3 = intv.tick().await;

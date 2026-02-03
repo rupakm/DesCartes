@@ -3,7 +3,7 @@
 This document describes the design for **deterministic** scheduling/tie-breaking policies in this Rust workspace, across:
 
 - `des-core`: discrete-event simulation scheduler and async runtime
-- `des_tokio`: Tokio-like facade built on `des-core::async_runtime`
+- `des-tokio`: Tokio-like facade built on `des-core::async_runtime`
 - `des-explore`: opt-in tracing + record/replay + exploration harness
 
 The intent is to preserve **default deterministic behavior** while enabling **opt-in experimentation** (randomized heuristics, record/replay) without adding event priorities or schedule enumeration.
@@ -31,16 +31,16 @@ The intent is to preserve **default deterministic behavior** while enabling **op
    - Event priorities.
    - Multi-threading.
    - Systematic schedule exploration algorithms.
-     - See `doc/ai/des_explore_schedule_exploration_spec.md` for backtracking/policy search/DPOR/MCTS.
+     - See `doc/ai/descartes_explore_schedule_exploration_spec.md` for backtracking/policy search/DPOR/MCTS.
 
 ---
 
 ## Terminology
 
-- **Simulation time**: `des_core::SimTime`.
+- **Simulation time**: `descartes_core::SimTime`.
 - **Event**: a scheduled component event (`EventEntry::Component`) or a scheduled task event (`EventEntry::Task`) in the DES scheduler.
 - **Same-time frontier**: all enabled scheduled events at the current minimum time `t`.
-- **Ready async tasks**: tasks in `des_core::async_runtime::DesRuntime` that should be polled in the current poll cycle.
+- **Ready async tasks**: tasks in `descartes_core::async_runtime::DesRuntime` that should be polled in the current poll cycle.
 - **Choice point**: a moment where more than one runnable action exists and an ordering decision must be made.
 
 ---
@@ -67,11 +67,11 @@ To enable controlled experimentation, same-time events are treated as a **fronti
 
 Key API concepts (implemented):
 
-- `des_core::scheduler::EventFrontierPolicy`
+- `descartes_core::scheduler::EventFrontierPolicy`
   - `choose(time: SimTime, frontier: &[FrontierEvent]) -> usize`
-- `des_core::scheduler::FrontierEvent`
+- `descartes_core::scheduler::FrontierEvent`
   - stable descriptor: `seq`, kind, optional IDs
-- `des_core::scheduler::FrontierSignature`
+- `descartes_core::scheduler::FrontierSignature`
   - stable choice-point signature: `{ time_nanos, frontier_seqs }`
 
 ### A.3 Policies
@@ -144,7 +144,7 @@ Replay runs install replay frontier policy from an input trace and return struct
 
 ### C.1 Where tokio nondeterminism comes from
 
-`des_tokio` uses `des_core::async_runtime::DesRuntime`.
+`descartes_tokio` uses `descartes_core::async_runtime::DesRuntime`.
 
 Inside a single DES event like `RuntimeEvent::Poll`, the runtime currently polls tasks in **FIFO ready-queue order** (`VecDeque::pop_front`). This is deterministic, but it is a *second* scheduling layer distinct from the DES event queue.
 
@@ -163,7 +163,7 @@ It will **not** apply to:
 
 ### C.3 Ready-task policy (implemented)
 
-`des_core::async_runtime::DesRuntime` supports a second, separate policy layer for choosing which ready async task to poll next within a single `RuntimeEvent::Poll` cycle:
+`descartes_core::async_runtime::DesRuntime` supports a second, separate policy layer for choosing which ready async task to poll next within a single `RuntimeEvent::Poll` cycle:
 
 - `ReadyTaskPolicy`
   - `choose(time: SimTime, ready: &[async_runtime::TaskId]) -> usize`
@@ -178,12 +178,12 @@ Implementation notes:
 - `poll_ready_tasks` snapshots the ready set at the start of a cycle.
 - Tasks woken during polling are queued for the next cycle (snapshot semantics).
 
-### C.4 Exposing opt-in configuration via des_tokio (implemented)
+### C.4 Exposing opt-in configuration via descartes_tokio (implemented)
 
-- Default: `des_tokio::runtime::install(&mut Simulation)` remains FIFO.
+- Default: `descartes_tokio::runtime::install(&mut Simulation)` remains FIFO.
 - Opt-in configuration:
-  - `des_tokio::runtime::install_with(sim, configure: impl FnOnce(&mut DesRuntime))`
-  - `des_tokio::runtime::install_with_tokio(sim, TokioInstallConfig { .. }, configure)` (adds tokio-level knobs like mutex waiter policy + concurrency recorder)
+  - `descartes_tokio::runtime::install_with(sim, configure: impl FnOnce(&mut DesRuntime))`
+  - `descartes_tokio::runtime::install_with_tokio(sim, TokioInstallConfig { .. }, configure)` (adds tokio-level knobs like mutex waiter policy + concurrency recorder)
 
 This keeps defaults unchanged while enabling exploration tooling (and end users) to inject a different ready-task policy.
 

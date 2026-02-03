@@ -128,7 +128,7 @@ impl Router {
                 let (metadata, mut typed_stream, extensions) = resp.into_parts();
 
                 let (tx_bytes, bytes_stream) = stream::channel::<Bytes>(16);
-                des_tokio::task::spawn_local(async move {
+                descartes_tokio::task::spawn_local(async move {
                     while let Some(item) = typed_stream.next().await {
                         match item {
                             Ok(msg) => {
@@ -185,7 +185,7 @@ impl Router {
                 let (metadata, extensions, mut bytes_stream) = req_bytes.into_parts();
 
                 let (tx_typed, typed_stream) = stream::channel::<Req>(16);
-                des_tokio::task::spawn_local(async move {
+                descartes_tokio::task::spawn_local(async move {
                     while let Some(item) = bytes_stream.next().await {
                         match item {
                             Ok(bytes) => match Req::decode(bytes) {
@@ -255,7 +255,7 @@ impl Router {
                 let (metadata, extensions, mut bytes_stream) = req_bytes.into_parts();
 
                 let (tx_typed, typed_stream) = stream::channel::<Req>(16);
-                des_tokio::task::spawn_local(async move {
+                descartes_tokio::task::spawn_local(async move {
                     while let Some(item) = bytes_stream.next().await {
                         match item {
                             Ok(bytes) => match Req::decode(bytes) {
@@ -287,7 +287,7 @@ impl Router {
                 let (metadata, mut out_typed, extensions) = resp.into_parts();
 
                 let (tx_bytes, out_bytes) = stream::channel::<Bytes>(16);
-                des_tokio::task::spawn_local(async move {
+                descartes_tokio::task::spawn_local(async move {
                     while let Some(item) = out_typed.next().await {
                         match item {
                             Ok(msg) => {
@@ -370,7 +370,7 @@ mod tests {
                 |_req| async move { Ok(Response::new(Bytes::new())) },
             )
             .add_server_streaming("/svc.S/S", |_req| async move {
-                let (_tx, rx) = des_tokio::sync::mpsc::channel(1);
+                let (_tx, rx) = descartes_tokio::sync::mpsc::channel(1);
                 Ok(Response::new(DesStreaming::new(rx)))
             })
             .add_client_streaming(
@@ -378,7 +378,7 @@ mod tests {
                 |_req| async move { Ok(Response::new(Bytes::new())) },
             )
             .add_bidi_streaming("/svc.B/B", |_req| async move {
-                let (_tx, rx) = des_tokio::sync::mpsc::channel(1);
+                let (_tx, rx) = descartes_tokio::sync::mpsc::channel(1);
                 Ok(Response::new(DesStreaming::new(rx)))
             });
 

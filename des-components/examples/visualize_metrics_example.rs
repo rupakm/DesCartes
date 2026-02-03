@@ -7,10 +7,10 @@
 //!
 //! Run with: cargo run --example visualize_metrics_example
 
-use des_core::SimTime;
-use des_metrics::SimulationMetrics;
-use des_viz::charts::{latency, percentiles, throughput};
-use des_viz::report::generate_html_report;
+use descartes_core::SimTime;
+use descartes_metrics::SimulationMetrics;
+use descartes_viz::charts::{latency, percentiles, throughput};
+use descartes_viz::report::generate_html_report;
 use std::time::Duration;
 
 fn main() {

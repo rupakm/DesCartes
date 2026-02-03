@@ -3,8 +3,8 @@
 //! These tests validate the retry functionality and demonstrate
 //! how RetryTask integrates with Tower services.
 
-use des_core::{task::RetryTask, Scheduler, SimTime, Simulation, Task};
-use des_tower::{DesRetryLayer, DesRetryPolicy, DesServiceBuilder, SimBody};
+use descartes_core::{task::RetryTask, Scheduler, SimTime, Simulation, Task};
+use descartes_tower::{DesRetryLayer, DesRetryPolicy, DesServiceBuilder, SimBody};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -108,11 +108,11 @@ fn test_retry_task_max_attempts() {
 }
 
 #[test]
-fn test_des_retry_layer_creation() {
+fn test_descartes_retry_layer_creation() {
     println!("\n=== DesRetryLayer Creation Test ===\n");
 
     let mut simulation = Simulation::default();
-    des_tokio::runtime::install(&mut simulation);
+    descartes_tokio::runtime::install(&mut simulation);
 
     // Create base service
     let base_service = DesServiceBuilder::new("layered-retry-service".to_string())
@@ -166,12 +166,12 @@ fn test_retry_task_exponential_backoff_calculation() {
 fn test_retry_metadata_attempt_numbering() {
     println!("\n=== Retry Metadata Attempt Numbering Test ===\n");
 
-    use des_core::RequestId;
-    use des_tower::retry::metadata;
+    use descartes_core::RequestId;
+    use descartes_tower::retry::metadata;
 
     // Test creating retry metadata for a new request
     let original_request_id = RequestId(12345);
-    let first_attempt_meta = des_tower::retry::RetryMetadata::new(original_request_id);
+    let first_attempt_meta = descartes_tower::retry::RetryMetadata::new(original_request_id);
 
     assert_eq!(first_attempt_meta.original_request_id, original_request_id);
     assert_eq!(first_attempt_meta.attempt_number, 1);
@@ -241,7 +241,7 @@ fn test_tower_scheduler_handle_attempt_creation() {
     println!("\n=== TowerSchedulerHandle Attempt Creation Test ===\n");
 
     let mut simulation = Simulation::default();
-    des_tokio::runtime::install(&mut simulation);
+    descartes_tokio::runtime::install(&mut simulation);
 
     // Create a service to get access to the TowerSchedulerHandle
     let _service = DesServiceBuilder::new("attempt-test-service".to_string())
@@ -259,8 +259,8 @@ fn test_tower_scheduler_handle_attempt_creation() {
 
     // We can't directly access the TowerSchedulerHandle from the service,
     // but we can test the metadata system that it uses
-    use des_core::RequestId;
-    use des_tower::retry::metadata;
+    use descartes_core::RequestId;
+    use descartes_tower::retry::metadata;
 
     // Simulate what TowerSchedulerHandle.create_request_attempt() does
 
@@ -277,7 +277,7 @@ fn test_tower_scheduler_handle_attempt_creation() {
         .unwrap();
 
     let original_request_id = RequestId(98765);
-    let retry_meta = des_tower::retry::RetryMetadata::new(original_request_id).next_attempt(); // This would be attempt 2
+    let retry_meta = descartes_tower::retry::RetryMetadata::new(original_request_id).next_attempt(); // This would be attempt 2
 
     metadata::add_retry_metadata(&mut retry_request, retry_meta);
 

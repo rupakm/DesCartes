@@ -1,9 +1,9 @@
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex as StdMutex};
 
-use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
-use des_explore::prelude::*;
-use des_explore::trace::TraceEvent;
+use descartes_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
+use descartes_explore::prelude::*;
+use descartes_explore::trace::TraceEvent;
 
 #[derive(Debug, Clone, Copy)]
 enum Pattern {
@@ -17,12 +17,12 @@ enum Pattern {
 fn run_pattern_record_and_replay(pattern: Pattern, schedule_seed: u64) {
     let scenario = format!("thread_patterns_{pattern:?}_{schedule_seed}");
 
-    // Record in one OS thread (des_tokio uses TLS for install).
+    // Record in one OS thread (descartes_tokio uses TLS for install).
     let (trace, recorded_result) = std::thread::spawn({
         let scenario = scenario.clone();
         move || {
             let trace_path = std::env::temp_dir().join(format!(
-                "des_explore_thread_patterns_record_{}_{}.json",
+                "descartes_explore_thread_patterns_record_{}_{}.json",
                 std::process::id(),
                 scenario
             ));
@@ -70,7 +70,7 @@ fn run_pattern_record_and_replay(pattern: Pattern, schedule_seed: u64) {
     // Replay in a separate OS thread.
     let replayed_result = std::thread::spawn(move || {
         let trace_path = std::env::temp_dir().join(format!(
-            "des_explore_thread_patterns_replay_{}_{}.json",
+            "descartes_explore_thread_patterns_replay_{}_{}.json",
             std::process::id(),
             scenario
         ));
@@ -115,8 +115,8 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
 
     match pattern {
         Pattern::MutexCounter => {
-            let mutex_id = des_tokio::stable_id!("thread_patterns", "mutex_counter");
-            let counter = des_tokio::sync::Mutex::new_with_id(mutex_id, 0u64);
+            let mutex_id = descartes_tokio::stable_id!("thread_patterns", "mutex_counter");
+            let counter = descartes_tokio::sync::Mutex::new_with_id(mutex_id, 0u64);
 
             let tasks = 8;
             let iters = 50;
@@ -124,18 +124,18 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
 
             for _ in 0..tasks {
                 let c = counter.clone();
-                handles.push(des_tokio::thread::spawn(async move {
+                handles.push(descartes_tokio::thread::spawn(async move {
                     for _ in 0..iters {
                         let mut g = c.lock().await;
                         *g += 1;
                         drop(g);
-                        des_tokio::thread::yield_now().await;
+                        descartes_tokio::thread::yield_now().await;
                     }
                 }));
             }
 
             let result_out = result.clone();
-            des_tokio::thread::spawn(async move {
+            descartes_tokio::thread::spawn(async move {
                 for h in handles {
                     h.await.expect("worker should complete");
                 }
@@ -147,8 +147,8 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
         }
 
         Pattern::AtomicFetchAddCounter => {
-            let site_id = des_tokio::stable_id!("thread_patterns", "atomic_fetch_add");
-            let counter = Arc::new(des_tokio::sync::AtomicU64::new(site_id, 0));
+            let site_id = descartes_tokio::stable_id!("thread_patterns", "atomic_fetch_add");
+            let counter = Arc::new(descartes_tokio::sync::AtomicU64::new(site_id, 0));
 
             let tasks = 8;
             let iters = 100;
@@ -156,16 +156,16 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
 
             for _ in 0..tasks {
                 let c = counter.clone();
-                handles.push(des_tokio::thread::spawn(async move {
+                handles.push(descartes_tokio::thread::spawn(async move {
                     for _ in 0..iters {
                         let _ = c.fetch_add(1, Ordering::SeqCst);
-                        des_tokio::thread::yield_now().await;
+                        descartes_tokio::thread::yield_now().await;
                     }
                 }));
             }
 
             let result_out = result.clone();
-            des_tokio::thread::spawn(async move {
+            descartes_tokio::thread::spawn(async move {
                 for h in handles {
                     h.await.expect("worker should complete");
                 }
@@ -177,8 +177,8 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
         }
 
         Pattern::RacyLoadStoreCounter => {
-            let site_id = des_tokio::stable_id!("thread_patterns", "atomic_load_store");
-            let counter = Arc::new(des_tokio::sync::AtomicU64::new(site_id, 0));
+            let site_id = descartes_tokio::stable_id!("thread_patterns", "atomic_load_store");
+            let counter = Arc::new(descartes_tokio::sync::AtomicU64::new(site_id, 0));
 
             // Intentionally racy (non-RMW) increment: load + yield + store.
             let tasks = 8;
@@ -187,18 +187,18 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
 
             for _ in 0..tasks {
                 let c = counter.clone();
-                handles.push(des_tokio::thread::spawn(async move {
+                handles.push(descartes_tokio::thread::spawn(async move {
                     for _ in 0..iters {
                         let v = c.load(Ordering::SeqCst);
-                        des_tokio::thread::yield_now().await;
+                        descartes_tokio::thread::yield_now().await;
                         c.store(v + 1, Ordering::SeqCst);
-                        des_tokio::thread::yield_now().await;
+                        descartes_tokio::thread::yield_now().await;
                     }
                 }));
             }
 
             let result_out = result.clone();
-            des_tokio::thread::spawn(async move {
+            descartes_tokio::thread::spawn(async move {
                 for h in handles {
                     h.await.expect("worker should complete");
                 }
@@ -210,13 +210,13 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
         }
 
         Pattern::SpinLockCounter => {
-            let lock_id = des_tokio::stable_id!("thread_patterns", "spin_lock");
-            let value_id = des_tokio::stable_id!("thread_patterns", "spin_lock_value");
+            let lock_id = descartes_tokio::stable_id!("thread_patterns", "spin_lock");
+            let value_id = descartes_tokio::stable_id!("thread_patterns", "spin_lock_value");
 
-            let lock = Arc::new(des_tokio::sync::AtomicU64::new(lock_id, 0));
-            let value = Arc::new(des_tokio::sync::AtomicU64::new(value_id, 0));
+            let lock = Arc::new(descartes_tokio::sync::AtomicU64::new(lock_id, 0));
+            let value = Arc::new(descartes_tokio::sync::AtomicU64::new(value_id, 0));
 
-            async fn acquire(lock: &des_tokio::sync::AtomicU64) {
+            async fn acquire(lock: &descartes_tokio::sync::AtomicU64) {
                 loop {
                     if lock
                         .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
@@ -224,13 +224,13 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
                     {
                         return;
                     }
-                    des_tokio::thread::yield_now().await;
+                    descartes_tokio::thread::yield_now().await;
                 }
             }
 
-            async fn release(lock: &des_tokio::sync::AtomicU64) {
+            async fn release(lock: &descartes_tokio::sync::AtomicU64) {
                 lock.store(0, Ordering::SeqCst);
-                des_tokio::thread::yield_now().await;
+                descartes_tokio::thread::yield_now().await;
             }
 
             let tasks = 6;
@@ -240,7 +240,7 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
             for _ in 0..tasks {
                 let lock = lock.clone();
                 let value = value.clone();
-                handles.push(des_tokio::thread::spawn(async move {
+                handles.push(descartes_tokio::thread::spawn(async move {
                     for _ in 0..iters {
                         acquire(&lock).await;
                         let _ = value.fetch_add(1, Ordering::SeqCst);
@@ -250,7 +250,7 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
             }
 
             let result_out = result.clone();
-            des_tokio::thread::spawn(async move {
+            descartes_tokio::thread::spawn(async move {
                 for h in handles {
                     h.await.expect("worker should complete");
                 }
@@ -262,30 +262,30 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
         }
 
         Pattern::TicketLockCounter => {
-            let next_id = des_tokio::stable_id!("thread_patterns", "ticket_next");
-            let serving_id = des_tokio::stable_id!("thread_patterns", "ticket_serving");
-            let value_id = des_tokio::stable_id!("thread_patterns", "ticket_value");
+            let next_id = descartes_tokio::stable_id!("thread_patterns", "ticket_next");
+            let serving_id = descartes_tokio::stable_id!("thread_patterns", "ticket_serving");
+            let value_id = descartes_tokio::stable_id!("thread_patterns", "ticket_value");
 
-            let next = Arc::new(des_tokio::sync::AtomicU64::new(next_id, 0));
-            let serving = Arc::new(des_tokio::sync::AtomicU64::new(serving_id, 0));
-            let value = Arc::new(des_tokio::sync::AtomicU64::new(value_id, 0));
+            let next = Arc::new(descartes_tokio::sync::AtomicU64::new(next_id, 0));
+            let serving = Arc::new(descartes_tokio::sync::AtomicU64::new(serving_id, 0));
+            let value = Arc::new(descartes_tokio::sync::AtomicU64::new(value_id, 0));
 
             async fn acquire(
-                next: &des_tokio::sync::AtomicU64,
-                serving: &des_tokio::sync::AtomicU64,
+                next: &descartes_tokio::sync::AtomicU64,
+                serving: &descartes_tokio::sync::AtomicU64,
             ) {
                 let my = next.fetch_add(1, Ordering::SeqCst);
                 loop {
                     if serving.load(Ordering::SeqCst) == my {
                         return;
                     }
-                    des_tokio::thread::yield_now().await;
+                    descartes_tokio::thread::yield_now().await;
                 }
             }
 
-            async fn release(serving: &des_tokio::sync::AtomicU64) {
+            async fn release(serving: &descartes_tokio::sync::AtomicU64) {
                 let _ = serving.fetch_add(1, Ordering::SeqCst);
-                des_tokio::thread::yield_now().await;
+                descartes_tokio::thread::yield_now().await;
             }
 
             let tasks = 6;
@@ -296,7 +296,7 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
                 let next = next.clone();
                 let serving = serving.clone();
                 let value = value.clone();
-                handles.push(des_tokio::thread::spawn(async move {
+                handles.push(descartes_tokio::thread::spawn(async move {
                     for _ in 0..iters {
                         acquire(&next, &serving).await;
                         let _ = value.fetch_add(1, Ordering::SeqCst);
@@ -306,7 +306,7 @@ fn run_pattern(pattern: Pattern, sim: &mut Simulation) -> u64 {
             }
 
             let result_out = result.clone();
-            des_tokio::thread::spawn(async move {
+            descartes_tokio::thread::spawn(async move {
                 for h in handles {
                     h.await.expect("worker should complete");
                 }
@@ -365,7 +365,7 @@ fn run_tiny_ready_order(sim: &mut Simulation) -> [u64; 2] {
     for id in [1u64, 2u64] {
         let order = order.clone();
         let next = next.clone();
-        des_tokio::thread::spawn(async move {
+        descartes_tokio::thread::spawn(async move {
             let idx = next.fetch_add(1, Ordering::SeqCst);
             order.lock().unwrap()[idx] = id;
         });
@@ -387,7 +387,7 @@ fn thread_patterns_exhaustive_exploration_tiny_ready_order() {
         let n = TRACE_ID.fetch_add(1, Ordering::Relaxed);
         let mut p = std::env::temp_dir();
         p.push(format!(
-            "des_explore_thread_patterns_exhaustive_ready_order_{}_{}.json",
+            "descartes_explore_thread_patterns_exhaustive_ready_order_{}_{}.json",
             std::process::id(),
             n
         ));

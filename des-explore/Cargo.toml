@@ -1,5 +1,5 @@
 [package]
-name = "des-explore"
+name = "descartes-explore"
 version.workspace = true
 edition.workspace = true
 description = "Various exploration and record-and-replay utilities for DesCartes"
@@ -9,8 +9,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-des-core = { path = "../des-core" }
-des-tokio = { path = "../des-tokio", optional = true }
+descartes-core = { path = "../des-core" }
+descartes-tokio = { path = "../des-tokio", optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -24,4 +24,4 @@ hdrhistogram = { workspace = true }
 
 [features]
 default = ["tokio"]
-tokio = ["dep:des-tokio"]
+tokio = ["dep:descartes-tokio"]

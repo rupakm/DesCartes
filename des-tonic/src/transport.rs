@@ -1,12 +1,12 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_components::transport::{
+use descartes_components::transport::{
     SharedEndpointRegistry, SimTransport, SimpleNetworkModel, TransportEvent,
 };
 
 use crate::network::NetworkModel;
-use des_core::{Key, SchedulerHandle, Simulation};
+use descartes_core::{Key, SchedulerHandle, Simulation};
 
 use tonic::Status;
 

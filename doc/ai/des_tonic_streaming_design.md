@@ -179,11 +179,11 @@ struct StreamState {
     reorder_s2c: BTreeMap<u64, Bytes>,
 
     // Application pipes
-    inbound_tx: des_tokio::sync::mpsc::Sender<Bytes>,
-    inbound_rx: des_tokio::sync::mpsc::Receiver<Bytes>,
+    inbound_tx: descartes_tokio::sync::mpsc::Sender<Bytes>,
+    inbound_rx: descartes_tokio::sync::mpsc::Receiver<Bytes>,
 
-    outbound_tx: des_tokio::sync::mpsc::Sender<Bytes>,
-    outbound_rx: des_tokio::sync::mpsc::Receiver<Bytes>,
+    outbound_tx: descartes_tokio::sync::mpsc::Sender<Bytes>,
+    outbound_rx: descartes_tokio::sync::mpsc::Receiver<Bytes>,
 
     // Final status (server->client)
     final_status: Option<tonic::Status>,
@@ -235,7 +235,7 @@ Add methods:
   - `bidirectional_streaming(path, timeout) -> (DesStreamSender<Bytes>, DesStreaming<Bytes>)`
 
 Where:
-- `DesStreaming<T>` implements `Stream<Item = Result<T, Status>>` backed by `des_tokio::sync::mpsc::Receiver`.
+- `DesStreaming<T>` implements `Stream<Item = Result<T, Status>>` backed by `descartes_tokio::sync::mpsc::Receiver`.
 - `DesStreamSender<T>` provides `send(T).await` and `close().await`.
 
 ### 5.2 Client state
@@ -330,7 +330,7 @@ On receiving a transport message of type `RpcStreamFrame`:
 **On Open (C->S):**
 - validate method exists in router for the requested streaming kind
 - create `ServerStreamState`
-- create inbound/outbound bounded channels (`des_tokio::sync::mpsc::channel(cap)`)
+- create inbound/outbound bounded channels (`descartes_tokio::sync::mpsc::channel(cap)`)
 - spawn an async task that runs the handler:
   - server-streaming: invoke handler with `Request<Bytes>` and get `DesStreaming<Bytes>` (outbound)
   - client-streaming: invoke handler with inbound stream and await a single `Response<Bytes>`
@@ -371,7 +371,7 @@ When the handler completes:
 We need a deterministic and deadlock-avoiding approach.
 
 v1 pragmatic approach:
-- Use bounded `des_tokio::sync::mpsc` for inbound and outbound per stream.
+- Use bounded `descartes_tokio::sync::mpsc` for inbound and outbound per stream.
 - Set caps (configurable):
   - `inbound_capacity_messages`
   - `outbound_capacity_messages`
@@ -388,7 +388,7 @@ This is not HTTP/2 flow control, but it prevents unbounded memory/event growth.
   - re-use the channel’s monotonic counter + endpoint ID, similar to unary correlation_id.
 - Seq numbers are deterministic:
   - assigned by the sending side’s `AtomicU64` per stream direction.
-- All concurrency primitives used are `des_tokio` primitives.
+- All concurrency primitives used are `descartes_tokio` primitives.
 - Exploration hooks:
   - schedule decisions that affect frame delivery (frontier and tokio-ready) are already controllable via `des-explore`.
 
@@ -420,7 +420,7 @@ This section is the concrete execution plan for implementing streaming in `des-t
 ### 10.1 Milestone 0: Prep and invariants
 
 - **Invariant:** Unary RPC behavior is unchanged.
-- **Invariant:** Streaming uses `des_tokio::*` primitives only.
+- **Invariant:** Streaming uses `descartes_tokio::*` primitives only.
 - **Invariant:** Do not change `des-components::transport::TransportMessage` shape.
 - **Determinism:** `stream_id` generation must be deterministic and locally unique.
 
@@ -472,12 +472,12 @@ Tests:
 
 Changes:
 - Add new module `des-tonic/src/stream.rs` (or `channel/stream.rs`):
-  - `pub struct DesStreaming<T>`: wrapper over `des_tokio::sync::mpsc::Receiver<Result<T, Status>>`
-  - `pub struct DesStreamSender<T>`: wrapper over `des_tokio::sync::mpsc::Sender<T>` plus `close()`
+  - `pub struct DesStreaming<T>`: wrapper over `descartes_tokio::sync::mpsc::Receiver<Result<T, Status>>`
+  - `pub struct DesStreamSender<T>`: wrapper over `descartes_tokio::sync::mpsc::Sender<T>` plus `close()`
   - Implement `futures_core::Stream` for `DesStreaming` (if already in deps); otherwise provide `async fn next(&mut self)`.
 
 Notes:
-- Prefer `des_tokio::sync::mpsc` to avoid OS-tokio.
+- Prefer `descartes_tokio::sync::mpsc` to avoid OS-tokio.
 - Keep the types `Send` where possible, but allow `spawn_local` usage.
 
 Acceptance:

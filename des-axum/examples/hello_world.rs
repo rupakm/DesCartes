@@ -1,12 +1,12 @@
-use des_axum::Transport;
-use des_core::{Execute, Executor, SimTime, Simulation};
+use descartes_axum::Transport;
+use descartes_core::{Execute, Executor, SimTime, Simulation};
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sim = Simulation::default();
 
     // Install deterministic async runtime.
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     // Transport (deterministic, no latency by default).
     let transport = Transport::install_default(&mut sim);
@@ -21,13 +21,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = transport.connect(&mut sim, "hello")?;
 
-    des_tokio::task::spawn_local(async move {
+    descartes_tokio::task::spawn_local(async move {
         for i in 0..5u32 {
             if i > 0 {
-                des_tokio::time::sleep(Duration::from_millis(50)).await;
+                descartes_tokio::time::sleep(Duration::from_millis(50)).await;
             }
 
-            let t = des_core::scheduler::current_time().unwrap_or(SimTime::zero());
+            let t = descartes_core::scheduler::current_time().unwrap_or(SimTime::zero());
             let resp = client.get("/hello", Some(Duration::from_secs(1))).await;
             match resp {
                 Ok(resp) => {

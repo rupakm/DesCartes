@@ -1,13 +1,13 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::dists::{
+use descartes_core::dists::{
     ArrivalPattern, ExponentialDistribution, PoissonArrivals, ServiceTimeDistribution,
 };
-use des_core::{Component, Key, SimTime, Simulation, SimulationConfig};
+use descartes_core::{Component, Key, SimTime, Simulation, SimulationConfig};
 
-use des_explore::harness::HarnessContext;
-use des_explore::trace::{Trace, TraceEvent, TraceMeta, TraceRecorder};
+use descartes_explore::harness::HarnessContext;
+use descartes_explore::trace::{Trace, TraceEvent, TraceMeta, TraceRecorder};
 
 #[derive(Debug)]
 enum Ev {
@@ -26,7 +26,7 @@ impl Component for DualRng {
         &mut self,
         self_id: Key<Self::Event>,
         _event: &Self::Event,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         // Consume one draw from each distribution.
         let dt = self.arrivals.next_arrival_time();
@@ -42,7 +42,7 @@ fn draws(trace: &Trace) -> Vec<(u64, f64)> {
         .iter()
         .filter_map(|e| match e {
             TraceEvent::RandomDraw(d) => match d.value {
-                des_explore::trace::DrawValue::F64(v) => Some((d.site_id, v)),
+                descartes_explore::trace::DrawValue::F64(v) => Some((d.site_id, v)),
                 _ => None,
             },
             _ => None,
@@ -70,8 +70,8 @@ fn shared_branching_provider_replays_across_two_distributions() {
 
     // Use explicit site IDs here to keep this test stable. In real use, site IDs
     // are stable because the same `setup(...)` function is reused for all runs.
-    let arrival_site = des_core::DrawSite::new("arrival", 1);
-    let service_site = des_core::DrawSite::new("service", 2);
+    let arrival_site = descartes_core::DrawSite::new("arrival", 1);
+    let service_site = descartes_core::DrawSite::new("service", 2);
 
     let mut sim = Simulation::new(sim_config.clone());
     let arrivals = PoissonArrivals::from_config(sim.config(), 10.0)
@@ -127,10 +127,10 @@ fn shared_branching_provider_replays_across_two_distributions() {
     ctx2.recorder()
         .lock()
         .unwrap()
-        .record(TraceEvent::RandomDraw(des_explore::trace::RandomDraw {
+        .record(TraceEvent::RandomDraw(descartes_explore::trace::RandomDraw {
             time_nanos: Some(SimTime::from_duration(Duration::from_millis(1)).as_nanos()),
             tag: "dummy".to_string(),
             site_id: 0,
-            value: des_explore::trace::DrawValue::Bool(true),
+            value: descartes_explore::trace::DrawValue::Bool(true),
         }));
 }

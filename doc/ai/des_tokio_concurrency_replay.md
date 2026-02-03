@@ -1,6 +1,6 @@
-# `des_tokio` Concurrency Primitives + Record/Replay Validation
+# `descartes_tokio` Concurrency Primitives + Record/Replay Validation
 
-This document describes the **deterministic, single-threaded** “simulated shared-memory concurrency” facilities implemented in `des_tokio`, and how `des-explore` can **record** and **validate** their behavior during replay.
+This document describes the **deterministic, single-threaded** “simulated shared-memory concurrency” facilities implemented in `descartes_tokio`, and how `des-explore` can **record** and **validate** their behavior during replay.
 
 These primitives are intended for **exploration tooling** (race hunting, schedule perturbation, trace replay), while preserving the project’s core constraints:
 
@@ -8,13 +8,13 @@ These primitives are intended for **exploration tooling** (race hunting, schedul
 - No event priorities.
 - Opt-in policy experimentation and opt-in Tokio interleaving exploration.
 - Schedule exploration (backtracking/policy search/DPOR) is specified separately:
-  - `doc/ai/des_explore_schedule_exploration_spec.md`
+  - `doc/ai/descartes_explore_schedule_exploration_spec.md`
 
 ---
 
 ## Mental Model
 
-Even though the simulation is single-threaded, `des_tokio` tasks can behave like concurrent “threads” because:
+Even though the simulation is single-threaded, `descartes_tokio` tasks can behave like concurrent “threads” because:
 
 - The async runtime polls many tasks over time.
 - Wakeups can make other tasks runnable.
@@ -28,18 +28,18 @@ The concurrency primitives in this module do **not** introduce real parallelism.
 
 ## Provided Primitives
 
-### `des_tokio::thread`
+### `descartes_tokio::thread`
 
-- `des_tokio::thread::spawn(fut)`
-  - Thin wrapper over `des_tokio::task::spawn` to provide a `std::thread`-like entry point.
-- `des_tokio::thread::yield_now().await`
+- `descartes_tokio::thread::spawn(fut)`
+  - Thin wrapper over `descartes_tokio::task::spawn` to provide a `std::thread`-like entry point.
+- `descartes_tokio::thread::yield_now().await`
   - Cooperative yield point.
   - Internally, it schedules itself to be polled again (wakes itself once), allowing other ready tasks to run in between.
   - This is the main user-facing knob for “simulated preemption”.
 
-### `des_tokio::sync::Mutex<T>`
+### `descartes_tokio::sync::Mutex<T>`
 
-`des_tokio::sync::Mutex<T>` is an async mutex intended to model contention patterns deterministically.
+`descartes_tokio::sync::Mutex<T>` is an async mutex intended to model contention patterns deterministically.
 
 - Default behavior:
   - Deterministic FIFO waiter ordering.
@@ -66,11 +66,11 @@ When a guard is dropped and there are waiters, the mutex chooses which waiter to
 - Default: FIFO (`FifoMutexWaiterPolicy`)
 - Opt-in: uniform random (`UniformRandomMutexWaiterPolicy::new(seed)`)
 
-This policy is installed via `des_tokio::runtime::TokioInstallConfig { mutex_policy: ... }`.
+This policy is installed via `descartes_tokio::runtime::TokioInstallConfig { mutex_policy: ... }`.
 
-### `des_tokio::sync::AtomicU64`
+### `descartes_tokio::sync::AtomicU64`
 
-`des_tokio::sync::AtomicU64` wraps `std::sync::atomic::AtomicU64` but emits **traceable atomic operation events**.
+`descartes_tokio::sync::AtomicU64` wraps `std::sync::atomic::AtomicU64` but emits **traceable atomic operation events**.
 
 - API subset:
   - `load(ordering)`
@@ -87,14 +87,14 @@ Atomic operations are identified by a `site_id`:
 
 You can also generate ids via macros:
 
-- `des_tokio::stable_id!("domain", "name")` / `des_tokio::stable_id!("name")`
-- `des_tokio::site_id!("tag")` (callsite-unique)
+- `descartes_tokio::stable_id!("domain", "name")` / `descartes_tokio::stable_id!("name")`
+- `descartes_tokio::site_id!("tag")` (callsite-unique)
 
 ---
 
 ## Concurrency Event Stream (Observational)
 
-Concurrency primitives optionally emit `des_tokio::concurrency::ConcurrencyEvent`.
+Concurrency primitives optionally emit `descartes_tokio::concurrency::ConcurrencyEvent`.
 
 Key properties:
 
@@ -113,11 +113,11 @@ Event kinds include:
 
 To capture events, install a recorder implementing:
 
-- `des_tokio::concurrency::ConcurrencyRecorder` (`record(&self, event: ConcurrencyEvent)`)
+- `descartes_tokio::concurrency::ConcurrencyRecorder` (`record(&self, event: ConcurrencyEvent)`)
 
 Installation hook:
 
-- `des_tokio::runtime::install_with_tokio(sim, TokioInstallConfig { concurrency_recorder: Some(recorder), .. }, configure)`
+- `descartes_tokio::runtime::install_with_tokio(sim, TokioInstallConfig { concurrency_recorder: Some(recorder), .. }, configure)`
 
 If no recorder is installed, events are simply ignored.
 
@@ -137,7 +137,7 @@ A `ConcurrencyTraceEvent` stores:
 
 ### Recording
 
-`des-explore::concurrency::RecordingConcurrencyRecorder` implements `des_tokio::ConcurrencyRecorder` and records `TraceEvent::Concurrency(...)` into the trace.
+`descartes_explore::concurrency::RecordingConcurrencyRecorder` implements `descartes_tokio::ConcurrencyRecorder` and records `TraceEvent::Concurrency(...)` into the trace.
 
 When using the harness, enable:
 

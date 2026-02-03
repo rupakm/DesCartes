@@ -1,5 +1,5 @@
 [package]
-name = "des-viz"
+name = "descartes-viz"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,15 +8,15 @@ repository.workspace = true
 description = "Visualization utilities for DesCartes"
 
 [dependencies]
-des-core = { path = "../des-core" }
-des-metrics = { path = "../des-metrics" }
+descartes-core = { path = "../des-core" }
+descartes-metrics = { path = "../des-metrics" }
 thiserror = { workspace = true }
 plotters = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-des-axum = { path = "../des-axum" }
-des-tokio = { path = "../des-tokio" }
+descartes-axum = { path = "../des-axum" }
+descartes-tokio = { path = "../des-tokio" }
 metrics = { workspace = true }
 axum = "0.7"

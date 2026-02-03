@@ -15,8 +15,8 @@
 //!
 //! Run with: cargo run --package des-components --example end_to_end_workload_example
 
-use des_components::{ClientEvent, FifoQueue, Server, ServerEvent};
-use des_core::{
+use descartes_components::{ClientEvent, FifoQueue, Server, ServerEvent};
+use descartes_core::{
     Component, Execute, Executor, Key, RequestAttempt, RequestAttemptId, RequestId, Response,
     Scheduler, SimTime, Simulation,
 };
@@ -552,7 +552,7 @@ impl ExponentialServiceServer {
         }
     }
 
-    pub fn with_queue(mut self, queue: Box<dyn des_components::Queue>) -> Self {
+    pub fn with_queue(mut self, queue: Box<dyn descartes_components::Queue>) -> Self {
         self.inner_server = self.inner_server.with_queue(queue);
         self
     }

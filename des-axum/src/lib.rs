@@ -5,7 +5,7 @@
 //! `des-components`' simulated transport and endpoint registry.
 //!
 //! What this crate provides
-//! - A `des_axum::Transport` wrapper that installs `SimTransport` and exposes serve/connect APIs.
+//! - A `descartes_axum::Transport` wrapper that installs `SimTransport` and exposes serve/connect APIs.
 //! - A server endpoint component that decodes an HTTP-shaped request, calls your axum `Router`,
 //!   collects the response body to bytes, and sends an HTTP-shaped response back.
 //! - A client endpoint component that sends requests over the simulated network and resolves
@@ -19,28 +19,28 @@
 //! - This is "axum as a tower service in simulation", not a real socket server.
 //! - No HTTP/1 parsing and no hyper accept loop.
 //! - Bodies are currently handled as collected bytes (no streaming / websockets yet).
-//! - Deterministic time requires installing the DES async runtime (`des_tokio::runtime::install`).
+//! - Deterministic time requires installing the DES async runtime (`descartes_tokio::runtime::install`).
 //!
 //! Sketch
 //! ```rust,no_run
-//! # use des_core::{Execute, Executor, SimTime, Simulation};
+//! # use descartes_core::{Execute, Executor, SimTime, Simulation};
 //! # use std::time::Duration;
 //! let mut sim = Simulation::default();
-//! des_tokio::runtime::install(&mut sim);
+//! descartes_tokio::runtime::install(&mut sim);
 //!
-//! let transport = des_axum::Transport::install_default(&mut sim);
+//! let transport = descartes_axum::Transport::install_default(&mut sim);
 //! let app = axum::Router::new().route("/hello", axum::routing::get(|| async { "hello" }));
 //!
 //! // (A) serve by (service_name, instance_name)
-//! des_axum::serve(&transport, &mut sim, "hello", "hello-1", app)?;
+//! descartes_axum::serve(&transport, &mut sim, "hello", "hello-1", app)?;
 //!
 //! let client = transport.connect(&mut sim, "hello")?;
-//! des_tokio::task::spawn_local(async move {
+//! descartes_tokio::task::spawn_local(async move {
 //!     let _resp = client.get("/hello", Some(Duration::from_secs(1))).await.unwrap();
 //! });
 //!
 //! Executor::timed(SimTime::from_duration(Duration::from_secs(1))).execute(&mut sim);
-//! # Ok::<(), des_axum::Error>(())
+//! # Ok::<(), descartes_axum::Error>(())
 //! ```
 
 mod addr;
@@ -65,7 +65,7 @@ pub use crate::client::Error;
 /// simulation harness.
 pub fn serve(
     transport: &Transport,
-    sim: &mut des_core::Simulation,
+    sim: &mut descartes_core::Simulation,
     service_name: impl Into<String>,
     instance_name: impl Into<String>,
     app: axum::Router,
@@ -76,7 +76,7 @@ pub fn serve(
 /// Convenience wrapper: serve an axum router under `(service_name, instance_name)`.
 pub fn serve_named(
     transport: &Transport,
-    sim: &mut des_core::Simulation,
+    sim: &mut descartes_core::Simulation,
     service_name: impl Into<String>,
     instance_name: impl Into<String>,
     app: axum::Router,
@@ -89,7 +89,7 @@ pub fn serve_named(
 /// This uses `addr.to_string()` as `instance_name`.
 pub fn serve_socket_addr(
     transport: &Transport,
-    sim: &mut des_core::Simulation,
+    sim: &mut descartes_core::Simulation,
     service_name: impl Into<String>,
     addr: std::net::SocketAddr,
     app: axum::Router,
@@ -103,7 +103,7 @@ pub fn serve_socket_addr(
 /// string ("http://127.0.0.1:3000").
 pub fn serve_addr(
     transport: &Transport,
-    sim: &mut des_core::Simulation,
+    sim: &mut descartes_core::Simulation,
     service_name: impl Into<String>,
     addr: impl AsRef<str>,
     app: axum::Router,

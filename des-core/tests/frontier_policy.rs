@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use des_core::{
+use descartes_core::{
     Component, Execute, Executor, Key, Scheduler, SimTime, Simulation, UniformRandomFrontierPolicy,
 };
 

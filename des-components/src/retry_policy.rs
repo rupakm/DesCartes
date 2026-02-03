@@ -4,7 +4,7 @@
 //! request failures with various backoff strategies including exponential backoff,
 //! token bucket-based retries, and success-based adaptive retries.
 
-use des_core::{RequestAttempt, Response, SimTime, SimulationConfig};
+use descartes_core::{RequestAttempt, Response, SimTime, SimulationConfig};
 use rand::Rng;
 use rand::SeedableRng;
 use std::time::Duration;
@@ -470,7 +470,7 @@ impl RetryPolicy for FixedRetryPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use des_core::{RequestAttemptId, RequestId};
+    use descartes_core::{RequestAttemptId, RequestId};
 
     fn create_test_attempt() -> RequestAttempt {
         RequestAttempt::new(

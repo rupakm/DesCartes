@@ -5,10 +5,10 @@ use crate::wire::{
 };
 use crate::{stream, ClientResponseFuture};
 use bytes::Bytes;
-use des_components::transport::{
+use descartes_components::transport::{
     EndpointId, MessageType, SharedEndpointRegistry, SimTransport, TransportEvent, TransportMessage,
 };
-use des_core::{defer_wake_after, scheduler::in_scheduler_context, Key, SchedulerHandle, SimTime};
+use descartes_core::{defer_wake_after, scheduler::in_scheduler_context, Key, SchedulerHandle, SimTime};
 
 use crate::util;
 use std::collections::{BTreeMap, HashMap};
@@ -26,7 +26,7 @@ use prost::Message;
 pub type ClientStreamingResponseFuture =
     Pin<Box<dyn Future<Output = Result<Response<Bytes>, Status>> + 'static>>;
 
-type PendingUnaryTx = des_tokio::sync::oneshot::Sender<Result<Response<Bytes>, Status>>;
+type PendingUnaryTx = descartes_tokio::sync::oneshot::Sender<Result<Response<Bytes>, Status>>;
 type PendingUnaryMap = HashMap<String, PendingUnaryTx>;
 type PendingUnary = Arc<Mutex<PendingUnaryMap>>;
 
@@ -82,7 +82,7 @@ impl Channel {
     ///
     /// This is equivalent to `transport.connect(sim, service_name, addr)`.
     pub fn connect(
-        sim: &mut des_core::Simulation,
+        sim: &mut descartes_core::Simulation,
         transport: &crate::Transport,
         service_name: impl Into<String>,
         addr: impl AsRef<str>,
@@ -94,7 +94,7 @@ impl Channel {
     ///
     /// This is equivalent to `transport.connect_socket_addr(sim, service_name, addr)`.
     pub fn connect_socket_addr(
-        sim: &mut des_core::Simulation,
+        sim: &mut descartes_core::Simulation,
         transport: &crate::Transport,
         service_name: impl Into<String>,
         addr: std::net::SocketAddr,
@@ -103,7 +103,7 @@ impl Channel {
     }
 
     pub(crate) fn connect_addr(
-        sim: &mut des_core::Simulation,
+        sim: &mut descartes_core::Simulation,
         transport: &crate::Transport,
         service_name: String,
         addr: std::net::SocketAddr,
@@ -201,7 +201,7 @@ impl Channel {
     async fn select_target(
         &self,
         timeout: Option<Duration>,
-    ) -> Result<des_components::transport::EndpointInfo, Status> {
+    ) -> Result<descartes_components::transport::EndpointInfo, Status> {
         let target = if let Some(target) = self.target_endpoint {
             // Validate the server endpoint is still registered.
             let ok = self
@@ -217,14 +217,14 @@ impl Channel {
                 )));
             }
 
-            des_components::transport::EndpointInfo {
+            descartes_components::transport::EndpointInfo {
                 id: target,
                 service_name: self.service_name.clone(),
                 instance_name: String::new(),
                 metadata: std::collections::HashMap::new(),
             }
         } else {
-            let fut = des_tower::wait_for_endpoint(
+            let fut = descartes_tower::wait_for_endpoint(
                 self.endpoint_registry.clone(),
                 self.service_name.clone(),
                 None,
@@ -232,7 +232,7 @@ impl Channel {
 
             let ep = match timeout {
                 None => fut.await,
-                Some(t) => match des_tokio::time::timeout(t, fut).await {
+                Some(t) => match descartes_tokio::time::timeout(t, fut).await {
                     Ok(r) => r,
                     Err(_) => {
                         return Err(Status::deadline_exceeded(
@@ -269,7 +269,7 @@ impl Channel {
             return self.unary_inner(path, request).await;
         };
 
-        match des_tokio::time::timeout(timeout, self.unary_inner(path, request)).await {
+        match descartes_tokio::time::timeout(timeout, self.unary_inner(path, request)).await {
             Ok(r) => r,
             Err(_) => Err(Status::deadline_exceeded("request timed out")),
         }
@@ -311,10 +311,10 @@ impl Channel {
 
         let stream_id = self.next_stream_id();
 
-        let (request_tx, mut request_rx) = des_tokio::sync::mpsc::channel::<Bytes>(16);
+        let (request_tx, mut request_rx) = descartes_tokio::sync::mpsc::channel::<Bytes>(16);
         let sender = DesStreamSender::new(request_tx);
 
-        let (response_tx, response_rx) = des_tokio::sync::oneshot::channel();
+        let (response_tx, response_rx) = descartes_tokio::sync::oneshot::channel();
 
         {
             let mut pending = self.pending_streams.lock().unwrap();
@@ -352,7 +352,7 @@ impl Channel {
         let channel = self.clone();
         let stream_id_for_task = stream_id.clone();
         let target_id_for_task = target.id;
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             let mut seq = 1u64;
             while let Some(payload) = request_rx.recv().await {
                 let frame = StreamFrameWire {
@@ -395,7 +395,7 @@ impl Channel {
                 None => response_rx
                     .await
                     .map_err(|_| Status::cancelled("stream cancelled")),
-                Some(t) => match des_tokio::time::timeout(t, response_rx).await {
+                Some(t) => match descartes_tokio::time::timeout(t, response_rx).await {
                     Ok(r) => r.map_err(|_| Status::cancelled("stream cancelled")),
                     Err(_) => {
                         {
@@ -448,7 +448,7 @@ impl Channel {
         let (bytes_sender, resp_fut) = self.client_streaming(path, timeout).await?;
         let (sender, mut typed_in) = stream::channel::<Req>(16);
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             while let Some(item) = typed_in.next().await {
                 match item {
                     Ok(msg) => {
@@ -486,7 +486,7 @@ impl Channel {
         let target = self.select_target(timeout).await?;
 
         let stream_id = self.next_stream_id();
-        let (tx, rx) = des_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
+        let (tx, rx) = descartes_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
 
         {
             let mut pending = self.pending_streams.lock().unwrap();
@@ -558,8 +558,8 @@ impl Channel {
             let channel = self.clone();
             let stream_id_for_timer = stream_id.clone();
             let target_id = target.id;
-            des_tokio::task::spawn_local(async move {
-                des_tokio::time::sleep(timeout).await;
+            descartes_tokio::task::spawn_local(async move {
+                descartes_tokio::time::sleep(timeout).await;
 
                 let tx = {
                     let mut pending = channel.pending_streams.lock().unwrap();
@@ -625,7 +625,7 @@ impl Channel {
         let (metadata, mut stream_bytes, extensions) = resp.into_parts();
 
         let (tx, stream_typed) = stream::channel::<Resp>(16);
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             while let Some(item) = stream_bytes.next().await {
                 match item {
                     Ok(bytes) => match Resp::decode(bytes) {
@@ -665,10 +665,10 @@ impl Channel {
 
         let stream_id = self.next_stream_id();
 
-        let (request_tx, mut request_rx) = des_tokio::sync::mpsc::channel::<Bytes>(16);
+        let (request_tx, mut request_rx) = descartes_tokio::sync::mpsc::channel::<Bytes>(16);
         let sender = DesStreamSender::new(request_tx);
 
-        let (stream_tx, stream_rx) = des_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
+        let (stream_tx, stream_rx) = descartes_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
 
         {
             let mut pending = self.pending_streams.lock().unwrap();
@@ -706,7 +706,7 @@ impl Channel {
         let channel = self.clone();
         let stream_id_for_task = stream_id.clone();
         let target_id_for_task = target.id;
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             let mut seq = 1u64;
             while let Some(payload) = request_rx.recv().await {
                 let frame = StreamFrameWire {
@@ -748,8 +748,8 @@ impl Channel {
             let channel = self.clone();
             let stream_id_for_timer = stream_id.clone();
             let target_id = target.id;
-            des_tokio::task::spawn_local(async move {
-                des_tokio::time::sleep(timeout).await;
+            descartes_tokio::task::spawn_local(async move {
+                descartes_tokio::time::sleep(timeout).await;
 
                 let tx = {
                     let mut pending = channel.pending_streams.lock().unwrap();
@@ -797,7 +797,7 @@ impl Channel {
         let (bytes_sender, resp) = self.bidirectional_streaming(path, timeout).await?;
         let (sender, mut typed_in) = stream::channel::<Req>(16);
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             while let Some(item) = typed_in.next().await {
                 match item {
                     Ok(msg) => {
@@ -814,7 +814,7 @@ impl Channel {
 
         let (metadata, mut stream_bytes, extensions) = resp.into_parts();
         let (tx, stream_typed) = stream::channel::<Resp>(16);
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             while let Some(item) = stream_bytes.next().await {
                 match item {
                     Ok(bytes) => match Resp::decode(bytes) {
@@ -877,7 +877,7 @@ impl Channel {
         let payload = encode_unary_request(&msg);
 
         // Register pending response.
-        let (tx, rx) = des_tokio::sync::oneshot::channel();
+        let (tx, rx) = descartes_tokio::sync::oneshot::channel();
         {
             let mut pending = self.pending.lock().unwrap();
             pending.insert(correlation_id.clone(), tx);
@@ -931,11 +931,11 @@ pub(crate) struct ClientStreamState {
     reorder: BTreeMap<u64, StreamFrameWire>,
 
     // --- client-streaming response ---
-    response_tx: Option<des_tokio::sync::oneshot::Sender<Result<Response<Bytes>, Status>>>,
+    response_tx: Option<descartes_tokio::sync::oneshot::Sender<Result<Response<Bytes>, Status>>>,
     response_payload: Option<Bytes>,
 
     // --- server-streaming response ---
-    stream_tx: Option<des_tokio::sync::mpsc::Sender<Result<Bytes, Status>>>,
+    stream_tx: Option<descartes_tokio::sync::mpsc::Sender<Result<Bytes, Status>>>,
 }
 
 pub struct InstalledClient {
@@ -980,7 +980,7 @@ impl ClientBuilder {
         self
     }
 
-    pub fn install(self, sim: &mut des_core::Simulation) -> Result<InstalledClient, Status> {
+    pub fn install(self, sim: &mut descartes_core::Simulation) -> Result<InstalledClient, Status> {
         let endpoint_id = self
             .endpoint_id
             .unwrap_or_else(|| EndpointId::new(format!("client:{}", self.client_name)));
@@ -1032,7 +1032,7 @@ impl ClientEndpoint {
     }
 }
 
-impl des_core::Component for ClientEndpoint {
+impl descartes_core::Component for ClientEndpoint {
     type Event = TransportEvent;
 
     #[allow(clippy::single_match)]
@@ -1040,7 +1040,7 @@ impl des_core::Component for ClientEndpoint {
         &mut self,
         _self_id: Key<Self::Event>,
         event: &Self::Event,
-        _scheduler: &mut des_core::Scheduler,
+        _scheduler: &mut descartes_core::Scheduler,
     ) {
         match event {
             TransportEvent::MessageDelivered { message } => match message.message_type {
@@ -1284,8 +1284,8 @@ impl des_core::Component for ClientEndpoint {
 #[cfg(test)]
 mod client_streaming_tests {
     use super::*;
-    use des_components::transport::{EndpointInfo, SimTransport};
-    use des_core::{
+    use descartes_components::transport::{EndpointInfo, SimTransport};
+    use descartes_core::{
         Component, Execute, Executor, Scheduler, SimTime, Simulation, SimulationConfig,
     };
 
@@ -1485,7 +1485,7 @@ mod client_streaming_tests {
     fn client_streaming_returns_single_response() {
         std::thread::spawn(|| {
             let mut sim = Simulation::new(SimulationConfig { seed: 1 });
-            des_tokio::runtime::install(&mut sim);
+            descartes_tokio::runtime::install(&mut sim);
 
             let transport = crate::Transport::install_default(&mut sim);
 
@@ -1530,7 +1530,7 @@ mod client_streaming_tests {
             let result: Arc<Mutex<Option<Result<Bytes, Status>>>> = Arc::new(Mutex::new(None));
             let result_out = result.clone();
 
-            des_tokio::task::spawn_local(async move {
+            descartes_tokio::task::spawn_local(async move {
                 let (sender, resp) = channel
                     .client_streaming("/svc.Test/ClientStreaming", Some(Duration::from_millis(50)))
                     .await
@@ -1558,7 +1558,7 @@ mod client_streaming_tests {
     fn client_streaming_accepts_implicit_open_from_server() {
         std::thread::spawn(|| {
             let mut sim = Simulation::new(SimulationConfig { seed: 1 });
-            des_tokio::runtime::install(&mut sim);
+            descartes_tokio::runtime::install(&mut sim);
 
             let transport = crate::Transport::install_default(&mut sim);
 
@@ -1603,7 +1603,7 @@ mod client_streaming_tests {
             let result: Arc<Mutex<Option<Result<Bytes, Status>>>> = Arc::new(Mutex::new(None));
             let result_out = result.clone();
 
-            des_tokio::task::spawn_local(async move {
+            descartes_tokio::task::spawn_local(async move {
                 let (sender, resp) = channel
                     .client_streaming("/svc.Test/ClientStreaming", Some(Duration::from_millis(50)))
                     .await
@@ -1630,8 +1630,8 @@ mod client_streaming_tests {
 #[cfg(test)]
 mod stream_protocol_tests {
     use super::*;
-    use des_components::transport::{EndpointInfo, SimTransport};
-    use des_core::{
+    use descartes_components::transport::{EndpointInfo, SimTransport};
+    use descartes_core::{
         Component, Execute, Executor, Scheduler, SimTime, Simulation, SimulationConfig,
     };
     use std::sync::{Arc, Mutex};
@@ -1853,7 +1853,7 @@ mod stream_protocol_tests {
         out_of_order_on_close: bool,
     ) -> (Simulation, Channel) {
         let mut sim = Simulation::new(SimulationConfig { seed: 1 });
-        des_tokio::runtime::install(&mut sim);
+        descartes_tokio::runtime::install(&mut sim);
 
         let transport = crate::Transport::install_default(&mut sim);
 
@@ -1906,7 +1906,7 @@ mod stream_protocol_tests {
             let out: Arc<Mutex<Option<Vec<Bytes>>>> = Arc::new(Mutex::new(None));
             let out2 = out.clone();
 
-            des_tokio::task::spawn_local(async move {
+            descartes_tokio::task::spawn_local(async move {
                 let resp = channel
                     .server_streaming(
                         "/svc.Test/Download",
@@ -1947,7 +1947,7 @@ mod stream_protocol_tests {
             let out: Arc<Mutex<Option<Code>>> = Arc::new(Mutex::new(None));
             let out2 = out.clone();
 
-            des_tokio::task::spawn_local(async move {
+            descartes_tokio::task::spawn_local(async move {
                 let resp = channel
                     .server_streaming(
                         "/svc.Test/Download",
@@ -1978,7 +1978,7 @@ mod stream_protocol_tests {
             let out: Arc<Mutex<Option<Code>>> = Arc::new(Mutex::new(None));
             let out2 = out.clone();
 
-            des_tokio::task::spawn_local(async move {
+            descartes_tokio::task::spawn_local(async move {
                 let resp = channel
                     .server_streaming(
                         "/svc.Test/Download",

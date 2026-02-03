@@ -1,6 +1,6 @@
-use des_core::{Execute, Executor, SimTime, Simulation};
-use des_metrics::{with_simulation_metrics_recorder, SimulationMetrics};
-use des_viz::report::generate_html_report;
+use descartes_core::{Execute, Executor, SimTime, Simulation};
+use descartes_metrics::{with_simulation_metrics_recorder, SimulationMetrics};
+use descartes_viz::report::generate_html_report;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -16,26 +16,26 @@ fn make_temp_dir(prefix: &str) -> PathBuf {
 }
 
 #[test]
-fn html_report_works_with_des_axum_metrics_labels() {
+fn html_report_works_with_descartes_axum_metrics_labels() {
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
 
     with_simulation_metrics_recorder(&metrics, || {
         let mut sim = Simulation::default();
-        des_tokio::runtime::install(&mut sim);
-        let transport = des_axum::Transport::install_default(&mut sim);
+        descartes_tokio::runtime::install(&mut sim);
+        let transport = descartes_axum::Transport::install_default(&mut sim);
 
         let app = axum::Router::new()
             .route(
                 "/work",
                 axum::routing::get(|| async {
-                    des_tokio::time::sleep(Duration::from_millis(10)).await;
+                    descartes_tokio::time::sleep(Duration::from_millis(10)).await;
                     "ok"
                 }),
             )
             .route(
                 "/health",
                 axum::routing::get(|| async {
-                    des_tokio::time::sleep(Duration::from_millis(1)).await;
+                    descartes_tokio::time::sleep(Duration::from_millis(1)).await;
                     "ok"
                 }),
             );
@@ -46,14 +46,14 @@ fn html_report_works_with_des_axum_metrics_labels() {
 
         let client = transport.connect(&mut sim, "svc").expect("install client");
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             for _ in 0..20u32 {
-                let start = des_tokio::time::Instant::now();
+                let start = descartes_tokio::time::Instant::now();
                 let resp = client
                     .get("/work", Some(Duration::from_secs(1)))
                     .await
                     .expect("work response");
-                let latency = des_tokio::time::Instant::now().duration_since(start);
+                let latency = descartes_tokio::time::Instant::now().duration_since(start);
 
                 metrics::counter!(
                     "http_requests_total",
@@ -67,14 +67,14 @@ fn html_report_works_with_des_axum_metrics_labels() {
         });
 
         let health_client = transport.connect(&mut sim, "svc").expect("install health client");
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             for _ in 0..50u32 {
-                let start = des_tokio::time::Instant::now();
+                let start = descartes_tokio::time::Instant::now();
                 let resp = health_client
                     .get("/health", Some(Duration::from_secs(1)))
                     .await
                     .expect("health response");
-                let latency = des_tokio::time::Instant::now().duration_since(start);
+                let latency = descartes_tokio::time::Instant::now().duration_since(start);
 
                 metrics::counter!(
                     "http_requests_total",
@@ -91,7 +91,7 @@ fn html_report_works_with_des_axum_metrics_labels() {
     });
 
     let snapshot = metrics.lock().unwrap().get_metrics_snapshot();
-    let dir = make_temp_dir("des_viz_axum_report_test");
+    let dir = make_temp_dir("descartes_viz_axum_report_test");
     let report_path = dir.join("report.html");
 
     generate_html_report(&snapshot, &report_path).expect("generate report");

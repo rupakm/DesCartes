@@ -15,14 +15,14 @@
 //! # Quick Start
 //!
 //! ```rust,no_run
-//! use des_tower::{DesServiceBuilder, DesTimeoutLayer, DesRateLimitLayer};
-//! use des_core::Simulation;
+//! use descartes_tower::{DesServiceBuilder, DesTimeoutLayer, DesRateLimitLayer};
+//! use descartes_core::Simulation;
 //! use ::tower::ServiceBuilder;
 //! use std::time::Duration;
 //!
-//! # fn example() -> Result<(), des_tower::ServiceError> {
+//! # fn example() -> Result<(), descartes_tower::ServiceError> {
 //! let mut simulation = Simulation::default();
-//! des_tokio::runtime::install(&mut simulation);
+//! descartes_tokio::runtime::install(&mut simulation);
 //!
 //! // Create a base service
 //! let base_service = DesServiceBuilder::new("api-server".to_string())
@@ -56,13 +56,13 @@
 //! ## Basic Service Creation
 //!
 //! ```rust,no_run
-//! use des_tower::{DesServiceBuilder, ServiceError};
-//! use des_core::Simulation;
+//! use descartes_tower::{DesServiceBuilder, ServiceError};
+//! use descartes_core::Simulation;
 //! use std::time::Duration;
 //!
 //! # fn example() -> Result<(), ServiceError> {
 //! let mut simulation = Simulation::default();
-//! des_tokio::runtime::install(&mut simulation);
+//! descartes_tokio::runtime::install(&mut simulation);
 //!
 //! let service = DesServiceBuilder::new("web-server".to_string())
 //!     .thread_capacity(10)
@@ -75,13 +75,13 @@
 //! ## Middleware Composition
 //!
 //! ```rust,no_run
-//! use des_tower::*;
+//! use descartes_tower::*;
 //! use ::tower::ServiceBuilder;
 //! use std::time::Duration;
 //!
 //! # fn middleware_example() -> Result<(), ServiceError> {
-//! # let mut simulation = des_core::Simulation::default();
-//! # des_tokio::runtime::install(&mut simulation);
+//! # let mut simulation = descartes_core::Simulation::default();
+//! # descartes_tokio::runtime::install(&mut simulation);
 //! let base_service = DesServiceBuilder::new("api-server".to_string())
 //!     .thread_capacity(5)
 //!     .service_time(Duration::from_millis(100))
@@ -100,11 +100,11 @@
 //! ## Load Balancing Multiple Services
 //!
 //! ```rust,no_run
-//! use des_tower::*;
+//! use descartes_tower::*;
 //!
 //! # fn load_balancing_example() -> Result<(), ServiceError> {
-//! # let mut simulation = des_core::Simulation::default();
-//! # des_tokio::runtime::install(&mut simulation);
+//! # let mut simulation = descartes_core::Simulation::default();
+//! # descartes_tokio::runtime::install(&mut simulation);
 //! let services = (0..3).map(|i| {
 //!     DesServiceBuilder::new(format!("server-{}", i))
 //!         .thread_capacity(5)
@@ -127,11 +127,11 @@
 //!
 //! ## Load Testing
 //! ```rust,no_run
-//! # use des_tower::*;
+//! # use descartes_tower::*;
 //! # use std::time::Duration;
 //! # fn load_test_example() {
-//! # let mut simulation = des_core::Simulation::default();
-//! # des_tokio::runtime::install(&mut simulation);
+//! # let mut simulation = descartes_core::Simulation::default();
+//! # descartes_tokio::runtime::install(&mut simulation);
 //! // Simulate high load with rate limiting
 //! let service = DesServiceBuilder::new("load-test".to_string())
 //!     .thread_capacity(2)
@@ -144,11 +144,11 @@
 //!
 //! ## Failure Testing
 //! ```rust,no_run
-//! # use des_tower::*;
+//! # use descartes_tower::*;
 //! # use std::time::Duration;
 //! # fn failure_test_example() {
-//! # let mut simulation = des_core::Simulation::default();
-//! # des_tokio::runtime::install(&mut simulation);
+//! # let mut simulation = descartes_core::Simulation::default();
+//! # descartes_tokio::runtime::install(&mut simulation);
 //! // Test circuit breaker behavior
 //! let service = DesServiceBuilder::new("failure-test".to_string())
 //!     .thread_capacity(1)
@@ -181,7 +181,7 @@ pub mod service;
 pub mod timeout;
 
 pub use circuit_breaker::{DesCircuitBreaker, DesCircuitBreakerLayer};
-pub use des_core::SchedulerHandle;
+pub use descartes_core::SchedulerHandle;
 pub use discovery::wait_for_endpoint;
 pub use hedge::{DesHedge, DesHedgeLayer};
 pub use limit::{
@@ -264,9 +264,9 @@ impl HttpBody for SimBody {
 
 /// Convert DES Response to HTTP response
 pub(crate) fn response_to_http(
-    response: des_core::Response,
+    response: descartes_core::Response,
 ) -> Result<HttpResponse<SimBody>, ServiceError> {
-    use des_core::ResponseStatus;
+    use descartes_core::ResponseStatus;
 
     match response.status {
         ResponseStatus::Ok => {
@@ -319,7 +319,7 @@ pub(crate) fn serialize_http_request(req: &http::Request<SimBody>) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use des_core::Simulation;
+    use descartes_core::Simulation;
     use http::{Method, Request};
     use std::future::Future;
     use std::pin::Pin;
@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn test_des_service_basic() {
+    fn test_descartes_service_basic() {
         let mut simulation = Simulation::default();
 
         // Build the service
@@ -385,9 +385,9 @@ mod tests {
     }
 
     #[test]
-    fn test_des_rate_limit_layer() {
+    fn test_descartes_rate_limit_layer() {
         let mut simulation = Simulation::default();
-        des_tokio::runtime::install(&mut simulation);
+        descartes_tokio::runtime::install(&mut simulation);
 
         // Create base service
         let base_service = DesServiceBuilder::new("rate-limit-test".to_string())
@@ -454,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn test_des_concurrency_limit_basic() {
+    fn test_descartes_concurrency_limit_basic() {
         let mut simulation = Simulation::default();
 
         // Create base service
@@ -509,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn test_des_concurrency_limit_backpressure() {
+    fn test_descartes_concurrency_limit_backpressure() {
         let mut simulation = Simulation::default();
 
         // Create base service with high capacity but slow processing
@@ -592,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn test_des_concurrency_limit_sequential_processing() {
+    fn test_descartes_concurrency_limit_sequential_processing() {
         let mut simulation = Simulation::default();
 
         // Create base service with capacity 1 to force sequential processing
@@ -651,7 +651,7 @@ mod tests {
     }
 
     #[test]
-    fn test_des_global_concurrency_limit_shared_state() {
+    fn test_descartes_global_concurrency_limit_shared_state() {
         let mut simulation = Simulation::default();
 
         // Create shared global concurrency state with limit of 2
@@ -743,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn test_des_global_concurrency_limit_fairness() {
+    fn test_descartes_global_concurrency_limit_fairness() {
         let mut simulation = Simulation::default();
 
         // Create shared global state with limit of 1 to test fairness
@@ -970,7 +970,7 @@ mod tests {
     #[test]
     fn test_tower_layer_composition() {
         let mut simulation = Simulation::default();
-        des_tokio::runtime::install(&mut simulation);
+        descartes_tokio::runtime::install(&mut simulation);
 
         // Create base service
         let base_service = DesServiceBuilder::new("layer-composition-test".to_string())
@@ -1026,13 +1026,13 @@ mod tests {
 
     #[test]
     fn test_timeout_layer_success() {
-        use des_core::{Execute, Executor, SimTime};
+        use descartes_core::{Execute, Executor, SimTime};
         use std::cell::RefCell;
         use std::rc::Rc;
         use tower::{Layer, ServiceExt};
 
         let mut simulation = Simulation::default();
-        des_tokio::runtime::install(&mut simulation);
+        descartes_tokio::runtime::install(&mut simulation);
 
         let base_service = DesServiceBuilder::new("timeout-success-test".to_string())
             .thread_capacity(5)
@@ -1046,7 +1046,7 @@ mod tests {
             Rc::new(RefCell::new(None));
         let done_clone = done.clone();
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             let req = Request::builder()
                 .method(Method::GET)
                 .uri("/timeout-success")
@@ -1064,13 +1064,13 @@ mod tests {
 
     #[test]
     fn test_timeout_layer_timeout() {
-        use des_core::{Execute, Executor, SimTime};
+        use descartes_core::{Execute, Executor, SimTime};
         use std::cell::RefCell;
         use std::rc::Rc;
         use tower::{Layer, ServiceExt};
 
         let mut simulation = Simulation::default();
-        des_tokio::runtime::install(&mut simulation);
+        descartes_tokio::runtime::install(&mut simulation);
 
         let base_service = DesServiceBuilder::new("timeout-test".to_string())
             .thread_capacity(5)
@@ -1084,7 +1084,7 @@ mod tests {
             Rc::new(RefCell::new(None));
         let done_clone = done.clone();
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             let req = Request::builder()
                 .method(Method::GET)
                 .uri("/timeout-test")
@@ -1109,7 +1109,7 @@ mod tests {
     #[test]
     fn test_timeout_layer_resource_cleanup() {
         let mut simulation = Simulation::default();
-        des_tokio::runtime::install(&mut simulation);
+        descartes_tokio::runtime::install(&mut simulation);
 
         // Create base service
         let base_service = DesServiceBuilder::new("cleanup-test".to_string())
@@ -1158,7 +1158,7 @@ mod tests {
     #[test]
     fn test_circuit_breaker_failure_threshold() {
         let mut simulation = Simulation::default();
-        des_tokio::runtime::install(&mut simulation);
+        descartes_tokio::runtime::install(&mut simulation);
 
         // Create a service that always fails
         let failing_service = FailingService;

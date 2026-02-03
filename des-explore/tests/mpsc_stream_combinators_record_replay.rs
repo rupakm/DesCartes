@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex as StdMutex};
 
-use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
-use des_explore::prelude::*;
-use des_tokio::stream::StreamExt;
+use descartes_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
+use descartes_explore::prelude::*;
+use descartes_tokio::stream::StreamExt;
 
 #[test]
 fn mpsc_stream_combinators_are_replayable() {
@@ -12,7 +12,7 @@ fn mpsc_stream_combinators_are_replayable() {
         let scenario = scenario.clone();
         move || {
             let trace_path = std::env::temp_dir().join(format!(
-                "des_explore_mpsc_stream_comb_record_{}_{}.json",
+                "descartes_explore_mpsc_stream_comb_record_{}_{}.json",
                 std::process::id(),
                 scenario
             ));
@@ -39,20 +39,20 @@ fn mpsc_stream_combinators_are_replayable() {
                 cfg,
                 move |sim_config, _ctx| Simulation::new(sim_config),
                 move |sim, _ctx| {
-                    let (tx, rx) = des_tokio::sync::mpsc::channel::<u64>(16);
+                    let (tx, rx) = descartes_tokio::sync::mpsc::channel::<u64>(16);
 
-                    let _producer = des_tokio::thread::spawn(async move {
+                    let _producer = descartes_tokio::thread::spawn(async move {
                         for i in 0..20u64 {
                             if tx.send(i).await.is_err() {
                                 break;
                             }
-                            des_tokio::thread::yield_now().await;
+                            descartes_tokio::thread::yield_now().await;
                         }
                         drop(tx);
                     });
 
                     let out2 = out2.clone();
-                    des_tokio::thread::spawn(async move {
+                    descartes_tokio::thread::spawn(async move {
                         let v = rx
                             .map(|x| x + 1)
                             .filter(|x| *x % 3 == 0)
@@ -79,7 +79,7 @@ fn mpsc_stream_combinators_are_replayable() {
 
     let replayed_out = std::thread::spawn(move || {
         let trace_path = std::env::temp_dir().join(format!(
-            "des_explore_mpsc_stream_comb_replay_{}_{}.json",
+            "descartes_explore_mpsc_stream_comb_replay_{}_{}.json",
             std::process::id(),
             scenario
         ));
@@ -104,20 +104,20 @@ fn mpsc_stream_combinators_are_replayable() {
             &trace,
             move |sim_config, _ctx, _input| Simulation::new(sim_config),
             move |sim, _ctx| {
-                let (tx, rx) = des_tokio::sync::mpsc::channel::<u64>(16);
+                let (tx, rx) = descartes_tokio::sync::mpsc::channel::<u64>(16);
 
-                let _producer = des_tokio::thread::spawn(async move {
+                let _producer = descartes_tokio::thread::spawn(async move {
                     for i in 0..20u64 {
                         if tx.send(i).await.is_err() {
                             break;
                         }
-                        des_tokio::thread::yield_now().await;
+                        descartes_tokio::thread::yield_now().await;
                     }
                     drop(tx);
                 });
 
                 let out2 = out2.clone();
-                des_tokio::thread::spawn(async move {
+                descartes_tokio::thread::spawn(async move {
                     let v = rx
                         .map(|x| x + 1)
                         .filter(|x| *x % 3 == 0)

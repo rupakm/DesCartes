@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use des_core::async_runtime::{ReadyTaskPolicy, ReadyTaskSignature, TaskId};
-use des_core::SimTime;
+use descartes_core::async_runtime::{ReadyTaskPolicy, ReadyTaskSignature, TaskId};
+use descartes_core::SimTime;
 
 use crate::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
 use crate::trace::{AsyncRuntimeDecision, TraceEvent, TraceRecorder};

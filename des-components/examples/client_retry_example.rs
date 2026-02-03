@@ -7,11 +7,11 @@
 //!
 //! Run with: cargo run --package des-components --example client_retry_example
 
-use des_components::{
+use descartes_components::{
     ClientEvent, ExponentialBackoffPolicy, RetryPolicy, Server, SimpleClient,
     SuccessBasedRetryPolicy, TokenBucketRetryPolicy,
 };
-use des_core::{task::PeriodicTask, Execute, Executor, SimTime, Simulation};
+use descartes_core::{task::PeriodicTask, Execute, Executor, SimTime, Simulation};
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

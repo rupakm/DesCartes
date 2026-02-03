@@ -11,12 +11,12 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::dists::{
+use descartes_core::dists::{
     ArrivalPattern, ExponentialDistribution, PoissonArrivals, ServiceTimeDistribution,
 };
-use des_core::draw_site;
-use des_core::{Component, Key, Scheduler, SimTime, Simulation, SimulationConfig};
-use des_explore::{
+use descartes_core::draw_site;
+use descartes_core::{Component, Key, Scheduler, SimTime, Simulation, SimulationConfig};
+use descartes_explore::{
     estimate::{
         estimate_monte_carlo, estimate_with_splitting, MonteCarloConfig, SplittingEstimateConfig,
     },

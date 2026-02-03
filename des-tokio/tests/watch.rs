@@ -1,19 +1,19 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::{Execute, Executor, SimTime, Simulation};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
 
 #[test]
 fn watch_receiver_observes_updates() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
-    let (tx, mut rx) = des_tokio::sync::watch::channel(0u64);
+    let (tx, mut rx) = descartes_tokio::sync::watch::channel(0u64);
 
     let out: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
     let out2 = out.clone();
 
-    des_tokio::task::spawn(async move {
+    descartes_tokio::task::spawn(async move {
         out2.lock().unwrap().push(*rx.borrow());
 
         rx.changed().await.unwrap();
@@ -23,10 +23,10 @@ fn watch_receiver_observes_updates() {
         out2.lock().unwrap().push(*rx.borrow());
     });
 
-    des_tokio::task::spawn(async move {
-        des_tokio::time::sleep(Duration::from_millis(5)).await;
+    descartes_tokio::task::spawn(async move {
+        descartes_tokio::time::sleep(Duration::from_millis(5)).await;
         tx.send(10).unwrap();
-        des_tokio::time::sleep(Duration::from_millis(5)).await;
+        descartes_tokio::time::sleep(Duration::from_millis(5)).await;
         tx.send(20).unwrap();
     });
 
@@ -37,15 +37,15 @@ fn watch_receiver_observes_updates() {
 #[test]
 fn watch_changed_returns_err_when_sender_dropped() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
-    let (tx, mut rx) = des_tokio::sync::watch::channel(1u64);
+    let (tx, mut rx) = descartes_tokio::sync::watch::channel(1u64);
 
-    let out: Arc<Mutex<Vec<Result<(), des_tokio::sync::watch::RecvError>>>> =
+    let out: Arc<Mutex<Vec<Result<(), descartes_tokio::sync::watch::RecvError>>>> =
         Arc::new(Mutex::new(Vec::new()));
     let out2 = out.clone();
 
-    des_tokio::task::spawn_local(async move {
+    descartes_tokio::task::spawn_local(async move {
         // Sender drops without any changes.
         drop(tx);
         let res = rx.changed().await;
@@ -62,15 +62,15 @@ fn watch_changed_returns_err_when_sender_dropped() {
 #[test]
 fn watch_clone_receiver_sees_updates() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
-    let (tx, mut rx1) = des_tokio::sync::watch::channel(0u64);
+    let (tx, mut rx1) = descartes_tokio::sync::watch::channel(0u64);
     let mut rx2 = rx1.clone();
 
     let out: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
 
     let out1 = out.clone();
-    des_tokio::task::spawn(async move {
+    descartes_tokio::task::spawn(async move {
         rx1.changed().await.unwrap();
         if *rx1.borrow() == 7 {
             out1.lock().unwrap().push("rx1");
@@ -78,15 +78,15 @@ fn watch_clone_receiver_sees_updates() {
     });
 
     let out2 = out.clone();
-    des_tokio::task::spawn(async move {
+    descartes_tokio::task::spawn(async move {
         rx2.changed().await.unwrap();
         if *rx2.borrow() == 7 {
             out2.lock().unwrap().push("rx2");
         }
     });
 
-    des_tokio::task::spawn(async move {
-        des_tokio::time::sleep(Duration::from_millis(5)).await;
+    descartes_tokio::task::spawn(async move {
+        descartes_tokio::time::sleep(Duration::from_millis(5)).await;
         tx.send(7).unwrap();
     });
 

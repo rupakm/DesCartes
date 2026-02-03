@@ -20,8 +20,8 @@ pub trait MetricsExporter {
 ///
 /// # Example
 /// ```no_run
-/// use des_metrics::SimulationMetrics;
-/// use des_metrics::export::export_json;
+/// use descartes_metrics::SimulationMetrics;
+/// use descartes_metrics::export::export_json;
 ///
 /// let metrics = SimulationMetrics::new();
 /// // ... collect metrics ...
@@ -40,8 +40,8 @@ pub fn export_json(
 ///
 /// # Example
 /// ```no_run
-/// use des_metrics::SimulationMetrics;
-/// use des_metrics::export::export_csv;
+/// use descartes_metrics::SimulationMetrics;
+/// use descartes_metrics::export::export_csv;
 ///
 /// let metrics = SimulationMetrics::new();
 /// // ... collect metrics ...

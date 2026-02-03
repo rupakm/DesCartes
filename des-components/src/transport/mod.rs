@@ -14,7 +14,7 @@ pub use endpoint_registry::{
 pub use network_model::{LatencyConfig, LatencyJitterModel, NetworkModel, SimpleNetworkModel};
 pub use sim_transport::SimTransport;
 
-use des_core::SimTime;
+use descartes_core::SimTime;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

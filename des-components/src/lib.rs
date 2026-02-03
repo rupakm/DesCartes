@@ -14,7 +14,7 @@ pub mod simple_client;
 pub mod transport;
 
 // Export distribution patterns from des-core
-pub use des_core::dists::{
+pub use descartes_core::dists::{
     AndPredicate, ArrivalPattern, BodySizePredicate, ClientInfo, CompositeServiceTime,
     ConstantArrivalPattern, ConstantServiceTime, EndpointBasedServiceTime, ExponentialDistribution,
     HeaderPredicate, MethodPredicate, OrPredicate, RequestContext, RequestPredicate,
@@ -43,7 +43,7 @@ pub use error::{ComponentError, QueueError, RequestError, ThrottleError};
 pub mod queue;
 pub use queue::{FifoQueue, PriorityQueue, Queue, QueueItem};
 
-pub use des_core::{
+pub use descartes_core::{
     AttemptStatus, Request, RequestAttempt, RequestAttemptId, RequestId, RequestStatus, Response,
     ResponseStatus,
 };

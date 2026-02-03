@@ -8,9 +8,9 @@
 //!
 //! Run with: cargo run --package des-components --example metrics_retrieval_example
 
-use des_components::{ClientEvent, ExponentialBackoffPolicy, SimpleClient};
-use des_core::{task::PeriodicTask, Execute, Executor, SimTime, Simulation};
-use des_metrics::SimulationMetrics;
+use descartes_components::{ClientEvent, ExponentialBackoffPolicy, SimpleClient};
+use descartes_core::{task::PeriodicTask, Execute, Executor, SimTime, Simulation};
+use descartes_metrics::SimulationMetrics;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -113,7 +113,7 @@ fn client_metrics_example() {
     let mut sim = Simulation::default();
 
     // Create a server first
-    let server = des_components::Server::with_constant_service_time(
+    let server = descartes_components::Server::with_constant_service_time(
         "metrics-server".to_string(),
         1,
         Duration::from_millis(50),

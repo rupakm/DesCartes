@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex as StdMutex};
 
-use des_core::async_runtime::{
+use descartes_core::async_runtime::{
     self, DesRuntime, DesRuntimeHandle, DesRuntimeLocalHandle, RuntimeEvent,
 };
-use des_core::{Key, SchedulerHandle, SimTime, Simulation};
+use descartes_core::{Key, SchedulerHandle, SimTime, Simulation};
 
 use crate::concurrency::{ConcurrencyEvent, ConcurrencyRecorder};
 use crate::sync::mutex::{FifoMutexWaiterPolicy, MutexWaiterPolicy, WaiterInfo};
@@ -23,7 +23,7 @@ thread_local! {
     static INSTALLED: RefCell<Option<Installed>> = const { RefCell::new(None) };
 }
 
-/// Configuration for `des_tokio` facilities installed into a simulation.
+/// Configuration for `descartes_tokio` facilities installed into a simulation.
 #[derive(Default)]
 pub struct TokioInstallConfig {
     pub mutex_policy: Option<Box<dyn MutexWaiterPolicy>>,
@@ -31,7 +31,7 @@ pub struct TokioInstallConfig {
 }
 
 /// Install the DES async runtime into the simulation and make it the
-/// current runtime for `des_tokio::spawn`.
+/// current runtime for `descartes_tokio::spawn`.
 ///
 /// # Panics
 ///
@@ -79,7 +79,7 @@ pub fn install_with_tokio(
     INSTALLED.with(|cell| {
         let mut slot = cell.borrow_mut();
         if slot.is_some() {
-            panic!("des_tokio runtime already installed");
+            panic!("descartes_tokio runtime already installed");
         }
         let mutex_policy: Box<dyn MutexWaiterPolicy> = tokio_cfg
             .mutex_policy
@@ -101,7 +101,7 @@ pub(crate) fn with_scheduler<R>(f: impl FnOnce(&SchedulerHandle) -> R) -> R {
     INSTALLED.with(|cell| {
         let slot = cell.borrow();
         let installed = slot.as_ref().expect(
-            "des_tokio runtime not installed. Call des_tokio::runtime::install(&mut Simulation) first",
+            "descartes_tokio runtime not installed. Call descartes_tokio::runtime::install(&mut Simulation) first",
         );
         f(&installed.scheduler)
     })
@@ -111,7 +111,7 @@ pub(crate) fn with_handle<R>(f: impl FnOnce(&DesRuntimeHandle) -> R) -> R {
     INSTALLED.with(|cell| {
         let slot = cell.borrow();
         let installed = slot.as_ref().expect(
-            "des_tokio runtime not installed. Call des_tokio::runtime::install(&mut Simulation) first",
+            "descartes_tokio runtime not installed. Call descartes_tokio::runtime::install(&mut Simulation) first",
         );
         f(&installed.handle)
     })
@@ -121,7 +121,7 @@ pub(crate) fn with_local_handle<R>(f: impl FnOnce(&DesRuntimeLocalHandle) -> R) 
     INSTALLED.with(|cell| {
         let slot = cell.borrow();
         let installed = slot.as_ref().expect(
-            "des_tokio runtime not installed. Call des_tokio::runtime::install(&mut Simulation) first",
+            "descartes_tokio runtime not installed. Call descartes_tokio::runtime::install(&mut Simulation) first",
         );
         f(&installed.local_handle)
     })
@@ -158,7 +158,7 @@ pub(crate) fn choose_mutex_waiter(time: SimTime, waiters: &[WaiterInfo]) -> usiz
     INSTALLED.with(|cell| {
         let slot = cell.borrow();
         let installed = slot.as_ref().expect(
-            "des_tokio runtime not installed. Call des_tokio::runtime::install(&mut Simulation) first",
+            "descartes_tokio runtime not installed. Call descartes_tokio::runtime::install(&mut Simulation) first",
         );
 
         let mut policy = installed.mutex_policy.lock().unwrap();

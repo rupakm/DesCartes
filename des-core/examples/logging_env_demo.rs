@@ -6,10 +6,10 @@
 //! - Default (info level): cargo run --example logging_env_demo
 //! - Debug level: RUST_LOG=debug cargo run --example logging_env_demo
 //! - Trace level: RUST_LOG=trace cargo run --example logging_env_demo
-//! - Module-specific: RUST_LOG=des_core::scheduler=debug cargo run --example logging_env_demo
-//! - Multiple modules: RUST_LOG=des_core=debug,logging_env_demo=trace cargo run --example logging_env_demo
+//! - Module-specific: RUST_LOG=descartes_core::scheduler=debug cargo run --example logging_env_demo
+//! - Multiple modules: RUST_LOG=descartes_core=debug,logging_env_demo=trace cargo run --example logging_env_demo
 
-use des_core::{init_simulation_logging_with_level, Component, Executor, Key, SimTime, Simulation};
+use descartes_core::{init_simulation_logging_with_level, Component, Executor, Key, SimTime, Simulation};
 use std::time::Duration;
 use tracing::{debug, info};
 
@@ -31,7 +31,7 @@ impl Component for SimpleComponent {
         &mut self,
         self_id: Key<Self::Event>,
         event: &Self::Event,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         match event {
             SimpleEvent::Tick => {

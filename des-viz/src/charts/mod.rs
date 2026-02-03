@@ -10,7 +10,7 @@ pub mod time_series;
 mod util;
 
 use crate::error::VizError;
-use des_metrics::simulation_metrics::MetricsSnapshot;
+use descartes_metrics::simulation_metrics::MetricsSnapshot;
 use std::path::Path;
 
 /// Common chart configuration
@@ -82,8 +82,8 @@ impl ChartConfig {
 ///
 /// # Example
 /// ```no_run
-/// use des_metrics::SimulationMetrics;
-/// use des_viz::charts::generate_all_charts;
+/// use descartes_metrics::SimulationMetrics;
+/// use descartes_viz::charts::generate_all_charts;
 ///
 /// let metrics = SimulationMetrics::new();
 /// let snapshot = metrics.get_metrics_snapshot();

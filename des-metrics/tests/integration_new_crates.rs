@@ -1,20 +1,20 @@
-use des_core::{Execute, Executor, SimTime, Simulation};
-use des_metrics::{with_simulation_metrics_recorder, SimulationMetrics};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
+use descartes_metrics::{with_simulation_metrics_recorder, SimulationMetrics};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[test]
-fn integrates_with_des_tokio_tasks() {
+fn integrates_with_descartes_tokio_tasks() {
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
 
     with_simulation_metrics_recorder(&metrics, || {
         let mut sim = Simulation::default();
-        des_tokio::runtime::install(&mut sim);
+        descartes_tokio::runtime::install(&mut sim);
 
-        des_tokio::task::spawn_local(async {
+        descartes_tokio::task::spawn_local(async {
             for _ in 0..3u32 {
                 metrics::counter!("ticks_total").increment(1);
-                des_tokio::time::sleep(Duration::from_millis(10)).await;
+                descartes_tokio::time::sleep(Duration::from_millis(10)).await;
             }
         });
 
@@ -28,14 +28,14 @@ fn integrates_with_des_tokio_tasks() {
 }
 
 #[test]
-fn integrates_with_des_axum_request_flow() {
+fn integrates_with_descartes_axum_request_flow() {
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
 
     with_simulation_metrics_recorder(&metrics, || {
         let mut sim = Simulation::default();
-        des_tokio::runtime::install(&mut sim);
+        descartes_tokio::runtime::install(&mut sim);
 
-        let transport = des_axum::Transport::install_default(&mut sim);
+        let transport = descartes_axum::Transport::install_default(&mut sim);
 
         let app = axum::Router::new().route(
             "/hello",
@@ -48,14 +48,14 @@ fn integrates_with_des_axum_request_flow() {
 
         let client = transport.connect(&mut sim, "hello").expect("install client");
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             for _ in 0..5u32 {
-                let start = des_tokio::time::Instant::now();
+                let start = descartes_tokio::time::Instant::now();
                 let resp = client
                     .get("/hello", Some(Duration::from_secs(1)))
                     .await
                     .expect("http response");
-                let elapsed = des_tokio::time::Instant::now().duration_since(start);
+                let elapsed = descartes_tokio::time::Instant::now().duration_since(start);
 
                 let status = resp.status().as_str().to_string();
 
@@ -89,18 +89,18 @@ fn integrates_with_des_axum_request_flow() {
 }
 
 #[test]
-fn integrates_with_des_tonic_unary_flow() {
+fn integrates_with_descartes_tonic_unary_flow() {
     let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
 
     with_simulation_metrics_recorder(&metrics, || {
         let mut sim = Simulation::default();
-        des_tokio::runtime::install(&mut sim);
+        descartes_tokio::runtime::install(&mut sim);
 
-        let transport = des_tonic::Transport::install_default(&mut sim);
+        let transport = descartes_tonic::Transport::install_default(&mut sim);
         let service_name = "echo.EchoService";
         let addr = "127.0.0.1:50051".parse().unwrap();
 
-        let mut router = des_tonic::Router::new();
+        let mut router = descartes_tonic::Router::new();
         router.add_unary(
             "/echo.EchoService/Echo",
             |req: tonic::Request<bytes::Bytes>| async move {
@@ -116,8 +116,8 @@ fn integrates_with_des_tonic_unary_flow() {
             .connect_socket_addr(&mut sim, service_name, addr)
             .expect("connect grpc client");
 
-        des_tokio::task::spawn_local(async move {
-            let start = des_tokio::time::Instant::now();
+        descartes_tokio::task::spawn_local(async move {
+            let start = descartes_tokio::time::Instant::now();
             let resp = channel
                 .unary(
                     "/echo.EchoService/Echo",
@@ -126,7 +126,7 @@ fn integrates_with_des_tonic_unary_flow() {
                 )
                 .await;
 
-            let elapsed = des_tokio::time::Instant::now().duration_since(start);
+            let elapsed = descartes_tokio::time::Instant::now().duration_since(start);
             match resp {
                 Ok(r) => {
                     assert_eq!(r.into_inner(), bytes::Bytes::from_static(b"hello"));

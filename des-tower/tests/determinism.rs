@@ -5,8 +5,8 @@
 //! non-determinism (ordering/wake behavior) without depending on any particular
 //! ordering policy.
 
-use des_core::{Execute, Executor, SimTime, Simulation};
-use des_tower::{DesServiceBuilder, SimBody};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
+use descartes_tower::{DesServiceBuilder, SimBody};
 use http::{Method, Request};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -14,11 +14,11 @@ use std::time::Duration;
 use tower::ServiceExt;
 
 fn run_tower_simulation() -> Vec<String> {
-    // des_tokio installs into TLS and can only be installed once per thread.
+    // descartes_tokio installs into TLS and can only be installed once per thread.
     // Run each simulation in a fresh thread to allow multiple runs in one test.
     std::thread::spawn(|| {
         let mut simulation = Simulation::default();
-        des_tokio::runtime::install(&mut simulation);
+        descartes_tokio::runtime::install(&mut simulation);
 
         let service = DesServiceBuilder::new("determinism-server".to_string())
             .thread_capacity(1)
@@ -41,7 +41,7 @@ fn run_tower_simulation() -> Vec<String> {
                     .body(SimBody::new(format!("req-{i}").into_bytes()))
                     .unwrap();
 
-                des_tokio::task::spawn_local(async move {
+                descartes_tokio::task::spawn_local(async move {
                     let response = service.oneshot(request).await.expect("service call failed");
                     let body = String::from_utf8_lossy(response.body().data()).to_string();
                     responses.borrow_mut().push(body);

@@ -3,7 +3,7 @@
 use crate::charts::util::{metric_label, truncate_label};
 use crate::charts::ChartConfig;
 use crate::error::VizError;
-use des_metrics::simulation_metrics::MetricsSnapshot;
+use descartes_metrics::simulation_metrics::MetricsSnapshot;
 use plotters::prelude::*;
 use std::path::Path;
 
@@ -18,8 +18,8 @@ use std::path::Path;
 ///
 /// # Example
 /// ```no_run
-/// use des_metrics::SimulationMetrics;
-/// use des_viz::charts::percentiles::create_percentile_chart;
+/// use descartes_metrics::SimulationMetrics;
+/// use descartes_viz::charts::percentiles::create_percentile_chart;
 ///
 /// let metrics = SimulationMetrics::new();
 /// let snapshot = metrics.get_metrics_snapshot();
@@ -137,7 +137,7 @@ pub fn create_percentile_chart_with_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use des_metrics::simulation_metrics::SimulationMetrics;
+    use descartes_metrics::simulation_metrics::SimulationMetrics;
 
     #[test]
     fn test_percentile_chart_generation() {

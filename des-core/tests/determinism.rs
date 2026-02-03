@@ -3,7 +3,7 @@
 //! These tests are intended to detect accidental introduction of
 //! non-determinism in event execution order for identical simulations.
 
-use des_core::{Component, Execute, Executor, Key, Scheduler, SimTime, Simulation};
+use descartes_core::{Component, Execute, Executor, Key, Scheduler, SimTime, Simulation};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]

@@ -3,7 +3,7 @@
 //! Prevents cascading failures by temporarily blocking requests to failing services.
 //!
 //! This implementation uses `des-tokio` for recovery timers.
-//! Note: requires `des_tokio::runtime::install(&mut sim)`.
+//! Note: requires `descartes_tokio::runtime::install(&mut sim)`.
 
 use http::Request;
 use pin_project::pin_project;
@@ -182,8 +182,8 @@ where
                     // `recovery_timeout` from the future and reschedule based on the shared state.
                     let state = this.state.clone();
                     let recovery_timeout = *this.recovery_timeout;
-                    des_tokio::task::spawn_local(async move {
-                        des_tokio::time::sleep(recovery_timeout).await;
+                    descartes_tokio::task::spawn_local(async move {
+                        descartes_tokio::time::sleep(recovery_timeout).await;
                         let mut s = state.lock().unwrap();
                         if matches!(*s, CircuitBreakerState::Open { generation: g } if g == generation)
                         {

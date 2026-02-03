@@ -3,7 +3,7 @@
 //! This example shows how to use the logging system to debug and monitor
 //! discrete event simulations.
 
-use des_core::{init_detailed_simulation_logging, Component, Executor, Key, SimTime, Simulation};
+use descartes_core::{init_detailed_simulation_logging, Component, Executor, Key, SimTime, Simulation};
 use std::time::Duration;
 use tracing::{debug, info};
 
@@ -38,7 +38,7 @@ impl Component for Server {
         &mut self,
         self_id: Key<Self::Event>,
         event: &Self::Event,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         match event {
             ServerEvent::ProcessRequest { request_id } => {
@@ -109,7 +109,7 @@ impl Component for Client {
         &mut self,
         self_id: Key<Self::Event>,
         event: &Self::Event,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         match event {
             ClientEvent::SendRequest => {
@@ -170,7 +170,7 @@ fn main() {
     // This allows you to control logging without recompiling
 
     // Option 4: Use default logging (info level)
-    // use des_core::init_simulation_logging;
+    // use descartes_core::init_simulation_logging;
     // init_simulation_logging();
 
     // ============================================================================

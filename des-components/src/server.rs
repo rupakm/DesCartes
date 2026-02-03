@@ -5,11 +5,11 @@
 //! capacity management.
 
 use crate::queue::{Queue, QueueItem};
-use des_core::dists::{RequestContext, ServiceTimeDistribution};
-use des_core::{
+use descartes_core::dists::{RequestContext, ServiceTimeDistribution};
+use descartes_core::{
     Component, Key, RequestAttempt, RequestAttemptId, RequestId, Response, Scheduler, SimTime,
 };
-use des_metrics::SimulationMetrics;
+use descartes_metrics::SimulationMetrics;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -118,7 +118,7 @@ impl Server {
         thread_capacity: usize,
         service_time: Duration,
     ) -> Self {
-        use des_core::dists::ConstantServiceTime;
+        use descartes_core::dists::ConstantServiceTime;
         Self::new(
             name,
             thread_capacity,
@@ -137,7 +137,7 @@ impl Server {
         thread_capacity: usize,
         mean_service_time: Duration,
     ) -> Self {
-        use des_core::dists::ExponentialDistribution;
+        use descartes_core::dists::ExponentialDistribution;
         let rate = 1.0 / mean_service_time.as_secs_f64();
         Self::new(
             name,
@@ -549,7 +549,7 @@ impl Component for Server {
 mod tests {
     use super::*;
     use crate::queue::FifoQueue;
-    use des_core::{Execute, Executor, Simulation};
+    use descartes_core::{Execute, Executor, Simulation};
 
     /// Test client for server testing
     pub struct TestClient {

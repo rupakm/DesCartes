@@ -5,8 +5,8 @@
 //!
 //! Run with: `cargo run -p des-tower --example retry_example`
 
-use des_core::{task::RetryTask, Scheduler, SimTime, Simulation, Task};
-use des_tower::{DesRetryLayer, DesRetryPolicy, DesServiceBuilder};
+use descartes_core::{task::RetryTask, Scheduler, SimTime, Simulation, Task};
+use descartes_tower::{DesRetryLayer, DesRetryPolicy, DesServiceBuilder};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
@@ -73,7 +73,7 @@ fn retry_layer_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("   Creating retry-enabled Tower services\n");
 
     let mut simulation = Simulation::default();
-    des_tokio::runtime::install(&mut simulation);
+    descartes_tokio::runtime::install(&mut simulation);
 
     // Create a base service
     let base_service = DesServiceBuilder::new("retry-service".to_string())

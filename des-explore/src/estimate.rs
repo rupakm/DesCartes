@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use des_core::{SimTime, Simulation, SimulationConfig};
+use descartes_core::{SimTime, Simulation, SimulationConfig};
 
 use crate::harness::{HarnessContext, HarnessError};
 use crate::monitor::{Monitor, MonitorStatus};
@@ -131,7 +131,7 @@ fn install_tokio_if_requested(
 
     #[cfg(feature = "tokio")]
     {
-        des_tokio::runtime::install(sim);
+        descartes_tokio::runtime::install(sim);
         Ok(())
     }
 

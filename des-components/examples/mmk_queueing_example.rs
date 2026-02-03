@@ -11,17 +11,17 @@
 //!
 //! Run with: cargo run --package des-components --example mmk_queueing_example
 
-use des_components::{
+use descartes_components::{
     ClientEvent, ExponentialBackoffPolicy, FifoQueue, FixedRetryPolicy, Server, ServerEvent,
     SimpleClient,
 };
-use des_core::{
+use descartes_core::{
     Component, Execute, Executor, Key, RequestAttempt, RequestAttemptId, RequestId, Response,
     Scheduler, SimTime, Simulation,
 };
-use des_metrics::MmkTimeSeriesMetrics;
-use des_metrics::SimulationMetrics;
-use des_viz::charts::time_series::{create_mmk_time_series_chart, TimeSeries};
+use descartes_metrics::MmkTimeSeriesMetrics;
+use descartes_metrics::SimulationMetrics;
+use descartes_viz::charts::time_series::{create_mmk_time_series_chart, TimeSeries};
 use plotters::prelude::{BLUE, GREEN, RED};
 use rand_distr::{Distribution, Exp};
 use std::collections::HashMap;
@@ -561,7 +561,7 @@ impl ExponentialServiceServer {
         }
     }
 
-    pub fn with_queue(mut self, queue: Box<dyn des_components::Queue>) -> Self {
+    pub fn with_queue(mut self, queue: Box<dyn descartes_components::Queue>) -> Self {
         self.inner_server = self.inner_server.with_queue(queue);
         self
     }
@@ -740,31 +740,31 @@ fn generate_time_series_charts(
     std::fs::create_dir_all("target/mmk_charts")?;
 
     // Convert time-series data to visualization format
-    let latency_data: Vec<des_viz::charts::time_series::TimeSeriesPoint> = ts_metrics
+    let latency_data: Vec<descartes_viz::charts::time_series::TimeSeriesPoint> = ts_metrics
         .latency
         .get_aggregated_data()
         .iter()
-        .map(|point| des_viz::charts::time_series::TimeSeriesPoint {
+        .map(|point| descartes_viz::charts::time_series::TimeSeriesPoint {
             timestamp: point.timestamp,
             value: point.value,
         })
         .collect();
 
-    let queue_size_data: Vec<des_viz::charts::time_series::TimeSeriesPoint> = ts_metrics
+    let queue_size_data: Vec<descartes_viz::charts::time_series::TimeSeriesPoint> = ts_metrics
         .queue_size
         .get_aggregated_data()
         .iter()
-        .map(|point| des_viz::charts::time_series::TimeSeriesPoint {
+        .map(|point| descartes_viz::charts::time_series::TimeSeriesPoint {
             timestamp: point.timestamp,
             value: point.value,
         })
         .collect();
 
-    let timeout_rate_data: Vec<des_viz::charts::time_series::TimeSeriesPoint> = ts_metrics
+    let timeout_rate_data: Vec<descartes_viz::charts::time_series::TimeSeriesPoint> = ts_metrics
         .timeout_rate
         .get_aggregated_data()
         .iter()
-        .map(|point| des_viz::charts::time_series::TimeSeriesPoint {
+        .map(|point| descartes_viz::charts::time_series::TimeSeriesPoint {
             timestamp: point.timestamp,
             value: point.value,
         })
@@ -1104,7 +1104,7 @@ pub fn run_mm1_with_retry(config: MmkConfig) -> MmkResults {
     let client_key = simulation.add_component(client);
 
     // Start periodic request generation
-    use des_core::task::PeriodicTask;
+    use descartes_core::task::PeriodicTask;
     let task = PeriodicTask::new(
         move |scheduler| {
             scheduler.schedule_now(client_key, ClientEvent::SendRequest);
@@ -1239,7 +1239,7 @@ pub fn run_mm1_with_exp_backoff(config: MmkConfig) -> MmkResults {
     let client_key = simulation.add_component(client);
 
     // Start periodic request generation
-    use des_core::task::PeriodicTask;
+    use descartes_core::task::PeriodicTask;
     let task = PeriodicTask::new(
         move |scheduler| {
             scheduler.schedule_now(client_key, ClientEvent::SendRequest);
@@ -1734,8 +1734,8 @@ mod tests {
     #[test]
     fn test_constant_arrival_client_from_rate() {
         use crate::ServerEvent;
-        use des_core::{Key, Simulation};
-        use des_metrics::{MmkTimeSeriesMetrics, SimulationMetrics};
+        use descartes_core::{Key, Simulation};
+        use descartes_metrics::{MmkTimeSeriesMetrics, SimulationMetrics};
         use std::sync::{Arc, Mutex};
 
         let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));

@@ -1,7 +1,7 @@
 //! Integration test for load balancing under exponential traffic.
 
-use des_core::{scheduler, Execute, Executor, SimTime, Simulation};
-use des_tower::{DesLoadBalanceStrategy, DesLoadBalancer, DesServiceBuilder, SimBody};
+use descartes_core::{scheduler, Execute, Executor, SimTime, Simulation};
+use descartes_tower::{DesLoadBalanceStrategy, DesLoadBalancer, DesServiceBuilder, SimBody};
 use http::{Method, Request};
 use rand::Rng;
 use rand::SeedableRng;
@@ -20,7 +20,7 @@ fn sample_exponential(rng: &mut ChaCha8Rng, rate: f64) -> Duration {
 #[test]
 fn load_balancer_completes_requests_under_exponential_interarrival() {
     let mut simulation = Simulation::default();
-    des_tokio::runtime::install(&mut simulation);
+    descartes_tokio::runtime::install(&mut simulation);
 
     let backends = vec![
         DesServiceBuilder::new("backend-1".to_string())
@@ -60,7 +60,7 @@ fn load_balancer_completes_requests_under_exponential_interarrival() {
             let load_balancer = load_balancer.clone();
             let latencies = latencies.clone();
 
-            des_tokio::task::spawn_local(async move {
+            descartes_tokio::task::spawn_local(async move {
                 let request = Request::builder()
                     .method(Method::POST)
                     .uri("/api/test")

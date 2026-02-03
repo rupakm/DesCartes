@@ -1,6 +1,6 @@
 use bytes::Bytes;
-use des_core::{Execute, Executor, SimTime, Simulation};
-use des_tonic::{ClientBuilder, DesStreaming, Router, ServerBuilder, Transport};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
+use descartes_tonic::{ClientBuilder, DesStreaming, Router, ServerBuilder, Transport};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tonic::{Request, Response, Status};
@@ -9,7 +9,7 @@ use tonic::{Request, Response, Status};
 fn bidi_streaming_end_to_end_via_server_endpoint() {
     std::thread::spawn(|| {
         let mut sim = Simulation::default();
-        des_tokio::runtime::install(&mut sim);
+        descartes_tokio::runtime::install(&mut sim);
 
         let transport = Transport::install_default(&mut sim);
 
@@ -18,9 +18,9 @@ fn bidi_streaming_end_to_end_via_server_endpoint() {
             "/svc.Test/Chat",
             |req: Request<DesStreaming<Bytes>>| async move {
                 let mut inbound = req.into_inner();
-                let (tx, rx) = des_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
+                let (tx, rx) = descartes_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
 
-                des_tokio::task::spawn_local(async move {
+                descartes_tokio::task::spawn_local(async move {
                     while let Some(item) = inbound.next().await {
                         match item {
                             Ok(bytes) => {
@@ -67,7 +67,7 @@ fn bidi_streaming_end_to_end_via_server_endpoint() {
         let result: Arc<Mutex<Option<Vec<Bytes>>>> = Arc::new(Mutex::new(None));
         let result_out = result.clone();
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             let (sender, resp) = channel
                 .bidirectional_streaming("/svc.Test/Chat", Some(Duration::from_millis(200)))
                 .await

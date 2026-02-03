@@ -1,9 +1,9 @@
 use bytes::Bytes;
-use des_components::transport::{
+use descartes_components::transport::{
     LatencyConfig, LatencyJitterModel, SharedEndpointRegistry, SimTransport,
 };
-use des_core::{Execute, Executor, SimTime, Simulation};
-use des_tonic::{ClientBuilder, Router, ServerBuilder};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
+use descartes_tonic::{ClientBuilder, Router, ServerBuilder};
 use std::time::Duration;
 use tonic::{Request, Response};
 
@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sim = Simulation::default();
 
     // Install deterministic async runtime (required by des-tonic).
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     // Network + transport.
     let network = Box::new(LatencyJitterModel::with_seed(
@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let channel = client.channel;
 
     // Spawn a unary call from the async runtime.
-    des_tokio::task::spawn_local(async move {
+    descartes_tokio::task::spawn_local(async move {
         let req = Request::new(Bytes::from_static(b"hello"));
         let resp = channel
             .unary("/echo.EchoService/Echo", req, Some(Duration::from_secs(1)))

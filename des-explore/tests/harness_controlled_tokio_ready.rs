@@ -5,16 +5,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use des_core::{Executor, SimTime, Simulation, SimulationConfig};
-use des_explore::harness::{run_controlled, HarnessConfig, HarnessControl};
-use des_explore::io::TraceFormat;
-use des_explore::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
-use des_explore::trace::TraceEvent;
+use descartes_core::{Executor, SimTime, Simulation, SimulationConfig};
+use descartes_explore::harness::{run_controlled, HarnessConfig, HarnessControl};
+use descartes_explore::io::TraceFormat;
+use descartes_explore::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
+use descartes_explore::trace::TraceEvent;
 
 fn temp_path(suffix: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "des_explore_harness_controlled_tokio_{}_{}{}",
+        "descartes_explore_harness_controlled_tokio_{}_{}{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -27,7 +27,7 @@ fn temp_path(suffix: &str) -> PathBuf {
 
 #[test]
 fn run_controlled_tokio_ready_respects_script_choice() {
-    // `des_tokio::runtime::install*` uses thread-local state, so each run must
+    // `descartes_tokio::runtime::install*` uses thread-local state, so each run must
     // execute on a fresh thread.
     let d1 = std::thread::spawn(|| {
         let ran = Arc::new(AtomicUsize::new(0));
@@ -60,8 +60,8 @@ fn run_controlled_tokio_ready_respects_script_choice() {
             move |sim, _ctx| {
                 for _ in 0..2 {
                     let ran_task = ran_for_run.clone();
-                    des_tokio::task::spawn(async move {
-                        des_tokio::thread::yield_now().await;
+                    descartes_tokio::task::spawn(async move {
+                        descartes_tokio::thread::yield_now().await;
                         ran_task.fetch_add(1, Ordering::Relaxed);
                     });
                 }
@@ -137,8 +137,8 @@ fn run_controlled_tokio_ready_respects_script_choice() {
             move |sim, _ctx| {
                 for _ in 0..2 {
                     let ran_task = ran2_for_run.clone();
-                    des_tokio::task::spawn(async move {
-                        des_tokio::thread::yield_now().await;
+                    descartes_tokio::task::spawn(async move {
+                        descartes_tokio::thread::yield_now().await;
                         ran_task.fetch_add(1, Ordering::Relaxed);
                     });
                 }

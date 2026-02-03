@@ -1,7 +1,7 @@
 //! Demonstrates deterministic async client/server interaction in DES.
 //!
 //! Note: this test intentionally uses a tiny custom response future (instead of
-//! `des_tokio::sync::oneshot`) to keep the mechanics explicit.
+//! `descartes_tokio::sync::oneshot`) to keep the mechanics explicit.
 //!
 //! For a comparable Tokio example using oneshot channels, see:
 //! - Tokio docs: https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html
@@ -28,8 +28,8 @@
 //! - **t=1s**: server sends response and calls the stored waker
 //! - **t=1s**: runtime polls the client task again, and it completes
 
-use des_core::async_runtime::{current_sim_time, sim_sleep_until, DesRuntime, RuntimeEvent};
-use des_core::{defer_wake, Component, Execute, Executor, Key, Scheduler, SimTime, Simulation};
+use descartes_core::async_runtime::{current_sim_time, sim_sleep_until, DesRuntime, RuntimeEvent};
+use descartes_core::{defer_wake, Component, Execute, Executor, Key, Scheduler, SimTime, Simulation};
 use rand::SeedableRng;
 use rand_distr::Distribution;
 use std::future::Future;

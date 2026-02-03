@@ -1,6 +1,6 @@
 //! Comprehensive demonstration of the Task system working with Components and Async runtime
 
-use des_core::{
+use descartes_core::{
     async_runtime::{sim_sleep, DesRuntime, RuntimeEvent},
     Component, Execute, Executor, Key, SimTime, Simulation,
 };
@@ -38,7 +38,7 @@ fn test_task_component_async_integration() {
             &mut self,
             _self_id: Key<Self::Event>,
             event: &Self::Event,
-            scheduler: &mut des_core::Scheduler,
+            scheduler: &mut descartes_core::Scheduler,
         ) {
             match event {
                 ServerEvent::ProcessRequest { id } => {

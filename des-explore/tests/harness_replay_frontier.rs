@@ -1,16 +1,16 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use des_core::{
+use descartes_core::{
     Component, Execute, Executor, Key, Scheduler, SimTime, Simulation, SimulationConfig,
 };
 
-use des_explore::harness::{
+use descartes_explore::harness::{
     run_recorded, run_replayed, HarnessConfig, HarnessFrontierConfig, HarnessFrontierPolicy,
     HarnessReplayError,
 };
-use des_explore::io::TraceFormat;
-use des_explore::trace::TraceEvent;
+use descartes_explore::io::TraceFormat;
+use descartes_explore::trace::TraceEvent;
 
 #[derive(Debug, Clone)]
 enum LogEvent {
@@ -39,7 +39,7 @@ impl Component for Logger {
 fn temp_path(suffix: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "des_explore_harness_replay_{}_{}{}",
+        "descartes_explore_harness_replay_{}_{}{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

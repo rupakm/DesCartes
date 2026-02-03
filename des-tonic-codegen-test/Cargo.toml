@@ -1,5 +1,5 @@
 [package]
-name = "des-tonic-codegen-test"
+name = "descartes-tonic-codegen-test"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -10,12 +10,12 @@ build = "build.rs"
 description = "tonic code generation utilities for DesCartes"
 
 [dependencies]
-des-core = { path = "../des-core" }
-des-tokio = { path = "../des-tokio" }
-des-tonic = { path = "../des-tonic" }
+descartes-core = { path = "../des-core" }
+descartes-tokio = { path = "../des-tokio" }
+descartes-tonic = { path = "../des-tonic" }
 
 prost = { workspace = true }
 tonic = "0.12"
 
 [build-dependencies]
-des-tonic-build = { path = "../des-tonic-build" }
+descartes-tonic-build = { path = "../des-tonic-build" }

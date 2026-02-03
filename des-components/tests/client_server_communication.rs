@@ -3,8 +3,8 @@
 //! This demonstrates how components can communicate with each other
 //! by sending events between them.
 
-use des_components::{ClientEvent, Server, ServerEvent};
-use des_core::{
+use descartes_components::{ClientEvent, Server, ServerEvent};
+use descartes_core::{
     Component, Execute, Executor, Key, RequestAttempt, RequestAttemptId, RequestId, Scheduler,
     SimTime, Simulation,
 };

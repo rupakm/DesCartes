@@ -8,9 +8,8 @@
 - A **scheduler** that executes events in timestamp order.
   - Same-time tie breaking is **FIFO by default**.
   - Optional policies exist, but must be explicitly installed (seeded) so defaults remain unchanged.
-- A deterministic async runtime (`des_core::async_runtime`) that powers `des-tokio`.
+- A deterministic async runtime (`descartes_core::async_runtime`) that powers `des-tokio`.
 - Deterministic ID generation (seeded), avoiding wall-clock UUIDs in core execution paths.
-- Optional **formal reasoning hooks** (Lyapunov/certificates), exposed under `des_core::formal`.
 
 ## How it fits with the rest
 

@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use des_core::{EventFrontierPolicy, FrontierEvent, FrontierEventKind, FrontierSignature, SimTime};
+use descartes_core::{EventFrontierPolicy, FrontierEvent, FrontierEventKind, FrontierSignature, SimTime};
 
 use crate::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
 use crate::trace::{FrontierEntry, FrontierKind, SchedulerDecision, TraceEvent, TraceRecorder};

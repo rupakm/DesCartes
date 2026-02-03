@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-pub use des_components::transport::{LatencyConfig, NetworkModel};
+pub use descartes_components::transport::{LatencyConfig, NetworkModel};
 
-use des_components::transport::{LatencyJitterModel, SimpleNetworkModel};
+use descartes_components::transport::{LatencyJitterModel, SimpleNetworkModel};
 
 /// Deterministic network model constructors.
 ///

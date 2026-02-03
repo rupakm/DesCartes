@@ -5,7 +5,7 @@ use std::sync::{
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use des_core::{defer_wake, Component, Execute, Executor, Key, Scheduler, SimTime, Simulation};
+use descartes_core::{defer_wake, Component, Execute, Executor, Key, Scheduler, SimTime, Simulation};
 use rand::SeedableRng;
 use rand_distr::Distribution;
 
@@ -151,9 +151,9 @@ async fn retrying_request_task_at(
     spike_latencies: Arc<Mutex<Vec<Duration>>>,
     busy_counter: Arc<AtomicUsize>,
 ) {
-    des_core::async_runtime::sim_sleep_until(arrival).await;
+    descartes_core::async_runtime::sim_sleep_until(arrival).await;
 
-    let start = des_core::async_runtime::current_sim_time().expect("in scheduler context");
+    let start = descartes_core::async_runtime::current_sim_time().expect("in scheduler context");
 
     let mut attempt = 1usize;
     let max_attempts = 10usize;
@@ -174,7 +174,7 @@ async fn retrying_request_task_at(
         match response_future.await {
             Response::Ok => {
                 let end =
-                    des_core::async_runtime::current_sim_time().expect("in scheduler context");
+                    descartes_core::async_runtime::current_sim_time().expect("in scheduler context");
                 let latency = end - start;
 
                 if arrival < spike_start {
@@ -190,7 +190,7 @@ async fn retrying_request_task_at(
                 if attempt >= max_attempts {
                     // Treat as "give up"; record as spike latency to highlight pathologies.
                     let end =
-                        des_core::async_runtime::current_sim_time().expect("in scheduler context");
+                        descartes_core::async_runtime::current_sim_time().expect("in scheduler context");
                     let latency = end - start;
                     spike_latencies.lock().unwrap().push(latency);
                     break;
@@ -198,12 +198,12 @@ async fn retrying_request_task_at(
 
                 let delay = exp_backoff(attempt);
                 attempt += 1;
-                des_tokio::time::sleep(delay).await;
+                descartes_tokio::time::sleep(delay).await;
             }
             Response::Rejected => {
                 // This server variant doesn't reject; treat as a give-up path.
                 let end =
-                    des_core::async_runtime::current_sim_time().expect("in scheduler context");
+                    descartes_core::async_runtime::current_sim_time().expect("in scheduler context");
                 let latency = end - start;
                 spike_latencies.lock().unwrap().push(latency);
                 break;
@@ -220,7 +220,7 @@ fn median(values: &mut [Duration]) -> Duration {
 #[test]
 fn retrying_clients_under_spike_increase_latency_distribution() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let server_key = sim.add_component(LoadSheddingServer::new(5, Duration::from_millis(250)));
 
@@ -269,7 +269,7 @@ fn retrying_clients_under_spike_increase_latency_distribution() {
         let spike_latencies = spike_latencies.clone();
         let busy_counter = busy_counter.clone();
 
-        let h = des_tokio::task::spawn(async move {
+        let h = descartes_tokio::task::spawn(async move {
             retrying_request_task_at(
                 arrival,
                 server_key,
@@ -411,15 +411,15 @@ async fn deadline_retrying_request_task_at(
     baseline_outcomes: Arc<Mutex<Vec<Outcome>>>,
     spike_outcomes: Arc<Mutex<Vec<Outcome>>>,
 ) {
-    des_core::async_runtime::sim_sleep_until(arrival).await;
+    descartes_core::async_runtime::sim_sleep_until(arrival).await;
 
-    let start = des_core::async_runtime::current_sim_time().expect("in scheduler context");
+    let start = descartes_core::async_runtime::current_sim_time().expect("in scheduler context");
     let deadline = start + timeout;
 
     let mut attempt = 1usize;
 
     loop {
-        let now = des_core::async_runtime::current_sim_time().expect("in scheduler context");
+        let now = descartes_core::async_runtime::current_sim_time().expect("in scheduler context");
         if now >= deadline {
             if arrival < spike_start {
                 baseline_outcomes.lock().unwrap().push(Outcome::Timeout);
@@ -444,7 +444,7 @@ async fn deadline_retrying_request_task_at(
         match response_future.await {
             Response::Ok => {
                 let end =
-                    des_core::async_runtime::current_sim_time().expect("in scheduler context");
+                    descartes_core::async_runtime::current_sim_time().expect("in scheduler context");
                 let latency = end - start;
 
                 if end > deadline {
@@ -478,7 +478,7 @@ async fn deadline_retrying_request_task_at(
                 attempt += 1;
 
                 let now =
-                    des_core::async_runtime::current_sim_time().expect("in scheduler context");
+                    descartes_core::async_runtime::current_sim_time().expect("in scheduler context");
                 if now + delay > deadline {
                     if arrival < spike_start {
                         baseline_outcomes.lock().unwrap().push(Outcome::Timeout);
@@ -488,7 +488,7 @@ async fn deadline_retrying_request_task_at(
                     return;
                 }
 
-                des_tokio::time::sleep(delay).await;
+                descartes_tokio::time::sleep(delay).await;
             }
         }
     }
@@ -497,7 +497,7 @@ async fn deadline_retrying_request_task_at(
 #[test]
 fn admission_rejection_and_deadlines_reduce_success_under_spike() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     // Capacity is small, and admission control deterministically rejects
     // every Nth request (stable, no randomness).
@@ -550,7 +550,7 @@ fn admission_rejection_and_deadlines_reduce_success_under_spike() {
         let baseline_outcomes = baseline_outcomes.clone();
         let spike_outcomes = spike_outcomes.clone();
 
-        let h = des_tokio::task::spawn(async move {
+        let h = descartes_tokio::task::spawn(async move {
             deadline_retrying_request_task_at(
                 arrival,
                 timeout,

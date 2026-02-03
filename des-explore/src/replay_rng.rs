@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use des_core::{DrawSite, RandomProvider};
+use descartes_core::{DrawSite, RandomProvider};
 
 use crate::rng::TracingRandomProvider;
 use crate::trace::{DrawValue, RandomDraw, Trace, TraceEvent, TraceRecorder};

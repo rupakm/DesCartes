@@ -2,9 +2,9 @@
 //!
 //! This demonstrates the new Component-based API with a client-server interaction.
 
-use des_components::{ClientEvent, ExponentialBackoffPolicy, Server, ServerEvent, SimpleClient};
-use des_core::task::PeriodicTask;
-use des_core::{Execute, Executor, SimTime, Simulation};
+use descartes_components::{ClientEvent, ExponentialBackoffPolicy, Server, ServerEvent, SimpleClient};
+use descartes_core::task::PeriodicTask;
+use descartes_core::{Execute, Executor, SimTime, Simulation};
 use std::time::Duration;
 
 #[test]

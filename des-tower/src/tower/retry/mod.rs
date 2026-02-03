@@ -2,9 +2,9 @@
 //!
 //! Provides retry functionality using simulation time via `des-tokio`.
 //!
-//! Note: this requires `des_tokio::runtime::install(&mut sim)`.
+//! Note: this requires `descartes_tokio::runtime::install(&mut sim)`.
 
-use des_core::{RequestAttemptId, RequestId};
+use descartes_core::{RequestAttemptId, RequestId};
 use http;
 use pin_project::pin_project;
 use std::future::Future;
@@ -122,7 +122,7 @@ impl<P, S> DesRetry<P, S> {
 enum RetryState<F> {
     Calling(F),
     Checking { error: ServiceError },
-    Sleeping { sleep: des_tokio::time::Sleep },
+    Sleeping { sleep: descartes_tokio::time::Sleep },
     Done,
 }
 
@@ -208,7 +208,7 @@ where
                             // For now, use a fixed retry delay. We can extend this to respect
                             // Tower's backoff future in a later iteration.
                             *this.state = RetryState::Sleeping {
-                                sleep: des_tokio::time::sleep(Duration::from_millis(100)),
+                                sleep: descartes_tokio::time::sleep(Duration::from_millis(100)),
                             };
                             continue;
                         }
@@ -321,7 +321,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_des_retry_policy_creation() {
+    fn test_descartes_retry_policy_creation() {
         let mut policy = DesRetryPolicy::new(3);
 
         let retryable_error = ServiceError::Timeout {

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use des_tokio::sync::notify::Notify;
+use descartes_tokio::sync::notify::Notify;
 
 /// Unique identifier for a service endpoint
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

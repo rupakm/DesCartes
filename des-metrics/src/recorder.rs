@@ -8,7 +8,7 @@
 //!
 //! ```rust,no_run
 //! # use std::sync::{Arc, Mutex};
-//! # use des_metrics::{SimulationMetrics, with_simulation_metrics_recorder};
+//! # use descartes_metrics::{SimulationMetrics, with_simulation_metrics_recorder};
 //! let metrics = Arc::new(Mutex::new(SimulationMetrics::new()));
 //! with_simulation_metrics_recorder(&metrics, || {
 //!     metrics::counter!("requests_total", "service" => "demo").increment(1);

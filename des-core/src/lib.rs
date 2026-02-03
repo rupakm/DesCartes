@@ -17,7 +17,7 @@
 //! # Basic Usage
 //!
 //! ```rust,no_run
-//! use des_core::{Simulation, SimTime, Executor};
+//! use descartes_core::{Simulation, SimTime, Executor};
 //! use std::time::Duration;
 //!
 //! // Create a simulation

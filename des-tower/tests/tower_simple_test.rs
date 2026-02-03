@@ -1,7 +1,7 @@
 //! Simple test to verify Tower service integration with DES.
 
-use des_core::{Execute, Executor, SimTime, Simulation};
-use des_tower::{DesServiceBuilder, SimBody};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
+use descartes_tower::{DesServiceBuilder, SimBody};
 use http::{Method, Request};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -11,7 +11,7 @@ use tower::ServiceExt;
 #[test]
 fn tower_service_oneshot_returns_success() {
     let mut simulation = Simulation::default();
-    des_tokio::runtime::install(&mut simulation);
+    descartes_tokio::runtime::install(&mut simulation);
 
     let service = DesServiceBuilder::new("test-server".to_string())
         .thread_capacity(1)
@@ -22,7 +22,7 @@ fn tower_service_oneshot_returns_success() {
     let done: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
     let done_clone = done.clone();
 
-    des_tokio::task::spawn_local(async move {
+    descartes_tokio::task::spawn_local(async move {
         let request = Request::builder()
             .method(Method::GET)
             .uri("/test")

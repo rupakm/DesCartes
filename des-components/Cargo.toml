@@ -1,5 +1,5 @@
 [package]
-name = "des-components"
+name = "descartes-components"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,9 +8,9 @@ repository.workspace = true
 description = "Core abstractions built on top of DES core primitives"
 
 [dependencies]
-des-core = { path = "../des-core" }
-des-metrics = { path = "../des-metrics" }
-des-tokio = { path = "../des-tokio" }
+descartes-core = { path = "../des-core" }
+descartes-metrics = { path = "../des-metrics" }
+descartes-tokio = { path = "../des-tokio" }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
@@ -22,5 +22,5 @@ uuid = { version = "1.19.0", features = ["v7", "serde", "v4"] }
 
 [dev-dependencies]
 proptest = { workspace = true }
-des-viz = { path = "../des-viz" }
+descartes-viz = { path = "../des-viz" }
 plotters = { workspace = true }

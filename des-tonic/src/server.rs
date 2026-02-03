@@ -6,11 +6,11 @@ use crate::wire::{
     StreamDirection, StreamFrameKind, StreamFrameWire, UnaryResponseWire,
 };
 use bytes::Bytes;
-use des_components::transport::{
+use descartes_components::transport::{
     EndpointId, EndpointInfo, MessageType, SharedEndpointRegistry, SimTransport, TransportEvent,
     TransportMessage,
 };
-use des_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
+use descartes_core::{Component, Key, Scheduler, SchedulerHandle, SimTime};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,8 +37,8 @@ fn send_stream_frame_from_task(
     )
     .with_correlation_id(stream_id.to_string());
 
-    if des_core::scheduler::in_scheduler_context() {
-        des_core::defer_wake(transport_key, TransportEvent::SendMessage { message: msg });
+    if descartes_core::scheduler::in_scheduler_context() {
+        descartes_core::defer_wake(transport_key, TransportEvent::SendMessage { message: msg });
     } else {
         scheduler_handle.schedule(
             SimTime::zero(),
@@ -73,7 +73,7 @@ enum ServerStreamState {
 struct ServerClientStreamState {
     next_expected_c2s: u64,
     reorder: BTreeMap<u64, StreamFrameWire>,
-    inbound_tx: Option<des_tokio::sync::mpsc::Sender<Result<Bytes, Status>>>,
+    inbound_tx: Option<descartes_tokio::sync::mpsc::Sender<Result<Bytes, Status>>>,
 }
 
 struct ServerServerStreamState {
@@ -91,7 +91,7 @@ struct ServerServerStreamState {
 struct ServerBidiStreamState {
     next_expected_c2s: u64,
     reorder: BTreeMap<u64, StreamFrameWire>,
-    inbound_tx: Option<des_tokio::sync::mpsc::Sender<Result<Bytes, Status>>>,
+    inbound_tx: Option<descartes_tokio::sync::mpsc::Sender<Result<Bytes, Status>>>,
 }
 
 impl ServerClientStreamState {
@@ -178,9 +178,9 @@ impl Component for ServerEndpoint {
                     let encoded_req = Bytes::from(message.payload.clone());
 
                     // Spawn the handler on the DES async runtime.
-                    des_tokio::task::spawn_local(async move {
+                    descartes_tokio::task::spawn_local(async move {
                         if delay > Duration::ZERO {
-                            des_tokio::time::sleep(delay).await;
+                            descartes_tokio::time::sleep(delay).await;
                         }
 
                         let response_wire = match decode_unary_request(encoded_req) {
@@ -269,8 +269,8 @@ impl Component for ServerEndpoint {
                         .with_correlation_id(correlation_id);
 
                         // Schedule send back through transport.
-                        if des_core::scheduler::in_scheduler_context() {
-                            des_core::defer_wake(
+                        if descartes_core::scheduler::in_scheduler_context() {
+                            descartes_core::defer_wake(
                                 transport_key,
                                 TransportEvent::SendMessage {
                                     message: response_msg,
@@ -359,7 +359,7 @@ impl Component for ServerEndpoint {
 
                             if let Some(h) = self.router.bidi_streaming(&method).map(Arc::clone) {
                                 let (in_tx, in_rx) =
-                                    des_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
+                                    descartes_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
 
                                 self.streams.insert(
                                     stream_id.clone(),
@@ -381,9 +381,9 @@ impl Component for ServerEndpoint {
                                 let open_metadata = frame.metadata.clone();
                                 let method_for_task = method.clone();
 
-                                des_tokio::task::spawn_local(async move {
+                                descartes_tokio::task::spawn_local(async move {
                                     if delay > Duration::ZERO {
-                                        des_tokio::time::sleep(delay).await;
+                                        descartes_tokio::time::sleep(delay).await;
                                     }
 
                                     let mut req = Request::new(DesStreaming::new(in_rx));
@@ -529,7 +529,7 @@ impl Component for ServerEndpoint {
 
                             if let Some(h) = self.router.client_streaming(&method).map(Arc::clone) {
                                 let (in_tx, in_rx) =
-                                    des_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
+                                    descartes_tokio::sync::mpsc::channel::<Result<Bytes, Status>>(16);
 
                                 let handler = Arc::clone(&h);
                                 let open_metadata = frame.metadata.clone();
@@ -553,9 +553,9 @@ impl Component for ServerEndpoint {
                                 let scheduler_handle = self.scheduler.clone();
                                 let delay = self.processing_delay;
 
-                                des_tokio::task::spawn_local(async move {
+                                descartes_tokio::task::spawn_local(async move {
                                     if delay > Duration::ZERO {
-                                        des_tokio::time::sleep(delay).await;
+                                        descartes_tokio::time::sleep(delay).await;
                                     }
 
                                     let mut req = Request::new(DesStreaming::new(in_rx));
@@ -675,8 +675,8 @@ impl Component for ServerEndpoint {
                                         )
                                         .with_correlation_id(stream_id_for_task.clone());
 
-                                        if des_core::scheduler::in_scheduler_context() {
-                                            des_core::defer_wake(
+                                        if descartes_core::scheduler::in_scheduler_context() {
+                                            descartes_core::defer_wake(
                                                 transport_key,
                                                 TransportEvent::SendMessage { message: msg },
                                             );
@@ -871,9 +871,9 @@ impl Component for ServerEndpoint {
                                         let delay = self.processing_delay;
                                         let stream_id_for_task = stream_id.clone();
 
-                                        des_tokio::task::spawn_local(async move {
+                                        descartes_tokio::task::spawn_local(async move {
                                             if delay > Duration::ZERO {
-                                                des_tokio::time::sleep(delay).await;
+                                                descartes_tokio::time::sleep(delay).await;
                                             }
 
                                             let mut req = Request::new(req_payload);
@@ -1082,7 +1082,7 @@ impl ServerBuilder {
 
 /// Convenience: register and add the server endpoint component.
 impl ServerBuilder {
-    pub fn install(self, sim: &mut des_core::Simulation) -> Result<InstalledServer, Status> {
+    pub fn install(self, sim: &mut descartes_core::Simulation) -> Result<InstalledServer, Status> {
         let endpoint = self.build();
         endpoint.start()?;
         let endpoint_id = endpoint.endpoint_id;

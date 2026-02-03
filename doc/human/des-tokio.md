@@ -9,20 +9,20 @@ Allow writing async Rust code (tasks, timers, channels, synchronization) that ex
 ## What it provides (subset)
 
 - **Runtime install hooks**
-  - `des_tokio::runtime::install(&mut Simulation)`
-  - `des_tokio::runtime::install_with(...)` / `install_with_tokio(...)` for opt-in configuration
+  - `descartes_tokio::runtime::install(&mut Simulation)`
+  - `descartes_tokio::runtime::install_with(...)` / `install_with_tokio(...)` for opt-in configuration
 - **Tasks**
-  - `des_tokio::task::{spawn, spawn_local, JoinHandle}`
+  - `descartes_tokio::task::{spawn, spawn_local, JoinHandle}`
   - `JoinSet` for awaiting a set of spawned tasks in completion order
 - **Time**
-  - `des_tokio::time::{Instant, sleep, sleep_until, timeout}`
+  - `descartes_tokio::time::{Instant, sleep, sleep_until, timeout}`
   - `interval/interval_at` with `MissedTickBehavior`
 - **Synchronization / channels** (deterministic behavior)
   - `sync::mpsc`, `sync::oneshot`, `sync::watch`, `sync::Notify`
   - `sync::Mutex` (async) + traced `sync::AtomicU64`
   - `sync::Semaphore` + `sync::RwLock` (Tokio-like fairness semantics)
 - **Simulated shared-memory concurrency tools**
-  - `des_tokio::thread::yield_now()` to insert explicit yield points
+  - `descartes_tokio::thread::yield_now()` to insert explicit yield points
 
 ## Determinism notes
 

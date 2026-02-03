@@ -27,50 +27,38 @@
 //! See the [repository](https://github.com/rupakm/DesCartes) for examples.
 
 // Re-export core (always available)
-pub use des_core as core;
+pub use descartes_core as core;
 
-pub use des_components as components;
+pub use descartes_components as components;
 
-pub use des_metrics as metrics;
+pub use descartes_metrics as metrics;
 
 #[cfg(feature = "viz")]
-pub use des_viz as viz;
+pub use descartes_viz as viz;
 
-pub use des_tokio as tokio;
+pub use descartes_tokio as tokio;
 
-pub use des_explore as explore;
+pub use descartes_explore as explore;
 
 #[cfg(feature = "tonic")]
-pub use des_tonic as tonic;
+pub use descartes_tonic as tonic;
 
 #[cfg(feature = "tower")]
-pub use des_tower as tower;
+pub use descartes_tower as tower;
 
 #[cfg(feature = "axum")]
-pub use des_axum as axum;
+pub use descartes_axum as axum;
 
 // Convenience re-exports of commonly used items from core
 pub mod prelude {
     //! Commonly used types and traits
-    
-    pub use des_core::{
-        Execute, Executor,
-        SimTime,
-        Simulation, SimulationConfig,
-        Component, Key,
+
+    pub use descartes_core::{
+        Component, Execute, Executor, Key, SchedulerHandle, SimTime, Simulation, SimulationConfig,
         Task, TaskHandle,
-        SchedulerHandle,
     };
-    
-    pub use des_components::{
-        simple_client::SimpleClient,
-        server::Server,
-        queue::Queue,
-    };
-    
-    pub use des_metrics::{
-        SimulationRecorder,
-        RequestTracker,
-        SimulationMetrics,
-    };
+
+    pub use descartes_components::{queue::Queue, server::Server, simple_client::SimpleClient};
+
+    pub use descartes_metrics::{RequestTracker, SimulationMetrics, SimulationRecorder};
 }

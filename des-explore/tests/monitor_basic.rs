@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use des_core::SimTime;
-use des_explore::monitor::{Monitor, MonitorConfig, QueueId};
+use descartes_core::SimTime;
+use descartes_explore::monitor::{Monitor, MonitorConfig, QueueId};
 
 /// Ensures the monitor emits window summaries and detects recovery.
 #[test]

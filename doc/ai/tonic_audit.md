@@ -39,13 +39,13 @@ impl Greeter for MyGreeter {
 
 **DES Tonic:**
 ```rust
-use des_components::{RpcService, RpcRequest, RpcResponse, TonicError};
+use descartes_components::{RpcService, RpcRequest, RpcResponse, TonicError};
 
 impl RpcService for MyService {
     fn handle_request(
         &mut self,
         request: RpcRequest,
-        _scheduler: &des_core::SchedulerHandle,
+        _scheduler: &descartes_core::SchedulerHandle,
     ) -> Result<RpcResponse, TonicError> {
         match request.method.method.as_str() {
             "GetUser" => {
@@ -154,7 +154,7 @@ let client = TonicClientBuilder::<GetUserRequest>::new()
 use tonic::{transport::Server, Request, Response, Status};
 
 #[cfg(feature = "simulation")]  
-use des_components::{RpcRequest, RpcResponse, TonicError};
+use descartes_components::{RpcRequest, RpcResponse, TonicError};
 
 #[cfg_attr(feature = "production", tonic::async_trait)]
 #[cfg_attr(feature = "simulation", derive(Clone))]

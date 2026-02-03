@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Mutex;
 use std::task::{Context, Poll, Waker};
 
-use des_core::async_runtime;
+use descartes_core::async_runtime;
 
 #[derive(Debug)]
 struct Waiter {

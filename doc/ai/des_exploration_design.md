@@ -3,7 +3,7 @@
 **Status:** Draft (conceptual / background)
 
 **Implementation spec:** For the concrete v1/v2 implementation plan (backtracking core, policy search, DPOR, MCTS), see:
-- `doc/ai/des_explore_schedule_exploration_spec.md`
+- `doc/ai/descartes_explore_schedule_exploration_spec.md`
 
 This document outlines two related tools built on top of the DES scheduler:
 
@@ -307,7 +307,7 @@ Support:
 
 ### 9.4 Site IDs for Random Sampling
 
-Random draws are tagged with stable site identifiers using the `des_core::draw_site!("tag")` macro, which computes a hash from the call site (module path, file, line, column, and user tag). This provides:
+Random draws are tagged with stable site identifiers using the `descartes_core::draw_site!("tag")` macro, which computes a hash from the call site (module path, file, line, column, and user tag). This provides:
 
 - **Automatic stability**: No manual ID management for typical use cases
 - **Refactor sensitivity**: Moving code changes the hash, which may break trace replay
@@ -325,7 +325,7 @@ Traces support multiple serialization formats selectable via configuration:
 The exploration harness provides a standardized setup pattern:
 
 - `setup(SimulationConfig) -> Simulation`: User-provided function that initializes the simulation
-- Optional `des_tokio::runtime::install`: Installs the async runtime for simulations that need it
+- Optional `descartes_tokio::runtime::install`: Installs the async runtime for simulations that need it
 - Enables reproducible exploration across different scenarios and configurations
 
 ---
@@ -396,8 +396,8 @@ There is overlap in observables, but the monitor has different requirements:
 - The exploration monitor focuses on **online decision-making** (window summaries, baseline distance, `S(state)`), with bounded memory and low overhead across many rollouts.
 
 The recommended design is a monitor in `des-explore` that can optionally reuse:
-- `des_metrics::RequestTracker` (retry/timeout/latency/throughput stats)
-- `des_metrics::TimeSeriesCollector` (windowed time series)
+- `descartes_metrics::RequestTracker` (retry/timeout/latency/throughput stats)
+- `descartes_metrics::TimeSeriesCollector` (windowed time series)
 
 while keeping exploration-critical computations (baseline distance, recovery predicates, splitting score) inside `des-explore`.
 

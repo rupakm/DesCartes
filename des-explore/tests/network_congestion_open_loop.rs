@@ -1,17 +1,17 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::async_runtime::current_sim_time;
-use des_core::dists::{
+use descartes_core::async_runtime::current_sim_time;
+use descartes_core::dists::{
     ArrivalPattern, ExponentialDistribution, PoissonArrivals, ServiceTimeDistribution,
 };
-use des_core::{Executor, SimTime, Simulation, SimulationConfig};
+use descartes_core::{Executor, SimTime, Simulation, SimulationConfig};
 
 #[derive(Debug)]
 struct Request {
     id: u64,
     start: SimTime,
-    respond_to: des_tokio::sync::oneshot::Sender<Response>,
+    respond_to: descartes_tokio::sync::oneshot::Sender<Response>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,11 +54,11 @@ impl Network {
     async fn send_to_server(
         self: &Arc<Self>,
         req: Request,
-        server_tx: des_tokio::sync::mpsc::Sender<Request>,
+        server_tx: descartes_tokio::sync::mpsc::Sender<Request>,
     ) {
         // One-way delay client -> server.
         let d = self.sample_one_way_delay();
-        des_tokio::time::sleep(d).await;
+        descartes_tokio::time::sleep(d).await;
 
         // If server is gone, drop the request (and thus the response channel).
         let _ = server_tx.send(req).await;
@@ -67,11 +67,11 @@ impl Network {
     async fn send_to_client(
         self: &Arc<Self>,
         resp: Response,
-        respond_to: des_tokio::sync::oneshot::Sender<Response>,
+        respond_to: descartes_tokio::sync::oneshot::Sender<Response>,
     ) {
         // One-way delay server -> client.
         let d = self.sample_one_way_delay();
-        des_tokio::time::sleep(d).await;
+        descartes_tokio::time::sleep(d).await;
         let _ = respond_to.send(resp);
     }
 }
@@ -129,14 +129,14 @@ async fn request_with_retries(
     id: u64,
     started_at: SimTime,
     network: Arc<Network>,
-    server_tx: des_tokio::sync::mpsc::Sender<Request>,
+    server_tx: descartes_tokio::sync::mpsc::Sender<Request>,
     timeout: Duration,
     base_backoff: Duration,
     max_retries: usize,
     stats: Arc<Mutex<LatencyStats>>,
 ) {
     for attempt in 0..=max_retries {
-        let (tx, rx) = des_tokio::sync::oneshot::channel::<Response>();
+        let (tx, rx) = descartes_tokio::sync::oneshot::channel::<Response>();
         let req = Request {
             id,
             start: started_at,
@@ -146,12 +146,12 @@ async fn request_with_retries(
         // Send request over the network.
         let net = network.clone();
         let tx_clone = server_tx.clone();
-        des_tokio::task::spawn(async move {
+        descartes_tokio::task::spawn(async move {
             net.send_to_server(req, tx_clone).await;
         });
 
         // Await response with timeout.
-        match des_tokio::time::timeout(timeout, rx).await {
+        match descartes_tokio::time::timeout(timeout, rx).await {
             Ok(Ok(_resp)) => {
                 let end = current_sim_time().expect("in sim");
                 stats
@@ -175,14 +175,14 @@ async fn request_with_retries(
 
         // Exponential backoff: base * 2^attempt.
         let backoff = base_backoff * (1u32 << attempt);
-        des_tokio::time::sleep(backoff).await;
+        descartes_tokio::time::sleep(backoff).await;
     }
 }
 
 async fn server_task(
     cfg: SimulationConfig,
     network: Arc<Network>,
-    mut rx: des_tokio::sync::mpsc::Receiver<Request>,
+    mut rx: descartes_tokio::sync::mpsc::Receiver<Request>,
 ) {
     // Exponential service time distribution.
     // Mean = 1/rate seconds.
@@ -191,12 +191,12 @@ async fn server_task(
     while let Some(req) = rx.recv().await {
         // Queueing happens in the receiver buffer; service is single-threaded.
         let service_time = service.sample();
-        des_tokio::time::sleep(service_time).await;
+        descartes_tokio::time::sleep(service_time).await;
 
         let resp = Response { request_id: req.id };
         let net = network.clone();
         let respond_to = req.respond_to;
-        des_tokio::task::spawn(async move {
+        descartes_tokio::task::spawn(async move {
             net.send_to_client(resp, respond_to).await;
         });
     }
@@ -207,7 +207,7 @@ fn open_loop_client_server_congestion_increases_latency_fifo_default() {
     // Default scheduling remains FIFO (no frontier/tokio policy set).
     let cfg = SimulationConfig { seed: 4242 };
     let mut sim = Simulation::new(cfg);
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     // Congestion starts halfway through.
     let sim_end = SimTime::from_secs(2);
@@ -218,12 +218,12 @@ fn open_loop_client_server_congestion_increases_latency_fifo_default() {
     let network = Arc::new(Network::new(&sim.config(), congestion_start, 500.0, 33.3));
 
     // Server request queue.
-    let (server_tx, server_rx) = des_tokio::sync::mpsc::channel::<Request>(1024);
+    let (server_tx, server_rx) = descartes_tokio::sync::mpsc::channel::<Request>(1024);
 
     // Start server.
     let cfg_for_server = sim.config().clone();
     let net_for_server = network.clone();
-    des_tokio::task::spawn(async move {
+    descartes_tokio::task::spawn(async move {
         server_task(cfg_for_server, net_for_server, server_rx).await;
     });
 
@@ -235,7 +235,7 @@ fn open_loop_client_server_congestion_increases_latency_fifo_default() {
     let tx_for_client = server_tx.clone();
     let stats_for_client = stats.clone();
 
-    des_tokio::task::spawn(async move {
+    descartes_tokio::task::spawn(async move {
         let mut arrivals = PoissonArrivals::from_config(&cfg_for_client, 50.0);
 
         let mut next_id = 0u64;
@@ -246,7 +246,7 @@ fn open_loop_client_server_congestion_increases_latency_fifo_default() {
             }
 
             let dt = arrivals.next_arrival_time();
-            des_tokio::time::sleep(dt).await;
+            descartes_tokio::time::sleep(dt).await;
 
             let start = current_sim_time().expect("in sim");
             let net = net_for_client.clone();
@@ -257,7 +257,7 @@ fn open_loop_client_server_congestion_increases_latency_fifo_default() {
             next_id += 1;
 
             // Open-loop: spawn request task, do not await.
-            des_tokio::task::spawn(async move {
+            descartes_tokio::task::spawn(async move {
                 request_with_retries(
                     id,
                     start,

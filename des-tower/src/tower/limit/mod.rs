@@ -6,14 +6,14 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use des_tower::limit::*;
-//! use des_tower::{DesServiceBuilder, ServiceError};
-//! use des_core::Simulation;
+//! use descartes_tower::limit::*;
+//! use descartes_tower::{DesServiceBuilder, ServiceError};
+//! use descartes_core::Simulation;
 //! use std::time::Duration;
 //!
 //! # fn example() -> Result<(), ServiceError> {
 //! let mut simulation = Simulation::default();
-//! des_tokio::runtime::install(&mut simulation);
+//! descartes_tokio::runtime::install(&mut simulation);
 //!
 //! // Create a base service
 //! let base_service = DesServiceBuilder::new("example".to_string())

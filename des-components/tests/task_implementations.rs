@@ -6,9 +6,9 @@
 //! - TimeoutTask in circuit breaker (state transitions, recovery)
 //! - PeriodicTask in SimpleClient (periodic behavior, termination)
 
-use des_components::{ClientEvent, ExponentialBackoffPolicy, Server, SimpleClient};
-use des_core::task::ClosureTask;
-use des_core::{
+use descartes_components::{ClientEvent, ExponentialBackoffPolicy, Server, SimpleClient};
+use descartes_core::task::ClosureTask;
+use descartes_core::{
     task::{PeriodicTask, TimeoutTask},
     Execute, Executor, SimTime, Simulation,
 };

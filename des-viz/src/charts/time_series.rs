@@ -5,8 +5,8 @@
 
 use crate::charts::ChartConfig;
 use crate::error::VizError;
-use des_core::SimTime;
-use des_metrics::mmk_time_series as mmk;
+use descartes_core::SimTime;
+use descartes_metrics::mmk_time_series as mmk;
 use plotters::prelude::*;
 use std::path::Path;
 
@@ -71,9 +71,9 @@ impl TimeSeries {
 ///
 /// # Example
 /// ```no_run
-/// use des_viz::charts::time_series::{TimeSeries, TimeSeriesPoint, create_time_series_chart};
-/// use des_viz::charts::ChartConfig;
-/// use des_core::SimTime;
+/// use descartes_viz::charts::time_series::{TimeSeries, TimeSeriesPoint, create_time_series_chart};
+/// use descartes_viz::charts::ChartConfig;
+/// use descartes_core::SimTime;
 /// use plotters::prelude::RED;
 /// use std::time::Duration;
 ///

@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use des_explore::io::{read_trace_from_path, write_trace_to_path, TraceFormat, TraceIoConfig};
-use des_explore::trace::{DrawValue, RandomDraw, Trace, TraceEvent, TraceMeta};
+use descartes_explore::io::{read_trace_from_path, write_trace_to_path, TraceFormat, TraceIoConfig};
+use descartes_explore::trace::{DrawValue, RandomDraw, Trace, TraceEvent, TraceMeta};
 
 fn temp_path(suffix: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     let unique = format!(
-        "des_explore_trace_io_{}_{}_{}{}",
+        "descartes_explore_trace_io_{}_{}_{}{}",
         std::process::id(),
         std::thread::current().name().unwrap_or("thread"),
         std::time::SystemTime::now()

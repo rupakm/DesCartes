@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use des_core::{Component, Key, Simulation, SimulationConfig};
-use des_explore::harness::{run_controlled, HarnessConfig, HarnessControl};
-use des_explore::io::TraceFormat;
-use des_explore::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
-use des_explore::trace::TraceEvent;
+use descartes_core::{Component, Key, Simulation, SimulationConfig};
+use descartes_explore::harness::{run_controlled, HarnessConfig, HarnessControl};
+use descartes_explore::io::TraceFormat;
+use descartes_explore::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
+use descartes_explore::trace::TraceEvent;
 
 #[derive(Debug)]
 enum Ev {
@@ -22,7 +22,7 @@ impl Component for Noop {
         &mut self,
         _self_id: Key<Self::Event>,
         _event: &Self::Event,
-        _scheduler: &mut des_core::Scheduler,
+        _scheduler: &mut descartes_core::Scheduler,
     ) {
     }
 }
@@ -30,7 +30,7 @@ impl Component for Noop {
 fn temp_path(suffix: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "des_explore_harness_controlled_{}_{}{}",
+        "decartess_explore_harness_controlled_{}_{}{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -2,8 +2,8 @@
 //!
 //! Run with: cargo run --package des-components --example task_usage
 
-use des_components::{ClientEvent, ExponentialBackoffPolicy, SimpleClient};
-use des_core::{
+use descartes_components::{ClientEvent, ExponentialBackoffPolicy, SimpleClient};
+use descartes_core::{
     task::{ClosureTask, PeriodicTask, TimeoutTask},
     Execute, Executor, SimTime, Simulation,
 };
@@ -185,7 +185,7 @@ fn client_with_tasks_example() {
     let mut sim = Simulation::default();
 
     // Create a server first
-    let server = des_components::Server::with_constant_service_time(
+    let server = descartes_components::Server::with_constant_service_time(
         "example-server".to_string(),
         1,
         Duration::from_millis(50),

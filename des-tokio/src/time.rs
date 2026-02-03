@@ -4,8 +4,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use des_core::async_runtime::{self, SimSleep};
-use des_core::SimTime;
+use descartes_core::async_runtime::{self, SimSleep};
+use descartes_core::SimTime;
 
 /// Tokio-like `Instant` backed by DES simulation time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -20,7 +20,7 @@ impl Instant {
     /// not installed or not currently polling within the simulation).
     pub fn now() -> Self {
         let t = async_runtime::current_sim_time().expect(
-            "des_tokio::time::Instant::now called outside scheduler context. \
+            "descartes_tokio::time::Instant::now called outside scheduler context. \
              Install the runtime and call from within simulation execution",
         );
         Self(t)
@@ -33,7 +33,7 @@ impl Instant {
     /// Panics if `earlier` is later than `self`.
     pub fn duration_since(&self, earlier: Instant) -> Duration {
         self.checked_duration_since(earlier)
-            .expect("des_tokio::time::Instant::duration_since: earlier is later than self")
+            .expect("descartes_tokio::time::Instant::duration_since: earlier is later than self")
     }
 
     /// Returns the amount of time elapsed since `earlier`, or `None` if `earlier > self`.
@@ -88,7 +88,7 @@ impl Sub<Instant> for Instant {
     }
 }
 
-/// Tokio-like sleep future (backed by `des_core::async_runtime::SimSleep`).
+/// Tokio-like sleep future (backed by `descartes_core::async_runtime::SimSleep`).
 pub type Sleep = SimSleep;
 
 pub fn sleep(duration: Duration) -> Sleep {
@@ -157,7 +157,7 @@ impl MissedTickBehavior {
             Self::Delay => now + period,
             Self::Skip => {
                 let period_nanos = u128::from(u64::try_from(period.as_nanos()).expect(
-                    "interval period too large for des_tokio simulated time (must fit u64 nanos)",
+                    "interval period too large for descartes_tokio simulated time (must fit u64 nanos)",
                 ));
 
                 let delta_nanos = (now - timeout).as_nanos();
@@ -194,7 +194,7 @@ pub fn interval_at(start: Instant, period: Duration) -> Interval {
     assert!(period > Duration::ZERO, "interval period must be non-zero");
     assert!(
         u64::try_from(period.as_nanos()).is_ok(),
-        "interval period too large for des_tokio simulated time (must fit u64 nanos)"
+        "interval period too large for descartes_tokio simulated time (must fit u64 nanos)"
     );
 
     Interval {

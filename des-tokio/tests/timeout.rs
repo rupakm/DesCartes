@@ -1,19 +1,19 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::{Execute, Executor, SimTime, Simulation};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
 
 #[test]
 fn timeout_returns_err_when_deadline_hits_first() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let out = Arc::new(Mutex::new(None));
     let out2 = out.clone();
 
-    let _h = des_tokio::task::spawn(async move {
-        let res = des_tokio::time::timeout(Duration::from_millis(10), async {
-            des_tokio::time::sleep(Duration::from_millis(50)).await;
+    let _h = descartes_tokio::task::spawn(async move {
+        let res = descartes_tokio::time::timeout(Duration::from_millis(10), async {
+            descartes_tokio::time::sleep(Duration::from_millis(50)).await;
             1usize
         })
         .await;
@@ -28,14 +28,14 @@ fn timeout_returns_err_when_deadline_hits_first() {
 #[test]
 fn timeout_returns_ok_when_future_completes_first() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let out = Arc::new(Mutex::new(None));
     let out2 = out.clone();
 
-    let _h = des_tokio::task::spawn(async move {
-        let res = des_tokio::time::timeout(Duration::from_millis(50), async {
-            des_tokio::time::sleep(Duration::from_millis(10)).await;
+    let _h = descartes_tokio::task::spawn(async move {
+        let res = descartes_tokio::time::timeout(Duration::from_millis(50), async {
+            descartes_tokio::time::sleep(Duration::from_millis(10)).await;
             7usize
         })
         .await;

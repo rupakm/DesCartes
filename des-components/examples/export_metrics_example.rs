@@ -7,8 +7,8 @@
 //!
 //! Run with: cargo run --example export_metrics_example
 
-use des_core::SimTime;
-use des_metrics::SimulationMetrics;
+use descartes_core::SimTime;
+use descartes_metrics::SimulationMetrics;
 use std::time::Duration;
 
 fn main() {

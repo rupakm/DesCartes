@@ -4,7 +4,7 @@
 //! goodput, throughput, retry rates, timeout rates, and latency statistics.
 
 use crate::error::MetricsError;
-use des_core::{
+use descartes_core::{
     AttemptStatus, Request, RequestAttempt, RequestAttemptId, RequestId, RequestStatus, SimTime,
 };
 use std::collections::HashMap;
@@ -467,7 +467,7 @@ impl std::fmt::Display for RequestTrackerStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use des_core::{AttemptStatus, RequestStatus};
+    use descartes_core::{AttemptStatus, RequestStatus};
     use std::time::Duration;
 
     fn create_test_request(id: u64, created_at: SimTime) -> Request {

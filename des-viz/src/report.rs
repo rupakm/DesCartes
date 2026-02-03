@@ -2,7 +2,7 @@
 
 use crate::charts;
 use crate::error::VizError;
-use des_metrics::simulation_metrics::MetricsSnapshot;
+use descartes_metrics::simulation_metrics::MetricsSnapshot;
 use std::fs;
 use std::path::Path;
 
@@ -19,8 +19,8 @@ use std::path::Path;
 ///
 /// # Example
 /// ```no_run
-/// use des_metrics::SimulationMetrics;
-/// use des_viz::report::generate_html_report;
+/// use descartes_metrics::SimulationMetrics;
+/// use descartes_viz::report::generate_html_report;
 ///
 /// let metrics = SimulationMetrics::new();
 /// let snapshot = metrics.get_metrics_snapshot();
@@ -368,7 +368,7 @@ fn html_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use des_metrics::simulation_metrics::SimulationMetrics;
+    use descartes_metrics::simulation_metrics::SimulationMetrics;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     fn make_temp_dir(prefix: &str) -> std::path::PathBuf {
@@ -390,7 +390,7 @@ mod tests {
         metrics.record_histogram("test_histogram", 123.45, &[("component", "test")]);
 
         let snapshot = metrics.get_metrics_snapshot();
-        let dir = make_temp_dir("des_viz_report_test");
+        let dir = make_temp_dir("descartes_viz_report_test");
         let output_path = dir.join("report.html");
 
         let result = generate_html_report(&snapshot, &output_path);

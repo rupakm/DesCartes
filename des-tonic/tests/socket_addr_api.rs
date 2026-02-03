@@ -2,13 +2,13 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use bytes::Bytes;
-use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
-use des_tonic::{Request, Response, Router, Transport};
+use descartes_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
+use descartes_tonic::{Request, Response, Router, Transport};
 
 #[test]
 fn socket_addr_api_connects_and_rejects_duplicate_bind() {
     let mut sim = Simulation::new(SimulationConfig { seed: 1 });
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let transport = Transport::install_default(&mut sim);
 
@@ -34,7 +34,7 @@ fn socket_addr_api_connects_and_rejects_duplicate_bind() {
         std::sync::Arc::new(std::sync::Mutex::new(None));
     let out2 = out.clone();
 
-    des_tokio::task::spawn_local(async move {
+    descartes_tokio::task::spawn_local(async move {
         let resp = channel
             .unary(
                 "/svc.Echo/Echo",

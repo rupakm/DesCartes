@@ -1,9 +1,9 @@
-use des_core::{Execute, Executor, SimTime, Simulation};
-use des_tonic::{ClientBuilder, DesStreaming, Router, ServerBuilder, Transport};
+use descartes_core::{Execute, Executor, SimTime, Simulation};
+use descartes_tonic::{ClientBuilder, DesStreaming, Router, ServerBuilder, Transport};
 use std::sync::{Arc, Mutex};
 use tonic::{Request, Response, Status};
 
-use des_tonic_codegen_test::pb;
+use descartes_tonic_codegen_test::pb;
 
 struct FooImpl;
 
@@ -19,9 +19,9 @@ impl pb::foo_server::Foo for FooImpl {
         request: Request<pb::Num>,
     ) -> Result<Response<DesStreaming<pb::Num>>, Status> {
         let n = request.into_inner().v;
-        let (tx, rx) = des_tokio::sync::mpsc::channel::<Result<pb::Num, Status>>(8);
+        let (tx, rx) = descartes_tokio::sync::mpsc::channel::<Result<pb::Num, Status>>(8);
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             for i in 0..n {
                 if tx.send(Ok(pb::Num { v: i })).await.is_err() {
                     return;
@@ -51,9 +51,9 @@ impl pb::foo_server::Foo for FooImpl {
         request: Request<DesStreaming<pb::Num>>,
     ) -> Result<Response<DesStreaming<pb::Num>>, Status> {
         let mut inbound = request.into_inner();
-        let (tx, rx) = des_tokio::sync::mpsc::channel::<Result<pb::Num, Status>>(8);
+        let (tx, rx) = descartes_tokio::sync::mpsc::channel::<Result<pb::Num, Status>>(8);
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             while let Some(item) = inbound.next().await {
                 match item {
                     Ok(num) => {
@@ -77,7 +77,7 @@ impl pb::foo_server::Foo for FooImpl {
 fn codegen_end_to_end() {
     std::thread::spawn(|| {
         let mut sim = Simulation::default();
-        des_tokio::runtime::install(&mut sim);
+        descartes_tokio::runtime::install(&mut sim);
 
         let transport = Transport::install_default(&mut sim);
 
@@ -117,7 +117,7 @@ fn codegen_end_to_end() {
         let cli_stream_out_task = cli_stream_out.clone();
         let bidi_out_task = bidi_out.clone();
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             let client = client;
             let unary = client.unary(pb::Num { v: 41 }).await.unwrap().into_inner();
             *unary_out_task.lock().unwrap() = Some(unary.v);

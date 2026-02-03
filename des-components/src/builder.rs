@@ -11,7 +11,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use des_components::builder::*;
+//! use descartes_components::builder::*;
 //!
 //! // This will compile - all required fields are set
 //! let component = MyComponentBuilder::new()

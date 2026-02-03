@@ -1,4 +1,4 @@
-use des_core::{
+use descartes_core::{
     defer_wake_after, Component, Execute, Executor, Key, Scheduler, SimTime, Simulation,
 };
 

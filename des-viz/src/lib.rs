@@ -12,8 +12,8 @@
 //! # Example
 //!
 //! ```no_run
-//! use des_metrics::SimulationMetrics;
-//! use des_viz::report::generate_html_report;
+//! use descartes_metrics::SimulationMetrics;
+//! use descartes_viz::report::generate_html_report;
 //!
 //! let metrics = SimulationMetrics::new();
 //! // ... collect metrics ...

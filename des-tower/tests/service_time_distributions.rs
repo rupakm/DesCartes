@@ -1,8 +1,8 @@
 //! Tests for request-dependent service time distributions.
 
-use des_core::dists::{ConstantServiceTime, EndpointBasedServiceTime, RequestSizeBasedServiceTime};
-use des_core::{scheduler, Execute, Executor, SimTime, Simulation};
-use des_tower::{DesServiceBuilder, SimBody};
+use descartes_core::dists::{ConstantServiceTime, EndpointBasedServiceTime, RequestSizeBasedServiceTime};
+use descartes_core::{scheduler, Execute, Executor, SimTime, Simulation};
+use descartes_tower::{DesServiceBuilder, SimBody};
 use http::{Method, Request};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,7 +12,7 @@ use tower::ServiceExt;
 #[test]
 fn request_size_based_service_time_is_applied() {
     let mut simulation = Simulation::default();
-    des_tokio::runtime::install(&mut simulation);
+    descartes_tokio::runtime::install(&mut simulation);
 
     // Base time: 10ms, 10μs per byte, max 100ms.
     let size_based_dist = RequestSizeBasedServiceTime::new(
@@ -46,7 +46,7 @@ fn request_size_based_service_time_is_applied() {
                 .body(SimBody::new(body))
                 .unwrap();
 
-            des_tokio::task::spawn_local(async move {
+            descartes_tokio::task::spawn_local(async move {
                 let _response = service.oneshot(request).await.expect("request succeeds");
                 let now = scheduler::current_time().expect("in scheduler context");
                 completion_times.borrow_mut()[index] = Some(now);
@@ -62,7 +62,7 @@ fn request_size_based_service_time_is_applied() {
         let time = times[index].expect("request completed");
         let observed = time.as_duration();
 
-        // des_tokio wakes the awaiting task via scheduled events, which can
+        // descartes_tokio wakes the awaiting task via scheduled events, which can
         // introduce a small deterministic overhead versus the raw service time.
         assert!(observed >= expected);
         assert!(observed <= expected + Duration::from_millis(5));
@@ -78,7 +78,7 @@ fn request_size_based_service_time_is_applied() {
 #[test]
 fn endpoint_based_service_time_is_applied() {
     let mut simulation = Simulation::default();
-    des_tokio::runtime::install(&mut simulation);
+    descartes_tokio::runtime::install(&mut simulation);
 
     let mut endpoint_dist = EndpointBasedServiceTime::new(Box::new(ConstantServiceTime::new(
         Duration::from_millis(50),
@@ -119,7 +119,7 @@ fn endpoint_based_service_time_is_applied() {
                 .body(SimBody::empty())
                 .unwrap();
 
-            des_tokio::task::spawn_local(async move {
+            descartes_tokio::task::spawn_local(async move {
                 let _response = service.oneshot(request).await.expect("request succeeds");
                 let now = scheduler::current_time().expect("in scheduler context");
                 completion_times.borrow_mut()[index] = Some(now);

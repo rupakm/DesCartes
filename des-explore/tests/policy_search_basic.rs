@@ -1,15 +1,15 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::{Component, Key, Scheduler, SimTime, Simulation, SimulationConfig};
+use descartes_core::{Component, Key, Scheduler, SimTime, Simulation, SimulationConfig};
 
-use des_explore::harness::HarnessContext;
-use des_explore::monitor::{Monitor, MonitorConfig, MonitorStatus, QueueId};
-use des_explore::policy_search::{
+use descartes_explore::harness::HarnessContext;
+use descartes_explore::monitor::{Monitor, MonitorConfig, MonitorStatus, QueueId};
+use descartes_explore::policy_search::{
     search_policy, BaseFrontierPolicy, BaseTokioReadyPolicy, PolicySearchConfig,
     PolicySearchObjective,
 };
-use des_explore::trace::Trace;
+use descartes_explore::trace::Trace;
 
 const Q: QueueId = QueueId(42);
 

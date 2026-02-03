@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use des_core::{DrawSite, RandomProvider};
+use descartes_core::{DrawSite, RandomProvider};
 use rand::SeedableRng;
 
 use crate::trace::{DrawValue, RandomDraw, TraceEvent, TraceRecorder};

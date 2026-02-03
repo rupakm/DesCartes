@@ -259,7 +259,7 @@ impl NetworkModel for LatencyJitterModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use des_core::SimTime;
+    use descartes_core::SimTime;
 
     #[test]
     fn test_simple_network_model() {

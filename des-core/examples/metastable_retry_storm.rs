@@ -16,11 +16,11 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::dists::{
+use descartes_core::dists::{
     ArrivalPattern, ExponentialDistribution, PoissonArrivals, ServiceTimeDistribution,
 };
-use des_core::{Component, Executor, Key, SimTime, Simulation, SimulationConfig};
-use des_explore::monitor::{Monitor, MonitorConfig, QueueId};
+use descartes_core::{Component, Executor, Key, SimTime, Simulation, SimulationConfig};
+use descartes_explore::monitor::{Monitor, MonitorConfig, QueueId};
 
 const LAMBDA_BASE_RPS: f64 = 9.3;
 const MU_RPS: f64 = 10.0;
@@ -150,7 +150,7 @@ impl Mm1RetryStorm {
     fn schedule_next_external_arrival(
         &mut self,
         self_id: Key<Event>,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         let now = scheduler.time();
         let inter_arrival = if Self::in_spike(now) {
@@ -166,7 +166,7 @@ impl Mm1RetryStorm {
         );
     }
 
-    fn maybe_start_service(&mut self, self_id: Key<Event>, scheduler: &mut des_core::Scheduler) {
+    fn maybe_start_service(&mut self, self_id: Key<Event>, scheduler: &mut descartes_core::Scheduler) {
         if self.server_busy {
             return;
         }
@@ -191,7 +191,7 @@ impl Mm1RetryStorm {
     fn enqueue_attempt(
         &mut self,
         self_id: Key<Event>,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
         parent_id: u64,
         attempt_no: u8,
         retries_left: u8,
@@ -278,7 +278,7 @@ impl Component for Mm1RetryStorm {
         &mut self,
         self_id: Key<Self::Event>,
         event: &Self::Event,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         match *event {
             Event::ExternalArrival => {

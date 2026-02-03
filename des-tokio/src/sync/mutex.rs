@@ -6,8 +6,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::task::{Context, Poll, Waker};
 
-use des_core::async_runtime;
-use des_core::SimTime;
+use descartes_core::async_runtime;
+use descartes_core::SimTime;
 
 use crate::concurrency::ConcurrencyEvent;
 
@@ -277,7 +277,7 @@ impl<T> Mutex<T> {
     /// This is useful when the same logical mutex is created in multiple places
     /// (e.g. record vs replay closures) and you want event IDs to match.
     pub fn new_named(name: &'static str, value: T) -> Self {
-        let mutex_id = des_core::randomness::runtime_site_id("des_tokio::sync::Mutex", name);
+        let mutex_id = descartes_core::randomness::runtime_site_id("des_tokio::sync::Mutex", name);
         Self::new_with_id(mutex_id, value)
     }
 

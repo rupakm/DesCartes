@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use des_core::{defer_wake, Component, Execute, Executor, Key, Scheduler, SimTime, Simulation};
+use descartes_core::{defer_wake, Component, Execute, Executor, Key, Scheduler, SimTime, Simulation};
 use rand::SeedableRng;
 use rand_distr::Distribution;
 
@@ -140,7 +140,7 @@ async fn request_task_at(
     server_key: Key<ServerEvent>,
     completed: Arc<Mutex<Vec<(SimTime, Response)>>>,
 ) {
-    des_core::async_runtime::sim_sleep_until(arrival).await;
+    descartes_core::async_runtime::sim_sleep_until(arrival).await;
 
     let response_state = ResponseStateHandle::new();
     let response_future = ResponseFuture {
@@ -155,14 +155,14 @@ async fn request_task_at(
     );
 
     let response = response_future.await;
-    let now = des_core::async_runtime::current_sim_time().expect("must be in scheduler context");
+    let now = descartes_core::async_runtime::current_sim_time().expect("must be in scheduler context");
     completed.lock().unwrap().push((now, response));
 }
 
 #[test]
 fn admission_control_rejects_during_spike_and_does_not_block_open_loop() {
     let mut sim = Simulation::default();
-    des_tokio::runtime::install(&mut sim);
+    descartes_tokio::runtime::install(&mut sim);
 
     let request_times = Arc::new(Mutex::new(Vec::new()));
     let server_key = sim.add_component(AdmissionServer::new(
@@ -206,7 +206,7 @@ fn admission_control_rejects_during_spike_and_does_not_block_open_loop() {
     let mut handles = Vec::with_capacity(arrivals.len());
     for arrival in arrivals {
         let completed = completed.clone();
-        let h = des_tokio::task::spawn(async move {
+        let h = descartes_tokio::task::spawn(async move {
             request_task_at(arrival, server_key, completed).await;
         });
         handles.push(h);

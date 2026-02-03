@@ -4,10 +4,10 @@
 //! simulation-specific helpers like a `RequestTracker` and high-resolution latency histograms.
 //!
 //! If you want other crates to emit standard `metrics::*` macros and have them end up in a
-//! `SimulationMetrics` instance, use `des_metrics::SimulationRecorder`.
+//! `SimulationMetrics` instance, use `descartes_metrics::SimulationRecorder`.
 
 use crate::request_tracker::{RequestTracker, RequestTrackerStats};
-use des_core::SimTime;
+use descartes_core::SimTime;
 use hdrhistogram::Histogram as HdrHistogram;
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
@@ -425,7 +425,7 @@ impl SimulationMetrics {
             counters,
             gauges,
             histograms,
-            timestamp: des_core::scheduler::current_time().unwrap_or(SimTime::zero()),
+            timestamp: descartes_core::scheduler::current_time().unwrap_or(SimTime::zero()),
         }
     }
 
@@ -459,7 +459,7 @@ impl SimulationMetrics {
     ///
     /// # Example
     /// ```no_run
-    /// use des_metrics::SimulationMetrics;
+    /// use descartes_metrics::SimulationMetrics;
     ///
     /// let metrics = SimulationMetrics::new();
     /// // ... collect metrics ...
@@ -487,7 +487,7 @@ impl SimulationMetrics {
     ///
     /// # Example
     /// ```no_run
-    /// use des_metrics::SimulationMetrics;
+    /// use descartes_metrics::SimulationMetrics;
     ///
     /// let metrics = SimulationMetrics::new();
     /// // ... collect metrics ...

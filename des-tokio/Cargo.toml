@@ -1,11 +1,11 @@
 [package]
-name = "des-tokio"
+name = "descartes-tokio"
 version.workspace = true
 edition.workspace = true
 description = "tokio interface for DesCartes"
 
 [dependencies]
-des-core = { path = "../des-core" }
+descartes-core = { path = "../des-core" }
 rand.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true

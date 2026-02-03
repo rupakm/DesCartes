@@ -1,9 +1,9 @@
-use des_core::async_runtime::{ReadyTaskPolicy, TaskId};
-use des_core::{EventFrontierPolicy, FrontierEvent, FrontierEventKind, SimTime};
+use descartes_core::async_runtime::{ReadyTaskPolicy, TaskId};
+use descartes_core::{EventFrontierPolicy, FrontierEvent, FrontierEventKind, SimTime};
 
-use des_explore::frontier::ReplayFrontierPolicy;
-use des_explore::ready_task::ReplayReadyTaskPolicy;
-use des_explore::trace::{AsyncRuntimeDecision, SchedulerDecision, TraceEvent};
+use descartes_explore::frontier::ReplayFrontierPolicy;
+use descartes_explore::ready_task::ReplayReadyTaskPolicy;
+use descartes_explore::trace::{AsyncRuntimeDecision, SchedulerDecision, TraceEvent};
 
 #[test]
 fn replay_frontier_allows_reordered_choice_set_when_chosen_seq_present() {

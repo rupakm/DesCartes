@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use des_core::{Component, Executor, Key, Scheduler, SimTime, Simulation, SimulationConfig};
-use des_explore::monitor::{Monitor, MonitorConfig};
+use descartes_core::{Component, Executor, Key, Scheduler, SimTime, Simulation, SimulationConfig};
+use descartes_explore::monitor::{Monitor, MonitorConfig};
 
 /// Basic smoke test that a minimal simulation executes.
 ///

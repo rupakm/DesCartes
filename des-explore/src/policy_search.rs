@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex};
 
-use des_core::{
+use descartes_core::{
     async_runtime::{FifoReadyTaskPolicy, ReadyTaskPolicy, UniformRandomReadyTaskPolicy},
     EventFrontierPolicy, FifoFrontierPolicy, SimTime, Simulation, SimulationConfig,
     UniformRandomFrontierPolicy,
@@ -257,7 +257,7 @@ fn run_rollout(
                     let script_for_tokio = script.clone();
                     let base_ready = fallback_ready_policy(&cfg.base_tokio_ready, ready_seed);
 
-                    des_tokio::runtime::install_with(&mut sim, move |runtime| {
+                    descartes_tokio::runtime::install_with(&mut sim, move |runtime| {
                         runtime.set_ready_task_policy(Box::new(ExplorationReadyTaskPolicy::new(
                             base_ready,
                             script_for_tokio,

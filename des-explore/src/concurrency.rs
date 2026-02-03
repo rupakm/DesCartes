@@ -7,7 +7,7 @@ use crate::trace::{
 };
 
 #[cfg(feature = "tokio")]
-use des_tokio::concurrency::{ConcurrencyEvent, ConcurrencyRecorder};
+use descartes_tokio::concurrency::{ConcurrencyEvent, ConcurrencyRecorder};
 
 #[cfg(feature = "tokio")]
 #[derive(Clone)]

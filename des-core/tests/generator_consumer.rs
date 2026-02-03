@@ -8,7 +8,7 @@
 //! Note: This demonstrates the event-driven nature of the DES framework.
 //! Components wake up in response to events and time advancement.
 
-use des_core::{Component, Execute, Executor, SimTime, Simulation};
+use descartes_core::{Component, Execute, Executor, SimTime, Simulation};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -43,9 +43,9 @@ impl Component for Generator {
 
     fn process_event(
         &mut self,
-        self_id: des_core::Key<Self::Event>,
+        self_id: descartes_core::Key<Self::Event>,
         _event: &Self::Event,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         let current_time = scheduler.time();
 
@@ -79,9 +79,9 @@ impl Component for Consumer {
 
     fn process_event(
         &mut self,
-        self_id: des_core::Key<Self::Event>,
+        self_id: descartes_core::Key<Self::Event>,
         _event: &Self::Event,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         let current_time = scheduler.time();
 

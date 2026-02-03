@@ -8,7 +8,7 @@
 //!
 //! ## 1. Use `init_detailed_simulation_logging()` (Recommended for debugging)
 //! ```rust
-//! use des_core::init_detailed_simulation_logging;
+//! use descartes_core::init_detailed_simulation_logging;
 //! init_detailed_simulation_logging();
 //! ```
 //! - Shows **all** log levels (TRACE, DEBUG, INFO, WARN, ERROR)
@@ -17,7 +17,7 @@
 //!
 //! ## 2. Use `init_simulation_logging_with_level()` for specific levels
 //! ```rust
-//! use des_core::init_simulation_logging_with_level;
+//! use descartes_core::init_simulation_logging_with_level;
 //! init_simulation_logging_with_level("debug");  // DEBUG and above
 //! init_simulation_logging_with_level("info");   // INFO and above (default)
 //! init_simulation_logging_with_level("trace");  // Everything (very verbose)
@@ -35,10 +35,10 @@
 //! RUST_LOG=trace cargo run --example logging_demo
 //!
 //! # Module-specific logging
-//! RUST_LOG=des_core::scheduler=debug cargo run --example logging_demo
+//! RUST_LOG=descartes_core::scheduler=debug cargo run --example logging_demo
 //!
 //! # Multiple modules
-//! RUST_LOG=des_core=debug,your_app=trace cargo run --example logging_demo
+//! RUST_LOG=descartes_core=debug,your_app=trace cargo run --example logging_demo
 //! ```
 //!
 //! ## 4. What You'll See in Terminal Output:
@@ -86,7 +86,7 @@ pub fn init_simulation_logging() {
 ///
 /// # Example
 /// ```rust
-/// use des_core::logging::init_simulation_logging_with_level;
+/// use descartes_core::logging::init_simulation_logging_with_level;
 ///
 /// // Enable detailed debugging
 /// // Note: This may fail in doc tests if subscriber is already set
@@ -98,7 +98,7 @@ pub fn init_simulation_logging_with_level(level: &str) {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         // Default filter with more detailed logging for DES modules
         format!(
-            "{}={},des_core::scheduler=debug,des_core::async_runtime=debug,des_components=info",
+            "{}={},descartes_core::scheduler=debug,descartes_core::async_runtime=debug,descartes_components=info",
             env!("CARGO_PKG_NAME"),
             level
         )
@@ -130,7 +130,7 @@ pub fn init_simulation_logging_with_level(level: &str) {
 pub fn init_detailed_simulation_logging() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         // Very detailed logging for debugging
-        "trace,des_core=trace,des_components=debug,des_metrics=debug".into()
+        "trace,descartes_core=trace,descartes_components=debug,descartes_metrics=debug".into()
     });
 
     let result = tracing_subscriber::registry()

@@ -1,6 +1,6 @@
 //! Tests that component and task IDs are deterministic under `SimulationConfig.seed`.
 
-use des_core::{SimTime, Simulation, SimulationConfig};
+use descartes_core::{SimTime, Simulation, SimulationConfig};
 
 #[test]
 fn component_ids_are_deterministic_across_runs() {
@@ -10,14 +10,14 @@ fn component_ids_are_deterministic_across_runs() {
     #[derive(Debug)]
     struct Noop;
 
-    impl des_core::Component for Noop {
+    impl descartes_core::Component for Noop {
         type Event = ();
 
         fn process_event(
             &mut self,
-            _self_id: des_core::Key<Self::Event>,
+            _self_id: descartes_core::Key<Self::Event>,
             _event: &Self::Event,
-            _scheduler: &mut des_core::Scheduler,
+            _scheduler: &mut descartes_core::Scheduler,
         ) {
         }
     }
@@ -34,7 +34,7 @@ fn component_ids_are_deterministic_across_runs() {
 
 #[test]
 fn task_ids_are_deterministic_across_runs() {
-    fn schedule_two(handle: &des_core::SchedulerHandle) -> (des_core::TaskId, des_core::TaskId) {
+    fn schedule_two(handle: &descartes_core::SchedulerHandle) -> (descartes_core::TaskId, descartes_core::TaskId) {
         let a = handle.timeout(SimTime::zero(), |_| {}).id();
         let b = handle.timeout(SimTime::zero(), |_| {}).id();
         (a, b)

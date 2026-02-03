@@ -1,4 +1,4 @@
-use des_tokio::sync::mpsc;
+use descartes_tokio::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use tonic::Status;
 
@@ -127,19 +127,19 @@ impl<T> From<mpsc::Sender<T>> for DesStreamSender<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use des_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
+    use descartes_core::{Execute, Executor, SimTime, Simulation, SimulationConfig};
     use tonic::Code;
 
     #[test]
     fn typed_stream_channel_sends_ok_and_err() {
         let mut sim = Simulation::new(SimulationConfig { seed: 1 });
-        des_tokio::runtime::install(&mut sim);
+        descartes_tokio::runtime::install(&mut sim);
 
         let out: std::sync::Arc<std::sync::Mutex<Vec<Result<u32, Code>>>> =
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let out2 = out.clone();
 
-        des_tokio::task::spawn_local(async move {
+        descartes_tokio::task::spawn_local(async move {
             let (tx, mut rx) = channel::<u32>(4);
             tx.send(7).await.unwrap();
             tx.send_err(Status::new(Code::InvalidArgument, "nope"))

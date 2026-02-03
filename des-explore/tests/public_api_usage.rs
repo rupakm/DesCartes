@@ -1,17 +1,17 @@
 //! Public API usage patterns for Milestone 6 estimators.
 //!
-//! This test file is intentionally "example-like": it uses the `des_explore::prelude::*`
+//! This test file is intentionally "example-like": it uses the `descartes_explore::prelude::*`
 //! exports and keeps the setup/predicate closures in the shape we expect downstream
 //! users to copy.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::dists::{ExponentialDistribution, ServiceTimeDistribution};
-use des_core::{Component, Execute, Executor, Key, SimTime, Simulation, SimulationConfig};
+use descartes_core::dists::{ExponentialDistribution, ServiceTimeDistribution};
+use descartes_core::{Component, Execute, Executor, Key, SimTime, Simulation, SimulationConfig};
 
-use des_explore::prelude::*;
-use des_explore::trace::TraceEvent;
+use descartes_explore::prelude::*;
+use descartes_explore::trace::TraceEvent;
 
 const Q: QueueId = QueueId(1);
 
@@ -37,7 +37,7 @@ impl Component for BernoulliTerminalModel {
         &mut self,
         self_id: Key<Self::Event>,
         _event: &Self::Event,
-        scheduler: &mut des_core::Scheduler,
+        scheduler: &mut descartes_core::Scheduler,
     ) {
         let now = scheduler.time();
 
@@ -87,7 +87,7 @@ fn setup(
 
     let provider = ctx.branching_provider(prefix, cont_seed);
     let coin = ExponentialDistribution::from_config(sim.config(), 1.0)
-        .with_provider(provider, des_core::draw_site!("coin"));
+        .with_provider(provider, descartes_core::draw_site!("coin"));
 
     let key = sim.add_component(BernoulliTerminalModel {
         coin,
@@ -150,15 +150,15 @@ fn public_splitting_usage_pattern() {
 /// Demonstrates installing a tokio-level ready-task policy and recording/replaying it.
 ///
 /// This is intentionally written in the style we'd expect downstream users to copy:
-/// - uses `des_explore::prelude::*`
+/// - uses `descartes_explore::prelude::*`
 /// - uses the harness for record/replay
-/// - installs tokio via the harness (not by manually calling `des_tokio::runtime::install`)
+/// - installs tokio via the harness (not by manually calling `descartes_tokio::runtime::install`)
 #[test]
 fn public_tokio_ready_task_record_replay_usage_pattern() {
     fn temp_path(suffix: &str) -> std::path::PathBuf {
         let mut p = std::env::temp_dir();
         p.push(format!(
-            "des_explore_public_tokio_ready_{}_{}{}",
+            "descartes_explore_public_tokio_ready_{}_{}{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -195,7 +195,7 @@ fn public_tokio_ready_task_record_replay_usage_pattern() {
             move |sim, _ctx| {
                 for i in 0..200 {
                     let log = log_for_run.clone();
-                    des_tokio::task::spawn(async move {
+                    descartes_tokio::task::spawn(async move {
                         log.lock().unwrap().push(i);
                     });
                 }
@@ -243,7 +243,7 @@ fn public_tokio_ready_task_record_replay_usage_pattern() {
             move |sim, _ctx| {
                 for i in 0..200 {
                     let log = log_for_run.clone();
-                    des_tokio::task::spawn(async move {
+                    descartes_tokio::task::spawn(async move {
                         log.lock().unwrap().push(i);
                     });
                 }
@@ -272,7 +272,7 @@ fn public_concurrency_record_replay_usage_pattern() {
     fn temp_path(suffix: &str) -> std::path::PathBuf {
         let mut p = std::env::temp_dir();
         p.push(format!(
-            "des_explore_public_concurrency_{}_{}{}",
+            "descartes_explore_public_concurrency_{}_{}{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -308,21 +308,21 @@ fn public_concurrency_record_replay_usage_pattern() {
                 use std::sync::atomic::Ordering;
                 use std::sync::Arc;
 
-                let mutex_id = des_tokio::stable_id!("concurrency", "public_mutex");
-                let atomic_id = des_tokio::stable_id!("concurrency", "public_atomic");
+                let mutex_id = descartes_tokio::stable_id!("concurrency", "public_mutex");
+                let atomic_id = descartes_tokio::stable_id!("concurrency", "public_atomic");
 
-                let m = des_tokio::sync::Mutex::new_with_id(mutex_id, 0u64);
-                let a = Arc::new(des_tokio::sync::atomic::AtomicU64::new(atomic_id, 0));
+                let m = descartes_tokio::sync::Mutex::new_with_id(mutex_id, 0u64);
+                let a = Arc::new(descartes_tokio::sync::atomic::AtomicU64::new(atomic_id, 0));
 
                 for _ in 0..2 {
                     let m1 = m.clone();
                     let a1 = a.clone();
-                    des_tokio::thread::spawn(async move {
+                    descartes_tokio::thread::spawn(async move {
                         let mut g = m1.lock().await;
                         let _ = a1.fetch_add(1, Ordering::SeqCst);
                         *g += 1;
                         drop(g);
-                        des_tokio::thread::yield_now().await;
+                        descartes_tokio::thread::yield_now().await;
                         let _g2 = m1.lock().await;
                         let _ = a1.fetch_add(1, Ordering::SeqCst);
                     });
@@ -370,21 +370,21 @@ fn public_concurrency_record_replay_usage_pattern() {
                 use std::sync::atomic::Ordering;
                 use std::sync::Arc;
 
-                let mutex_id = des_tokio::stable_id!("concurrency", "public_mutex");
-                let atomic_id = des_tokio::stable_id!("concurrency", "public_atomic");
+                let mutex_id = descartes_tokio::stable_id!("concurrency", "public_mutex");
+                let atomic_id = descartes_tokio::stable_id!("concurrency", "public_atomic");
 
-                let m = des_tokio::sync::Mutex::new_with_id(mutex_id, 0u64);
-                let a = Arc::new(des_tokio::sync::atomic::AtomicU64::new(atomic_id, 0));
+                let m = descartes_tokio::sync::Mutex::new_with_id(mutex_id, 0u64);
+                let a = Arc::new(descartes_tokio::sync::atomic::AtomicU64::new(atomic_id, 0));
 
                 for _ in 0..2 {
                     let m1 = m.clone();
                     let a1 = a.clone();
-                    des_tokio::thread::spawn(async move {
+                    descartes_tokio::thread::spawn(async move {
                         let mut g = m1.lock().await;
                         let _ = a1.fetch_add(1, Ordering::SeqCst);
                         *g += 1;
                         drop(g);
-                        des_tokio::thread::yield_now().await;
+                        descartes_tokio::thread::yield_now().await;
                         let _g2 = m1.lock().await;
                         let _ = a1.fetch_add(1, Ordering::SeqCst);
                     });

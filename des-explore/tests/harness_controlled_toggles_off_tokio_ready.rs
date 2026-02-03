@@ -5,14 +5,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use des_core::{Executor, SimTime, Simulation, SimulationConfig};
+use descartes_core::{Executor, SimTime, Simulation, SimulationConfig};
 
-use des_explore::harness::{
+use descartes_explore::harness::{
     run_controlled, HarnessConfig, HarnessControl, HarnessTokioReadyConfig, HarnessTokioReadyPolicy,
 };
-use des_explore::io::TraceFormat;
-use des_explore::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
-use des_explore::trace::TraceEvent;
+use descartes_explore::io::TraceFormat;
+use descartes_explore::schedule_explore::{DecisionKey, DecisionKind, DecisionScript};
+use descartes_explore::trace::TraceEvent;
 
 static TMP_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -20,7 +20,7 @@ fn temp_path(suffix: &str) -> PathBuf {
     let n = TMP_ID.fetch_add(1, Ordering::Relaxed);
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "des_explore_harness_tokio_toggles_off_{}_{}{}",
+        "descartes_explore_harness_tokio_toggles_off_{}_{}{}",
         std::process::id(),
         n,
         suffix
@@ -30,16 +30,16 @@ fn temp_path(suffix: &str) -> PathBuf {
 
 fn spawn_two_ready_tasks() {
     for _ in 0..2 {
-        des_tokio::task::spawn(async move {
+        descartes_tokio::task::spawn(async move {
             // Encourage both tasks to be ready at the same time.
-            des_tokio::thread::yield_now().await;
+            descartes_tokio::thread::yield_now().await;
         });
     }
 }
 
 #[test]
 fn run_controlled_tokio_ready_toggle_off_ignores_decision_script() {
-    // `des_tokio::runtime::install*` uses thread-local state, so isolate runs.
+    // `descartes_tokio::runtime::install*` uses thread-local state, so isolate runs.
     let d1 = std::thread::spawn(|| {
         let trace_path1 = temp_path(".json");
         let cfg1 = HarnessConfig {

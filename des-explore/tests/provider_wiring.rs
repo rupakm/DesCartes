@@ -1,12 +1,12 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use des_core::dists::{
+use descartes_core::dists::{
     ArrivalPattern, ExponentialDistribution, PoissonArrivals, ServiceTimeDistribution,
 };
-use des_core::{Simulation, SimulationConfig};
-use des_explore::rng::TracingRandomProvider;
-use des_explore::trace::{TraceEvent, TraceMeta, TraceRecorder};
+use descartes_core::{Simulation, SimulationConfig};
+use descartes_explore::rng::TracingRandomProvider;
+use descartes_explore::trace::{TraceEvent, TraceMeta, TraceRecorder};
 
 /// Ensures distributions delegate sampling to an injected `RandomProvider`.
 ///
@@ -26,7 +26,7 @@ fn distributions_can_delegate_sampling_to_provider() {
     ));
 
     let mut arrivals = PoissonArrivals::from_config(sim.config(), 1.0)
-        .with_provider(provider, des_core::draw_site!("arrival"));
+        .with_provider(provider, descartes_core::draw_site!("arrival"));
 
     let _ = arrivals.next_arrival_time();
 
@@ -36,7 +36,7 @@ fn distributions_can_delegate_sampling_to_provider() {
     ));
 
     let mut service = ExponentialDistribution::from_config(sim.config(), 10.0)
-        .with_provider(provider2, des_core::draw_site!("service"));
+        .with_provider(provider2, descartes_core::draw_site!("service"));
 
     let _ = service.sample();
 
@@ -70,7 +70,7 @@ fn distributions_can_delegate_sampling_to_provider() {
         .iter()
         .filter_map(|e| match e {
             TraceEvent::RandomDraw(d) => match d.value {
-                des_explore::trace::DrawValue::F64(v) => Some(v),
+                descartes_explore::trace::DrawValue::F64(v) => Some(v),
                 _ => None,
             },
             _ => None,

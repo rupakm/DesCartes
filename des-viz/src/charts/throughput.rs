@@ -3,7 +3,7 @@
 use crate::charts::util::{metric_label, truncate_label};
 use crate::charts::ChartConfig;
 use crate::error::VizError;
-use des_metrics::simulation_metrics::MetricsSnapshot;
+use descartes_metrics::simulation_metrics::MetricsSnapshot;
 use plotters::prelude::*;
 use std::path::Path;
 
@@ -18,8 +18,8 @@ use std::path::Path;
 ///
 /// # Example
 /// ```no_run
-/// use des_metrics::SimulationMetrics;
-/// use des_viz::charts::throughput::create_throughput_chart;
+/// use descartes_metrics::SimulationMetrics;
+/// use descartes_viz::charts::throughput::create_throughput_chart;
 ///
 /// let metrics = SimulationMetrics::new();
 /// let snapshot = metrics.get_metrics_snapshot();
@@ -126,7 +126,7 @@ fn format_large_number(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use des_metrics::simulation_metrics::SimulationMetrics;
+    use descartes_metrics::simulation_metrics::SimulationMetrics;
 
     #[test]
     fn test_throughput_chart_generation() {

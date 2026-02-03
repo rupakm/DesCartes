@@ -17,8 +17,8 @@
 //! # Basic Usage
 //!
 //! ```
-//! use des_core::{Simulation, Execute, Executor, SimTime};
-//! use des_core::async_runtime::{DesRuntime, RuntimeEvent, sim_sleep};
+//! use descartes_core::{Simulation, Execute, Executor, SimTime};
+//! use descartes_core::async_runtime::{DesRuntime, RuntimeEvent, sim_sleep};
 //! use std::time::Duration;
 //!
 //! // Create simulation and runtime
@@ -73,7 +73,7 @@ struct SpawnRequestLocal {
 
 /// Handle for enqueueing tasks into a runtime installed in a `Simulation`.
 ///
-/// This is used by higher-level facades (e.g. `des_tokio`) to spawn tasks without
+/// This is used by higher-level facades (e.g. `descartes_tokio`) to spawn tasks without
 /// direct mutable access to the runtime component.
 #[derive(Clone)]
 pub struct DesRuntimeHandle {
@@ -224,7 +224,7 @@ impl DesRuntimeLocalHandle {
 // Thread-local storage for the currently-polling runtime and task.
 //
 // Time access is provided by the scheduler's own context
-// (`des_core::scheduler::current_time`) so we avoid
+// (`descartes_core::scheduler::current_time`) so we avoid
 // duplicating TLS or storing raw scheduler pointers here.
 thread_local! {
     static CURRENT_RUNTIME_KEY: RefCell<Option<Key<RuntimeEvent>>> = const { RefCell::new(None) };
@@ -797,7 +797,7 @@ impl Future for SimSleep {
 /// # Example
 ///
 /// ```
-/// use des_core::async_runtime::sim_sleep;
+/// use descartes_core::async_runtime::sim_sleep;
 /// use std::time::Duration;
 ///
 /// async fn server_task() {
@@ -813,8 +813,8 @@ pub fn sim_sleep(duration: Duration) -> SimSleep {
 /// # Example
 ///
 /// ```
-/// use des_core::async_runtime::sim_sleep_until;
-/// use des_core::SimTime;
+/// use descartes_core::async_runtime::sim_sleep_until;
+/// use descartes_core::SimTime;
 ///
 /// async fn scheduled_task() {
 ///     sim_sleep_until(SimTime::from_secs(1)).await;
