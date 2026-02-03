@@ -1,5 +1,5 @@
 [package]
-name = "descartes"
+name = "des-cartes"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
