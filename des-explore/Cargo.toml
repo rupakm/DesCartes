@@ -2,6 +2,7 @@
 name = "des-explore"
 version.workspace = true
 edition.workspace = true
+description = "Various exploration and record-and-replay utilities for DesCartes"
 
 authors.workspace = true
 license.workspace = true

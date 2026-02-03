@@ -5,6 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Core abstractions built on top of DES core primitives"
 
 [dependencies]
 des-core = { path = "../des-core" }

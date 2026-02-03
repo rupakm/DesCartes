@@ -5,6 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "tonic code build helper for DesCartes"
 
 [dependencies]
 prost-build = "0.14.3"

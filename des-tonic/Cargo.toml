@@ -5,6 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "tonic API utilities for DesCartes"
 
 [dependencies]
 des-core = { path = "../des-core" }

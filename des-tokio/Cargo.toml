@@ -2,6 +2,7 @@
 name = "des-tokio"
 version.workspace = true
 edition.workspace = true
+description = "tokio interface for DesCartes"
 
 [dependencies]
 des-core = { path = "../des-core" }

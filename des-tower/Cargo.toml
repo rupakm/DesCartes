@@ -5,6 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "tower API bindings for DesCartes"
 
 [dependencies]
 des-core = { path = "../des-core" }
