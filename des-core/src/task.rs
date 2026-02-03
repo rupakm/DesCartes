@@ -236,7 +236,7 @@ where
                         "Retry task failed - scheduling retry"
                     );
 
-                    let task_id = scheduler.executing_task_id().unwrap_or_else(TaskId::new);
+                    let task_id = scheduler.executing_task_id().unwrap_or_default();
                     let wrapper = TaskWrapper::new(self);
                     scheduler.schedule_task_at(
                         scheduler.time() + delay,
@@ -315,7 +315,7 @@ where
 
         // Schedule next execution under the same task ID so the original handle can
         // cancel the whole periodic chain.
-        let task_id = scheduler.executing_task_id().unwrap_or_else(TaskId::new);
+        let task_id = scheduler.executing_task_id().unwrap_or_default();
         let interval = self.interval;
         let wrapper = TaskWrapper::new(self);
         scheduler.schedule_task_at(scheduler.time() + interval, task_id, Box::new(wrapper));

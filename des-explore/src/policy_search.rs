@@ -410,6 +410,7 @@ struct EvalResult {
     failures: Vec<PolicySearchFailure>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn eval_policy(
     cfg: &PolicySearchConfig,
     policy: &TablePolicy,

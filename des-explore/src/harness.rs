@@ -615,6 +615,7 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 ///
 /// The `setup` closure receives the input trace so it can also wire RNG replay via
 /// [`HarnessContext::branching_provider`] / [`HarnessContext::shared_branching_provider`].
+#[allow(clippy::result_large_err)]
 pub fn run_replayed<R>(
     cfg: HarnessConfig,
     input_trace: &Trace,
@@ -781,6 +782,7 @@ pub fn run_replayed<R>(
 }
 
 /// Convenience wrapper: replay with `Executor::timed(end_time)`.
+#[allow(clippy::result_large_err)]
 pub fn run_timed_replayed(
     cfg: HarnessConfig,
     end_time: SimTime,

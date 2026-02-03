@@ -427,7 +427,7 @@ impl Monitor {
         };
 
         let (p95, p99) = if let Some(hist) = &self.latency_hist {
-            if hist.len() == 0 {
+            if hist.is_empty() {
                 (None, None)
             } else {
                 (

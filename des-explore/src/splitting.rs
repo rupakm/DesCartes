@@ -183,7 +183,7 @@ pub fn find_with_splitting(
 
                 // Derive a deterministic but distinct continuation seed.
                 let seed = p.continuation_seed
-                    ^ ((threshold.to_bits().wrapping_mul(0x9E37_79B9)) as u64)
+                    ^ (threshold.to_bits().wrapping_mul(0x9E37_79B9))
                     ^ ((p_index as u64) << 32)
                     ^ (i as u64).wrapping_mul(0xD1B5_4A32_D192_ED03);
 

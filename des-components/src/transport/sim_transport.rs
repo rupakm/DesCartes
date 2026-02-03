@@ -96,6 +96,7 @@ impl SimTransport {
     }
 
     /// Send a message with correlation ID for request/response matching.
+    #[allow(clippy::too_many_arguments)]
     pub fn send_message_with_correlation(
         &mut self,
         source: EndpointId,

@@ -148,6 +148,12 @@ impl<T> Key<T> {
     }
 }
 
+impl<T> Default for Key<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> Clone for Key<T> {
     fn clone(&self) -> Self {
         *self
@@ -296,6 +302,7 @@ impl Default for Simulation {
     }
 }
 
+#[allow(clippy::arc_with_non_send_sync)]
 impl Simulation {
     /// Create a new simulation with the given configuration.
     #[must_use]

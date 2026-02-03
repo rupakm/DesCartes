@@ -409,6 +409,7 @@ impl Default for DesRuntime {
     }
 }
 
+#[allow(clippy::arc_with_non_send_sync)]
 impl DesRuntime {
     /// Create a new async runtime.
     pub fn new() -> Self {
