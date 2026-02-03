@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "descartes",
     "des-core",
     "des-components",
     "des-metrics",
@@ -20,7 +21,7 @@ edition = "2021"
 authors = ["Rupak Majumdar and Codex"]
 license = "Apache-2.0"
 repository = "https://github.com/rupakm/DesCartes"
-description = "A deterministic, replayable, discrete-event simulator for Rust"
+description = "DesCartes: A deterministic, replayable, discrete-event simulator for Rust"
 keywords = ["concurrency", "async", "server", "performance"]
 categories = ["concurrency", "development-tools::testing"]
 
