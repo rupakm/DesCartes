@@ -9,8 +9,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-descartes-core = { path = "../des-core" }
-descartes-tokio = { path = "../des-tokio", optional = true }
+descartes-core = { version = "0.1.1", path = "../des-core" }
+descartes-tokio = { version = "0.1.1", path = "../des-tokio", optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

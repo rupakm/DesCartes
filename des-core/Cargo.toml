@@ -27,7 +27,7 @@ features = [
 [dev-dependencies]
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
-descartes-explore = { path = "../des-explore" }
+# descartes-explore = { version = "0.1.1", path = "../des-explore" }
 
 [features]
 default = ["formal"]

@@ -8,9 +8,9 @@ repository.workspace = true
 description = "tower API bindings for DesCartes"
 
 [dependencies]
-descartes-core = { path = "../des-core" }
-descartes-tokio = { path = "../des-tokio" }
-descartes-components = { path = "../des-components" }
+descartes-core = { version = "0.1.1", path = "../des-core" }
+descartes-tokio = { version = "0.1.1", path = "../des-tokio" }
+descartes-components = { version = "0.1.1", path = "../des-components" }
 
 tokio = { workspace = true }
 

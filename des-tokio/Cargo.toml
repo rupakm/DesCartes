@@ -5,7 +5,7 @@ edition.workspace = true
 description = "tokio interface for DesCartes"
 
 [dependencies]
-descartes-core = { path = "../des-core" }
+descartes-core = { version = "0.1.1", path = "../des-core" }
 rand.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true

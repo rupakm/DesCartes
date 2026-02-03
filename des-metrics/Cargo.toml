@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Metrics crate for DesCartes"
 
 [dependencies]
-descartes-core = { path = "../des-core" }
+descartes-core = { version = "0.1.1", path = "../des-core" }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -21,10 +21,10 @@ quantiles = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-descartes-tokio = { path = "../des-tokio" }
-descartes-tower = { path = "../des-tower" }
-descartes-tonic = { path = "../des-tonic" }
-descartes-axum = { path = "../des-axum" }
+descartes-tokio = { version = "0.1.1", path = "../des-tokio" }
+descartes-tower = { version = "0.1.1", path = "../des-tower" }
+descartes-tonic = { version = "0.1.1", path = "../des-tonic" }
+descartes-axum = { version = "0.1.1", path = "../des-axum" }
 bytes = "1.0"
 tonic = "0.12"
 axum = "0.7"

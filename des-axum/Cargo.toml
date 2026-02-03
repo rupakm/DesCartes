@@ -8,9 +8,9 @@ repository.workspace = true
 description = "Axum connectors for DesCartes"
 
 [dependencies]
-descartes-core = { path = "../des-core" }
-descartes-components = { path = "../des-components" }
-descartes-tokio = { path = "../des-tokio" }
+descartes-core = { version = "0.1.1", path = "../des-core" }
+descartes-components = { version = "0.1.1", path = "../des-components" }
+descartes-tokio = { version = "0.1.1", path = "../des-tokio" }
 
 axum = "0.7"
 
@@ -28,8 +28,8 @@ tower = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-descartes-metrics = { path = "../des-metrics" }
-descartes-tower = { path = "../des-tower" }
+descartes-metrics = { version = "0.1.1", path = "../des-metrics" }
+descartes-tower = { version = "0.1.1", path = "../des-tower" }
 metrics = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }

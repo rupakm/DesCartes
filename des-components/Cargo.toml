@@ -8,9 +8,9 @@ repository.workspace = true
 description = "Core abstractions built on top of DES core primitives"
 
 [dependencies]
-descartes-core = { path = "../des-core" }
-descartes-metrics = { path = "../des-metrics" }
-descartes-tokio = { path = "../des-tokio" }
+descartes-core = { version = "0.1.1", path = "../des-core" }
+descartes-metrics = { version = "0.1.1", path = "../des-metrics" }
+descartes-tokio = { version = "0.1.1", path = "../des-tokio" }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
@@ -22,5 +22,5 @@ uuid = { version = "1.19.0", features = ["v7", "serde", "v4"] }
 
 [dev-dependencies]
 proptest = { workspace = true }
-descartes-viz = { path = "../des-viz" }
+descartes-viz = { version = "0.1.1", path = "../des-viz" }
 plotters = { workspace = true }

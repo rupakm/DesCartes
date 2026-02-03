@@ -8,15 +8,15 @@ repository.workspace = true
 description = "Visualization utilities for DesCartes"
 
 [dependencies]
-descartes-core = { path = "../des-core" }
-descartes-metrics = { path = "../des-metrics" }
+descartes-core = { version = "0.1.1", path = "../des-core" }
+descartes-metrics = { version = "0.1.1", path = "../des-metrics" }
 thiserror = { workspace = true }
 plotters = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-descartes-axum = { path = "../des-axum" }
-descartes-tokio = { path = "../des-tokio" }
+descartes-axum = { version = "0.1.1", path = "../des-axum" }
+descartes-tokio = { version = "0.1.1", path = "../des-tokio" }
 metrics = { workspace = true }
 axum = "0.7"
