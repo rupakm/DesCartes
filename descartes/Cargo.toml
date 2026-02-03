@@ -12,31 +12,27 @@ categories.workspace = true
 [dependencies]
 # Core functionality - always included
 des-core = { version = "0.1.1", path = "../des-core" }
+des-tokio = { version = "0.1.1", path = "../des-tokio" }
+des-components = { version = "0.1.1", path = "../des-components" }
+des-metrics = { version = "0.1.1", path = "../des-metrics" }
+des-explore = { version = "0.1.1", path = "../des-explore" }
+
 
 # Optional features for different use cases
-des-components = { version = "0.1.1", path = "../des-components", optional = true }
-des-metrics = { version = "0.1.1", path = "../des-metrics", optional = true }
 des-viz = { version = "0.1.1", path = "../des-viz", optional = true }
-des-tokio = { version = "0.1.1", path = "../des-tokio", optional = true }
-des-explore = { version = "0.1.1", path = "../des-explore", optional = true }
 des-tonic = { version = "0.1.1", path = "../des-tonic", optional = true }
 des-tower = { version = "0.1.1", path = "../des-tower", optional = true }
 des-axum = { version = "0.1.1", path = "../des-axum", optional = true }
 
 [features]
-default = ["components", "metrics"]
+default = []
 
 # Individual features
-components = ["dep:des-components"]
-metrics = ["dep:des-metrics"]
 viz = ["dep:des-viz"]
-tokio = ["dep:des-tokio"]
-explore = ["dep:des-explore"]
 tonic = ["dep:des-tonic"]
 tower = ["dep:des-tower"]
 axum = ["dep:des-axum"]
 
 # Convenience feature bundles
-full = ["components", "metrics", "viz", "tokio", "explore", "tonic", "tower", "axum"]
-testing = ["explore", "metrics"]
+full = ["viz", "tonic", "tower", "axum"]
 networking = ["tonic", "axum", "tower"]

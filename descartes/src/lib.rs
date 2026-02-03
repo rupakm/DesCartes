@@ -29,20 +29,15 @@
 // Re-export core (always available)
 pub use des_core as core;
 
-// Re-export optional crates
-#[cfg(feature = "components")]
 pub use des_components as components;
 
-#[cfg(feature = "metrics")]
 pub use des_metrics as metrics;
 
 #[cfg(feature = "viz")]
 pub use des_viz as viz;
 
-#[cfg(feature = "tokio")]
 pub use des_tokio as tokio;
 
-#[cfg(feature = "explore")]
 pub use des_explore as explore;
 
 #[cfg(feature = "tonic")]
@@ -67,14 +62,12 @@ pub mod prelude {
         SchedulerHandle,
     };
     
-    #[cfg(feature = "components")]
     pub use des_components::{
         simple_client::SimpleClient,
         server::Server,
         queue::Queue,
     };
     
-    #[cfg(feature = "metrics")]
     pub use des_metrics::{
         SimulationRecorder,
         RequestTracker,
