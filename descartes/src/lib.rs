@@ -27,27 +27,27 @@
 //! See the [repository](https://github.com/rupakm/DesCartes) for examples.
 
 // Re-export core (always available)
-pub use descartes_core as core;
+pub use descartes_core as desc_core;
 
-pub use descartes_components as components;
+pub use descartes_components as des_components;
 
-pub use descartes_metrics as metrics;
+pub use descartes_metrics as des_metrics;
 
 #[cfg(feature = "viz")]
-pub use descartes_viz as viz;
+pub use descartes_viz as des_viz;
 
-pub use descartes_tokio as tokio;
+pub use descartes_tokio as des_tokio;
 
-pub use descartes_explore as explore;
+pub use descartes_explore as des_explore;
 
 #[cfg(feature = "tonic")]
-pub use descartes_tonic as tonic;
+pub use descartes_tonic as des_tonic;
 
 #[cfg(feature = "tower")]
-pub use descartes_tower as tower;
+pub use descartes_tower as des_tower;
 
 #[cfg(feature = "axum")]
-pub use descartes_axum as axum;
+pub use descartes_axum as des_axum;
 
 // Convenience re-exports of commonly used items from core
 pub mod prelude {

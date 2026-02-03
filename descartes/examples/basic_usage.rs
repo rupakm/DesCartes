@@ -1,6 +1,6 @@
 //! Basic usage example showing how to use the descartes meta-crate
 
-use descartes::prelude::*;
+use des_cartes::prelude::*;
 
 fn main() {
     // Create a simulation with default configuration
