@@ -135,6 +135,29 @@ pub(crate) fn installed_local_handle() -> DesRuntimeLocalHandle {
     with_local_handle(|h| h.clone())
 }
 
+/// Scheduler-level diagnostics accessible from within simulated tasks
+/// 
+/// Uses `try_lock` so it is safe to call from within event processing
+/// (where the scheduler lock is already held). Returns `None` for any counter
+/// that could not be read without blocking.
+pub fn scheduler_diagnostics() -> (Option<usize>, Option<usize>, Option<usize>) {
+    with_scheduler(|s| {
+        (
+            s.try_event_count(),
+            s.try_completed_task_count(),
+            s.try_cancelled_task_count()
+        )
+    })
+}
+
+/// Runtime-level diagnostics accessible from within simulated tasks
+/// 
+/// Reads thread-local counters updated by `DesRuntime::process_event`, so
+/// this is lock-free and always succeeds.
+pub fn runtime_diagnostics() -> descartes_core::async_runtime::RuntimeDiagnostics {
+    descartes_core::async_runtime::runtime_diagnostics()
+}
+
 pub(crate) fn current_time_nanos() -> Option<u64> {
     let t = async_runtime::current_sim_time()?;
     let nanos: u128 = t.as_duration().as_nanos();

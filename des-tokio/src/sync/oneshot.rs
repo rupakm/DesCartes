@@ -6,6 +6,15 @@ use std::task::{Context, Poll, Waker};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecvError;
 
+impl std::fmt::Display for RecvError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "channel closed")
+    }
+}
+
+impl std::error::Error for RecvError {}
+
+
 #[derive(Debug)]
 struct State<T> {
     value: Option<T>,

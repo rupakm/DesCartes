@@ -57,6 +57,27 @@ use crate::scheduler::Scheduler;
 use crate::waker::create_des_waker;
 use crate::{Component, Key, SimTime};
 
+// ---- Runtime diagnostics (thread-local, lock-free) ----
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeDiagnostics {
+    pub task_count: usize,
+    pub timer_count: usize,
+    pub timer_registration: usize,
+    pub ready_queue_len: usize,
+    pub events_processed: u64,
+}
+
+thread_local! {
+    static RT_DIAG: RefCell<RuntimeDiagnostics> = RefCell::new(RuntimeDiagnostics::default());
+}
+
+/// Read the most recent runtime diagnostics snapshot
+/// 
+/// Safe to call from within async tasks (no locks needed -- uses thread-local storage)
+pub fn runtime_diagnostics() -> RuntimeDiagnostics {
+    RT_DIAG.with(|d| d.borrow().clone())
+}
+
 /// Unique identifier for async tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TaskId(pub u64);
@@ -279,6 +300,24 @@ fn register_timer_at(deadline: SimTime) {
     });
 }
 
+/// Cancel a timer for the currently polled task.
+/// 
+/// This schedules a `RuntimeEvent::CancelTimer` event to the runtime via
+/// `defer_wake(...)` (no scheduler locking)
+fn cancel_timer_at(deadline: SimTime) {
+    CURRENT_RUNTIME_KEY.with(|key| {
+        CURRENT_TASK_ID.with(|task| {
+            if let (Some(runtime_key), Some(task_id)) = (*key.borrow(), *
+task.borrow()) {
+                crate::defer_wake(
+                    runtime_key, 
+                   RuntimeEvent::CancelTimer { task_id, deadline }
+                );
+            }
+        });
+    });
+}
+
 /// Events that drive the async runtime.
 #[derive(Debug, Clone)]
 pub enum RuntimeEvent {
@@ -290,6 +329,8 @@ pub enum RuntimeEvent {
     Cancel { task_id: TaskId },
     /// Register a timer for a task to be woken at `deadline`.
     RegisterTimer { task_id: TaskId, deadline: SimTime },
+    /// Cancel a timer registration for a task
+    CancelTimer { task_id: TaskId, deadline: SimTime },
     /// Internal event fired when the next timer deadline is reached.
     TimerTick,
 }
@@ -490,6 +531,21 @@ impl DesRuntime {
         !self.tasks.is_empty()
     }
 
+    /// Get the number of pending timer entries (distinct deadlines)
+    pub fn timer_count(&self) -> usize {
+        self.timers.len()
+    }
+
+    // get the total number of timer registrations across all deadlines
+    pub fn total_timer_registrations(&self) -> usize {
+        self.timers.values().map(|v| v.len()).sum()
+    }
+
+    /// get the number of tasks in hte ready queue
+    pub fn ready_queue_len(&self) -> usize {
+        self.ready_queue.len()
+    }
+
     /// Poll a single task.
     #[instrument(skip(self, _scheduler), fields(task_id = ?task_id))]
     fn poll_task(&mut self, task_id: TaskId, _scheduler: &mut Scheduler) -> Option<Poll<()>> {
@@ -636,6 +692,25 @@ impl DesRuntime {
         self.schedule_next_timer_tick(scheduler, self_id);
     }
 
+    fn cancel_timer(
+        &mut self,
+        task_id: TaskId,
+        deadline: SimTime,
+        scheduler: &mut Scheduler,
+        self_id: Key<RuntimeEvent>,
+    ) {
+        // Remove the task_id from the timer.list at the given deadline
+        if let Some(tasks) = self.timers.get_mut(&deadline) {
+            tasks.retain(|&tid| tid != task_id);
+            // If the timer list is now empty, remove the deadline entry
+            if tasks.is_empty() {
+                self.timers.remove(&deadline);
+                // Reschedule timer tick in case this was the next deadline
+                self.schedule_next_timer_tick(scheduler, self_id);
+            }
+        }
+    }
+
     fn handle_timer_tick(&mut self, scheduler: &mut Scheduler, self_id: Key<RuntimeEvent>) {
         let now = scheduler.time();
 
@@ -719,6 +794,10 @@ impl Component for DesRuntime {
                 trace!(?task_id, ?deadline, "Processing RegisterTimer event");
                 self.register_timer(*task_id, *deadline, scheduler, self_id);
             }
+            RuntimeEvent::CancelTimer { task_id, deadline } => {
+                trace!(?task_id, ?deadline, "Processing CancelTimer event");
+                self.cancel_timer(*task_id, *deadline, scheduler, self_id);
+            }
             RuntimeEvent::TimerTick => {
                 trace!(current_time = ?scheduler.time(), "Processing TimerTick event");
                 self.handle_timer_tick(scheduler, self_id);
@@ -730,6 +809,16 @@ impl Component for DesRuntime {
             trace!("Scheduling next poll");
             scheduler.schedule_now(self_id, RuntimeEvent::Poll);
         }
+
+        // Update thread-local diagnostics snapshot
+        RT_DIAG.with(|d| {
+            let mut diag = d.borrow_mut();
+            diag.task_count = self.task_count();
+            diag.timer_count = self.timer_count();
+            diag.timer_registration = self.timers.values().map(|v| v.len()).sum();
+            diag.ready_queue_len = self.ready_queue_len();
+            diag.events_processed += 1;
+        });
     }
 }
 
@@ -779,6 +868,8 @@ impl Future for SimSleep {
         let target = self.target_time.unwrap();
 
         if current_time >= target {
+            // Timer already fired (handle_timer_tick removed it), no need to cancel on drop
+            self.timer_scheduled = false;
             Poll::Ready(())
         } else if !self.timer_scheduled {
             // Register a timer for the task. The runtime will wake this task
@@ -793,6 +884,19 @@ impl Future for SimSleep {
     }
 }
 
+impl Drop for SimSleep {
+    fn drop(&mut self) {
+        // If a timer was scheduled but this future is being dropped before
+        // it completed (e.g. Timeout resolved via the inner future), cancel
+        // the orphased timer to prevent it from firing spuriously
+        if self.timer_scheduled {
+            if let Some(target) = self.target_time {
+                cancel_timer_at(target);
+            }
+        }        
+
+    }
+}
 /// Sleep for a duration in simulation time.
 ///
 /// # Example

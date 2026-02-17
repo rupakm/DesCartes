@@ -505,6 +505,29 @@ impl SchedulerHandle {
         scheduler.clock()
     }
 
+    /// Returns the number of events in the scheduler event queue.
+    /// 
+    /// Uses `try_lock` to avoid deadlocking when called from within event 
+    /// processing (where teh scheduler lock is already held). Returns `None`
+    /// if the lock is contentd.
+    pub fn try_event_count(&self) -> Option<usize> {
+        self.scheduler.try_lock().ok().map(|s| s.event_count())
+    }
+
+    /// Returns the number of completed task results still held.
+    /// 
+    /// Uses `try_lock`: returns `None` when called from within event processing.
+    pub fn try_completed_task_count(&self) -> Option<usize> {
+        self.scheduler.try_lock().ok().map(|s| s.completed_task_count())
+    }
+
+    /// Returns the number of cancelled task still tracked.
+    /// 
+    /// Uses `try_lock`: returns `None` when called from within event processing.
+    pub fn try_cancelled_task_count(&self) -> Option<usize> {
+        self.scheduler.try_lock().ok().map(|s| s.cancelled_task_count())
+    }
+
     /// Get a weak reference to the underlying scheduler.
     /// This is useful for components that need to check if the simulation is still alive.
     pub fn downgrade(&self) -> std::sync::Weak<Mutex<Scheduler>> {
@@ -620,6 +643,21 @@ impl Scheduler {
         ClockRef {
             clock: Arc::clone(&self.clock),
         }
+    }
+
+    /// Returns the number of events currently in the event queue
+    pub fn event_count(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Returns the number of completed task results still held.
+    pub fn completed_task_count(&self) -> usize {
+        self.completed_task_results.len()
+    }
+
+    /// Returns the number of cancelled tasks still tracked
+    pub fn cancelled_task_count(&self) -> usize {
+        self.cancelled_tasks.len()
     }
 
     /// Returns a reference to the next scheduled event or `None` if none are left.

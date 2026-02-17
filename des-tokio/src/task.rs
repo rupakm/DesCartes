@@ -17,6 +17,16 @@ pub enum JoinError {
     Cancelled,
 }
 
+impl std::fmt::Display for JoinError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JoinError::Cancelled => write!(f, "task was cancelled"),
+        }
+    }
+}
+
+impl std::error::Error for JoinError {}
+
 #[derive(Clone, Debug)]
 pub struct AbortHandle {
     task_id: TaskId,
@@ -130,6 +140,18 @@ where
     spawn_local_inner(future)
 }
 
+/// Execute a blocking closure synchronously and wrap the result.
+/// 
+/// Under DesCartes' single-threaded runtime tehre si no blocking thread-pool;
+/// the closure runs inline and the result is returned via a spawned future.
+pub fn spawn_blocking<F, T>(f: F) -> JoinHandle<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let result = f();
+    spawn(async move { result })
+}
 pub struct JoinSet<T> {
     handles: VecDeque<JoinHandle<T>>,
 }

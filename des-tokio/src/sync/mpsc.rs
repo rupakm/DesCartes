@@ -8,6 +8,14 @@ use std::task::{Context, Poll, Waker};
 #[derive(Debug)]
 pub struct SendError<T>(pub T);
 
+impl<T> std::fmt::Display for SendError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "channel closed")
+    }
+}
+
+impl<T: std::fmt::Debug> std::error::Error for SendError<T> {}
+
 /// Error returned from `Sender::try_send`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrySendError {
@@ -15,12 +23,35 @@ pub enum TrySendError {
     Closed,
 }
 
+impl std::fmt::Display for TrySendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+        TrySendError::Full => write!(f, "channel full"),
+        TrySendError::Closed => write!(f, "channel closed"),
+        }
+    }
+}
+
+impl std::error::Error for TrySendError {}
+
+
 /// Error returned from `Receiver::try_recv`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TryRecvError {
     Empty,
     Closed,
 }
+
+impl std::fmt::Display for TryRecvError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+        TryRecvError::Empty => write!(f, "channel empty"),
+        TryRecvError::Closed => write!(f, "channel closed"),
+        }
+    }
+}
+
+impl std::error::Error for TryRecvError {}
 
 #[derive(Debug)]
 struct State<T> {
@@ -116,6 +147,24 @@ impl<T> Sender<T> {
         let state = self.inner.lock().unwrap();
         !state.receiver_alive
     }
+
+    /// Returns the current number of items in the queue
+    pub fn queue_len(&self) -> usize {
+        let state = self.inner.lock().unwrap();
+        state.queue.len()
+    }
+
+    /// Returns the capacity of the queue
+    pub fn capacity(&self) -> usize {
+        let state = self.inner.lock().unwrap();
+        state.capacity
+    }
+
+    /// Returns the number of senders currently waiting for queue space
+    pub fn num_waiting_senders(&self) -> usize {
+        let state = self.inner.lock().unwrap();
+        state.send_waiters.len()
+    }    
 }
 
 impl<T> Clone for Sender<T> {
@@ -204,7 +253,7 @@ impl<T> Future for SendFuture<T> {
             }
 
             if state.queue.len() >= state.capacity {
-                // Register as a waiter.
+                // Register as a waiter or re-register after a lost race
                 drop(state);
 
                 if self.waiter_id.is_none() {
@@ -214,6 +263,12 @@ impl<T> Future for SendFuture<T> {
                     state.send_wait_order.push_back(id);
                     drop(state);
                     self.waiter_id = Some(id);
+                } else {
+                    // previously woken sender that lost the race: re-add
+                    // to the back of the wait order so wake_one_sender()
+                    // can find us again.
+                    let mut state = self.inner.lock().unwrap();
+                    state.send_wait_order.push_back(self.waiter_id.unwrap());
                 }
 
                 let id = self.waiter_id.expect("set above");
@@ -238,10 +293,13 @@ impl<T> Future for SendFuture<T> {
         }
 
         if state.queue.len() >= state.capacity {
-            // Lost the race: restore value and register as waiter.
+            // Lost the race: restore value and re-register as waiter.
             drop(state);
             self.value = Some(v);
 
+            // a previously-woken sender's ID was already popped from
+            // send_wait_order by wake_one_sender(), so we must re-add it
+            // to avoid a lost wakeup.
             if self.waiter_id.is_none() {
                 let mut state = self.inner.lock().unwrap();
                 let id = state.next_waiter_id;
@@ -249,6 +307,9 @@ impl<T> Future for SendFuture<T> {
                 state.send_wait_order.push_back(id);
                 drop(state);
                 self.waiter_id = Some(id);
+            } else {
+                let mut state = self.inner.lock().unwrap();
+                state.send_wait_order.push_back(self.waiter_id.unwrap());
             }
 
             let id = self.waiter_id.expect("set above");

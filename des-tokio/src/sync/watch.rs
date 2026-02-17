@@ -116,6 +116,41 @@ impl<T> Sender<T> {
         Ok(())
     }
 
+    pub fn send_replace(&self, value: T) -> T 
+    where
+	T: Clone,
+    {
+	let mut st = self.inner.lock().unwrap();
+	let old = (*st.value).clone();
+	st.value = Arc::new(value);
+        st.version = st.version.saturating_add(1);
+	st.wake_all();
+	old
+    }
+
+    pub fn send_if_modified<F>(&self, modify: F) -> bool 
+    where
+	T: Clone,
+	F: FnOnce(&mut T) -> bool,
+    {
+	let mut st = self.inner.lock().unwrap();
+
+	// Clone the current value to get a mutable reference
+	let mut value_clone = (*st.value).clone();
+
+	// Call the modifier function
+	let modified = modify(&mut value_clone);
+
+	if modified {
+	    // Update the value and notify receivers
+	    st.value = Arc::new(value_clone);
+            st.version = st.version.saturating_add(1);
+	    st.wake_all();
+	}
+
+	modified
+    }
+
     pub fn borrow(&self) -> WatchRef<T> {
         let st = self.inner.lock().unwrap();
         WatchRef {
@@ -195,6 +230,20 @@ impl<T> Receiver<T> {
 
     pub async fn changed(&mut self) -> Result<(), RecvError> {
         Changed { rx: self }.await
+    }
+
+    pub async fn wait_for<F>(&mut self, mut condition: F) -> Result<WatchRef<T>, RecvError>
+    where
+        F: FnMut(&T) -> bool,
+    {
+        loop {
+            let watch_ref = self.borrow_and_update();
+            if condition(&*watch_ref) {
+                return Ok(watch_ref);
+            }
+            self.changed().await?;
+        }
+
     }
 
     fn poll_changed(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), RecvError>> {

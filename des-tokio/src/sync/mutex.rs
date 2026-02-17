@@ -267,6 +267,14 @@ fn current_task_id_u64() -> u64 {
 #[derive(Clone)]
 pub struct Mutex<T>(Arc<MutexAsync<T>>);
 
+impl<T> std::fmt::Debug for Mutex<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Mutex")
+            .field("mutex_id", &self.0.mutex_id())
+            .finish()
+    }
+}
+
 impl<T> Mutex<T> {
     pub fn new(value: T) -> Self {
         Self(Arc::new(MutexAsync::new(value)))
